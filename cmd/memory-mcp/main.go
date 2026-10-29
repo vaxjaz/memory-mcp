@@ -31,6 +31,7 @@ Usage:
   memory-mcp serve [--data-dir DIR]           MCP over stdin/stdout
   memory-mcp status [--data-dir DIR]          Show path and record count
   memory-mcp export --out FILE [--data-dir DIR]
+  memory-mcp backup --out FILE [--data-dir DIR]  Consistent standalone SQLite snapshot
   memory-mcp forget --id ID --yes [--data-dir DIR]
   memory-mcp guide                          Print host integration guide
   memory-mcp config                         Print generic MCP JSON configuration
@@ -62,7 +63,7 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 	}
 	cmd := args[0]
 	switch cmd {
-	case "serve", "status", "export", "forget":
+	case "serve", "status", "export", "backup", "forget":
 	default:
 		return fmt.Errorf("unknown command %q; run memory-mcp help", cmd)
 	}
@@ -70,8 +71,8 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 	dir := fs.String("data-dir", "", "local data directory")
 	var out, id string
 	var yes bool
-	if cmd == "export" {
-		fs.StringVar(&out, "out", "", "new JSON export file (will not overwrite)")
+	if cmd == "export" || cmd == "backup" {
+		fs.StringVar(&out, "out", "", "new output file (will not overwrite)")
 	}
 	if cmd == "forget" {
 		fs.StringVar(&id, "id", "", "entry ID; removes lineage and dependent interpretations")
@@ -86,8 +87,8 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 	if fs.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
 	}
-	if cmd == "export" && out == "" {
-		return errors.New("export requires --out FILE")
+	if (cmd == "export" || cmd == "backup") && out == "" {
+		return fmt.Errorf("%s requires --out FILE", cmd)
 	}
 	if cmd == "forget" && (id == "" || !yes) {
 		return errors.New("forget requires --id ID --yes; removes all revisions and dependent interpretations")
@@ -111,20 +112,11 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 		// stdout belongs exclusively to the MCP transport; diagnostics use stderr.
 		return server.New(store, version).Run(ctx, &mcp.StdioTransport{})
 	case "status":
-		snapshot, err := store.Export(ctx)
+		stats, err := store.Stats(ctx)
 		if err != nil {
 			return err
 		}
-		current, review := 0, 0
-		for _, e := range snapshot.Entries {
-			if e.Current {
-				current++
-				if e.NeedsReview {
-					review++
-				}
-			}
-		}
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"version": version, "schema_version": memory.SchemaVersion, "data_dir": store.Dir, "entries_including_history": len(snapshot.Entries), "current_entries": current, "needs_review": review})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"version": version, "schema_version": memory.SchemaVersion, "data_dir": store.Dir, "entries_including_history": stats.Entries, "current_entries": stats.Current, "needs_review": stats.NeedsReview})
 	case "export":
 		snapshot, err := store.Export(ctx)
 		if err != nil {
@@ -134,6 +126,12 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 			return err
 		}
 		fmt.Fprintln(os.Stdout, "Exported to", out)
+		return nil
+	case "backup":
+		if err = store.Backup(ctx, out); err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stdout, "Backed up to", out)
 		return nil
 	case "forget":
 		n, err := store.Forget(ctx, id)
