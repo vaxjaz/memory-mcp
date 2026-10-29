@@ -1,0 +1,7 @@
+/dist/
+/memory-mcp
+/memory-mcp.exe
+*.db
+*.db-shm
+*.db-wal
+__pycache__/
