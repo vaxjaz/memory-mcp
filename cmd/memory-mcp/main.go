@@ -2,19 +2,25 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vaxjaz/memory-mcp/internal/memory"
 	"github.com/vaxjaz/memory-mcp/internal/server"
 )
 
-var version = "0.1.0"
+// version may be supplied by the release linker; source builds use VERSION.
+var version string
+
+//go:embed VERSION
+var sourceVersion string
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -24,6 +30,10 @@ func main() {
 }
 
 func run(args []string) error {
+	buildVersion := strings.TrimPrefix(strings.TrimSpace(version), "v")
+	if buildVersion == "" {
+		buildVersion = strings.TrimPrefix(strings.TrimSpace(sourceVersion), "v")
+	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
 		fmt.Print(`memory-mcp: local decision memory, powered by your host AI.
 
@@ -45,7 +55,7 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 		return nil
 	}
 	if args[0] == "version" {
-		fmt.Println(version)
+		fmt.Println(buildVersion)
 		return nil
 	}
 	if args[0] == "guide" {
@@ -110,13 +120,13 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 	switch cmd {
 	case "serve":
 		// stdout belongs exclusively to the MCP transport; diagnostics use stderr.
-		return server.New(store, version).Run(ctx, &mcp.StdioTransport{})
+		return server.New(store, buildVersion).Run(ctx, &mcp.StdioTransport{})
 	case "status":
 		stats, err := store.Stats(ctx)
 		if err != nil {
 			return err
 		}
-		return json.NewEncoder(os.Stdout).Encode(map[string]any{"version": version, "schema_version": memory.SchemaVersion, "data_dir": store.Dir, "entries_including_history": stats.Entries, "current_entries": stats.Current, "needs_review": stats.NeedsReview})
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"version": buildVersion, "schema_version": memory.SchemaVersion, "data_dir": store.Dir, "entries_including_history": stats.Entries, "current_entries": stats.Current, "needs_review": stats.NeedsReview})
 	case "export":
 		snapshot, err := store.Export(ctx)
 		if err != nil {
