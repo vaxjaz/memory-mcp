@@ -97,9 +97,14 @@ jobs:
         if: steps.plan.outputs.publish == 'true' && github.event_name != 'pull_request'
         env:
           RELEASE_TAG: ${{ steps.plan.outputs.tag }}
+          CREATE_TAG: ${{ steps.plan.outputs.create_tag }}
+          SOURCE_SHA: ${{ steps.plan.outputs.source_sha }}
         run: |
-          python3 tooling/scripts/release.py publish --tag "$RELEASE_TAG" \
-            --dist dist --source-dir source
+          args=(--tag "$RELEASE_TAG" --dist dist --source-dir source)
+          if [ "$CREATE_TAG" = true ]; then
+            args+=(--create-tag --source-sha "$SOURCE_SHA")
+          fi
+          python3 tooling/scripts/release.py publish "${args[@]}"
 
       - name: Report build result
         if: always() && github.event_name != 'pull_request'
