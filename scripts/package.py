@@ -14,7 +14,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 GO = os.environ.get("GO", "go")
-VERSION = "0.1.0"
+VERSION_FILE = ROOT / "cmd/memory-mcp/VERSION"
 TARGETS = [("linux", "amd64"), ("linux", "arm64"),
            ("darwin", "amd64"), ("darwin", "arm64"), ("windows", "amd64")]
 
@@ -24,6 +24,10 @@ def normalize_version(value):
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", value):
         raise ValueError("Expected a version such as 0.1.1 or v0.1.1")
     return value
+
+
+# Keep old tags buildable when they predate the version file.
+VERSION = normalize_version(VERSION_FILE.read_text().strip() if VERSION_FILE.is_file() else "0.1.0")
 
 
 def notices(root=ROOT):
