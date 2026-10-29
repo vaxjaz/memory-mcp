@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from package import TARGETS, VERSION, normalize_version
+from package import TARGETS, VERSION, VERSION_FILE, normalize_version
 
 
 def gh(*args):
@@ -33,7 +33,43 @@ def asset_names(version):
     return names + [f"memory-mcp-{version}-source.zip", "SHA256SUMS"]
 
 
-def plan(event_name, event, ref, sha, repo, cli=gh):
+def tag_commit(repo, tag, cli=gh):
+    try:
+        obj = json.loads(cli("api", f"repos/{repo}/git/ref/tags/{tag}"))["object"]
+    except subprocess.CalledProcessError as error:
+        if "404" in (error.stderr or ""):
+            return None
+        raise
+    for _ in range(10):
+        if obj["type"] == "commit":
+            return obj["sha"]
+        if obj["type"] != "tag":
+            break
+        obj = json.loads(cli("api", f"repos/{repo}/git/tags/{obj['sha']}"))["object"]
+    raise ValueError("Release tag does not resolve to a commit")
+
+
+def ensure_tag(repo, tag, sha, cli=gh):
+    existing = tag_commit(repo, tag, cli)
+    if existing is None:
+        try:
+            cli("api", "--method", "POST", f"repos/{repo}/git/refs",
+                "-f", f"ref=refs/tags/{tag}", "-f", f"sha={sha}")
+            return
+        except subprocess.CalledProcessError:
+            # Another actor may have created it. Never force-move an existing tag.
+            existing = tag_commit(repo, tag, cli)
+            if existing is None:
+                raise
+    if existing != sha:
+        raise ValueError(f"Tag {tag} already points to another commit; choose a new version")
+
+
+def core_version(value):
+    return tuple(int(part) for part in normalize_version(value).split("-", 1)[0].split("+", 1)[0].split("."))
+
+
+def plan(event_name, event, ref, sha, repo, cli=gh, release_version=None):
     tag = ""
     if event_name == "release":
         if event.get("action") == "published" and not event["release"].get("draft"):
@@ -47,6 +83,26 @@ def plan(event_name, event, ref, sha, repo, cli=gh):
         # This also backfills releases created before the release-event workflow existed.
         releases = json.loads(cli("release", "list", "--repo", repo, "--exclude-drafts",
                                  "--limit", "1", "--json", "tagName"))
+        if release_version:
+            version = normalize_version(release_version)
+            desired = "v" + version
+            latest = releases[0]["tagName"] if releases else None
+            try:
+                forward = latest is None or core_version(version) >= core_version(latest)
+            except ValueError:
+                forward = False
+            if forward:
+                info = release_info(repo, desired, cli)
+                if info is None:
+                    existing = tag_commit(repo, desired, cli)
+                    if existing is not None and existing != sha:
+                        raise ValueError(f"Tag {desired} already points to another commit; choose a new version")
+                    # Build/test the pinned commit FIRST. The publish step creates
+                    # the tag only after all artifacts and checks have succeeded.
+                    return {"tag": desired, "version": version, "source_ref": sha,
+                            "source_sha": sha, "create_tag": "true", "publish": "true"}
+                if set(asset_names(version)) - {a["name"] for a in info["assets"]}:
+                    tag = desired
         if releases:
             candidate = releases[0]["tagName"]
             try:
@@ -56,7 +112,7 @@ def plan(event_name, event, ref, sha, repo, cli=gh):
             if version:
                 info = release_info(repo, candidate, cli)
                 present = {asset["name"] for asset in info["assets"]} if info else set()
-                if set(asset_names(version)) - present:
+                if not tag and set(asset_names(version)) - present:
                     tag = candidate
     if not tag:
         return {"tag": "", "version": VERSION, "source_ref": sha, "publish": "false"}
@@ -67,7 +123,7 @@ def plan(event_name, event, ref, sha, repo, cli=gh):
     return {"tag": tag, "version": version, "source_ref": tag, "publish": "true"}
 
 
-def publish(repo, tag, dist, source, cli=gh):
+def publish(repo, tag, dist, source, cli=gh, create_tag=False, source_sha=None):
     version = normalize_version(tag)
     if tag != "v" + version:
         raise ValueError("Noncanonical release tag")
@@ -84,6 +140,11 @@ def publish(repo, tag, dist, source, cli=gh):
     for name in names[:-1]:
         if hashlib.sha256((dist / name).read_bytes()).hexdigest() != manifest.get(name):
             raise ValueError(f"Build checksum mismatch: {name}")
+
+    if create_tag:
+        if not source_sha:
+            raise ValueError("source_sha is required to create a release tag")
+        ensure_tag(repo, tag, source_sha, cli)
 
     info = release_info(repo, tag, cli)
     if info is None:
@@ -131,18 +192,22 @@ def main():
     upload.add_argument("--tag", required=True)
     upload.add_argument("--dist", type=Path, required=True)
     upload.add_argument("--source-dir", type=Path, required=True)
+    upload.add_argument("--create-tag", action="store_true")
+    upload.add_argument("--source-sha")
     args = parser.parse_args()
     repo = os.environ["GITHUB_REPOSITORY"]
     if args.command == "plan":
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
         result = plan(os.environ["GITHUB_EVENT_NAME"], event, os.environ["GITHUB_REF"],
-                      os.environ["GITHUB_SHA"], repo)
+                      os.environ["GITHUB_SHA"], repo,
+                      release_version=VERSION if VERSION_FILE.is_file() else None)
         with open(os.environ["GITHUB_OUTPUT"], "a") as output:
             for key, value in result.items():
                 output.write(f"{key}={value}\n")
         print(json.dumps(result))
     else:
-        print(publish(repo, args.tag, args.dist, args.source_dir))
+        print(publish(repo, args.tag, args.dist, args.source_dir,
+                      create_tag=args.create_tag, source_sha=args.source_sha))
 
 
 if __name__ == "__main__":
