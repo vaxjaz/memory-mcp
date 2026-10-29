@@ -63,14 +63,32 @@ func TestMCPDiscoveryAndLearningRoundTrip(t *testing.T) {
 	if boot.Guide == "" || boot.DataDir != store.Dir {
 		t.Fatal("bootstrap incomplete")
 	}
+	if boot.SchemaVersion != 2 {
+		t.Fatal("missing storage capability version")
+	}
 	var e memory.Entry
-	call("memory_record", memory.Draft{Kind: "record", Scope: "project:mcp-test", Title: "反馈", Body: "方案B的状态反馈更清楚，未评价其他场景。", Origin: "host_quote"}, &e)
+	draft := memory.Draft{Kind: "record", Scope: "project:mcp-test", Title: "反馈", Body: "方案B的状态反馈更清楚，未评价其他场景。", Origin: "host_quote", RequestID: "transport-write-001"}
+	call("memory_record", draft, &e)
+	var retried memory.Entry
+	call("memory_record", draft, &retried)
+	if e.ID != retried.ID || retried.BodyBytes != len(draft.Body) || len(retried.BodySHA256) != 64 {
+		t.Fatal("MCP retry receipt or integrity metadata lost")
+	}
 	var h memory.Entry
 	call("memory_revise", ReviseInput{Draft: memory.Draft{Kind: "hypothesis", Scope: e.Scope, Title: "局部偏好假设", Body: "可能更重视明确状态反馈，其他场景未知。", Origin: "model_inference", Links: []memory.Link{{TargetID: e.ID, Relation: "supports"}}}}, &h)
 	var search SearchOutput
 	call("memory_search", memory.SearchInput{Scope: e.Scope, Query: "状态"}, &search)
 	if len(search.Results) != 2 {
 		t.Fatalf("unexpected search: %+v", search)
+	}
+	call("memory_search", memory.SearchInput{Scope: e.Scope, Query: "状态", Limit: 1}, &search)
+	if !search.HasMore || search.NextCursor == "" {
+		t.Fatal("MCP search hid continuation")
+	}
+	var next SearchOutput
+	call("memory_search", memory.SearchInput{Scope: e.Scope, Query: "状态", Limit: 1, Cursor: search.NextCursor}, &next)
+	if next.HasMore || len(next.Results) != 1 || next.Results[0].ID == search.Results[0].ID {
+		t.Fatal("MCP cursor did not advance")
 	}
 	var read memory.ReadResult
 	call("memory_read", ReadInput{ID: e.ID}, &read)
