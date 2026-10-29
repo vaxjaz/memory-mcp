@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 
-from release import asset_names, plan, publish
+from release import asset_names, ensure_tag, plan, publish
 
 
 REPO = "example/memory-mcp"
@@ -55,6 +55,57 @@ def build_fixture(directory):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_version_file_prepares_pinned_release_without_creating_tag_early(self):
+        calls = []
+        def cli(*args):
+            calls.append(args)
+            if args[:2] == ("release", "list"):
+                return json.dumps([{"tagName": TAG}])
+            if args[:3] == ("release", "view", "v0.1.2") or args[:2] == ("api", f"repos/{REPO}/git/ref/tags/v0.1.2"):
+                raise subprocess.CalledProcessError(1, args, stderr="HTTP 404: Not Found")
+            raise AssertionError(args)
+        result = plan("push", {}, "refs/heads/main", "a" * 40, REPO, cli, release_version="0.1.2")
+        self.assertEqual(result, {"tag": "v0.1.2", "version": "0.1.2", "source_ref": "a" * 40,
+                                  "source_sha": "a" * 40, "create_tag": "true", "publish": "true"})
+        self.assertFalse(any("POST" in call for call in calls))
+
+    def test_complete_version_marker_does_not_republish(self):
+        cli = FakeGitHub({name: b"existing" for name in asset_names("0.1.1")})
+        result = plan("push", {}, "refs/heads/main", "a" * 40, REPO, cli, release_version="0.1.1")
+        self.assertEqual(result["publish"], "false")
+
+    def test_version_marker_does_not_downgrade_a_newer_release(self):
+        def cli(*args):
+            if args[:2] == ("release", "list"):
+                return json.dumps([{"tagName": "v0.1.3"}])
+            if args[:3] == ("release", "view", "v0.1.3"):
+                return json.dumps({"assets": [{"name": name} for name in asset_names("0.1.3")]})
+            raise AssertionError(args)
+        result = plan("push", {}, "refs/heads/main", "a" * 40, REPO, cli, release_version="0.1.2")
+        self.assertEqual(result["publish"], "false")
+
+    def test_existing_tag_is_never_moved(self):
+        refs = {}
+        posts = []
+        def cli(*args):
+            if args[:2] == ("api", f"repos/{REPO}/git/ref/tags/{TAG}"):
+                if not refs:
+                    raise subprocess.CalledProcessError(1, args, stderr="HTTP 404: Not Found")
+                return json.dumps({"object": {"type": "commit", "sha": refs[TAG]}})
+            if args[:3] == ("api", "--method", "POST"):
+                self.assertIn("ref=refs/tags/" + TAG, args)
+                self.assertIn("sha=" + "a" * 40, args)
+                refs[TAG] = "a" * 40
+                posts.append(args)
+                return "{}"
+            raise AssertionError(args)
+        ensure_tag(REPO, TAG, "a" * 40, cli)
+        ensure_tag(REPO, TAG, "a" * 40, cli)
+        with self.assertRaisesRegex(ValueError, "another commit"):
+            ensure_tag(REPO, TAG, "b" * 40, cli)
+        self.assertEqual(len(posts), 1)
+        self.assertEqual(refs[TAG], "a" * 40)
+
     def test_main_repairs_manual_release_using_tag_not_default_version(self):
         result = plan("push", {}, "refs/heads/main", "a" * 40, REPO, FakeGitHub())
         self.assertEqual(result, {"tag": TAG, "version": "0.1.1", "source_ref": TAG, "publish": "true"})
@@ -125,7 +176,7 @@ class ReleaseTests(unittest.TestCase):
             (Path(directory) / asset_names("0.1.1")[0]).write_bytes(b"corrupt")
             cli = FakeGitHub()
             with self.assertRaisesRegex(ValueError, "checksum mismatch"):
-                publish(REPO, TAG, directory, directory, cli)
+                publish(REPO, TAG, directory, directory, cli, create_tag=True, source_sha="a" * 40)
             self.assertEqual(cli.calls, [])
 
 
