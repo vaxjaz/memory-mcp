@@ -15,10 +15,11 @@ import (
 	"time"
 	"unicode/utf8"
 
-	_ "github.com/ncruces/go-sqlite3/driver"
+	"github.com/ncruces/go-sqlite3"
+	"github.com/ncruces/go-sqlite3/driver"
 )
 
-const SchemaVersion = 1
+const SchemaVersion = 2
 
 // Entry bodies are free text. These fields track provenance, not semantic truth.
 type Entry struct {
@@ -29,6 +30,8 @@ type Entry struct {
 	Scope       string `json:"scope"`
 	Title       string `json:"title"`
 	Body        string `json:"body"`
+	BodyBytes   int    `json:"body_bytes"`
+	BodySHA256  string `json:"body_sha256"`
 	Origin      string `json:"origin"`
 	SourceRef   string `json:"source_ref,omitempty"`
 	Host        string `json:"host,omitempty"`
@@ -56,6 +59,7 @@ type Draft struct {
 	Model     string `json:"model,omitempty" jsonschema:"Model identifier if actually known; omit rather than guess"`
 	Session   string `json:"session,omitempty" jsonschema:"Optional originating session identifier"`
 	Links     []Link `json:"links,omitempty" jsonschema:"Optional links to existing supporting, contradicting, or contextual entries"`
+	RequestID string `json:"request_id,omitempty" jsonschema:"Optional stable ID for one logical write. Reuse it with the same payload when retrying an uncertain response; use a new ID for a different write. Scoped to this project or global scope."`
 }
 
 type Store struct {
@@ -104,7 +108,11 @@ func Open(dir string) (*Store, error) {
 	if err := f.Close(); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3", filepath.Join(abs, "memory.db"))
+	// Initialize EVERY physical connection, including replacements opened by database/sql.
+	db, err := driver.Open(filepath.Join(abs, "memory.db"), func(conn *sqlite3.Conn) error {
+		return conn.Exec(`PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON;
+PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;`)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -120,11 +128,6 @@ func Open(dir string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) init() error {
-	for _, q := range []string{"PRAGMA busy_timeout=10000", "PRAGMA foreign_keys=ON", "PRAGMA journal_mode=WAL", "PRAGMA secure_delete=ON"} {
-		if _, err := s.db.Exec(q); err != nil {
-			return err
-		}
-	}
 	var version int
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
@@ -135,11 +138,18 @@ func (s *Store) init() error {
 	if version == SchemaVersion {
 		return nil
 	}
-	tx, err := s.db.Begin()
+	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	// A second process may have migrated while this connection waited for the lock.
+	if err = tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		return err
+	}
+	if version > SchemaVersion {
+		return fmt.Errorf("database version %d is newer than supported %d", version, SchemaVersion)
+	}
 	_, err = tx.Exec(`
 CREATE TABLE IF NOT EXISTS entries (
  id TEXT PRIMARY KEY, root_id TEXT NOT NULL, previous_id TEXT NOT NULL,
@@ -158,7 +168,12 @@ CREATE TABLE IF NOT EXISTS links (
  PRIMARY KEY(entry_id,target_id,relation)
 );
 CREATE INDEX IF NOT EXISTS links_target ON links(target_id);
-PRAGMA user_version=1;`)
+CREATE TABLE IF NOT EXISTS write_requests (
+ scope TEXT NOT NULL, request_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
+ entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,
+ PRIMARY KEY(scope,request_id)
+);
+PRAGMA user_version=2;`)
 	if err != nil {
 		return err
 	}
@@ -166,6 +181,14 @@ PRAGMA user_version=1;`)
 }
 
 func Validate(d Draft) error {
+	for _, value := range []string{d.Scope, d.Title, d.Body, d.SourceRef, d.Host, d.Model, d.Session, d.RequestID} {
+		if !utf8.ValidString(value) {
+			return errors.New("text fields must be valid UTF-8; raw text is not normalized or repaired")
+		}
+	}
+	if len(d.RequestID) > 256 || (d.RequestID != "" && strings.TrimSpace(d.RequestID) == "") {
+		return errors.New("request_id must be nonblank and at most 256 bytes")
+	}
 	if d.Kind != "record" && d.Kind != "case" && d.Kind != "hypothesis" {
 		return errors.New("kind must be record, case, or hypothesis")
 	}
@@ -216,7 +239,7 @@ func scanEntry(r rowScanner) (Entry, error) {
 	var e Entry
 	err := r.Scan(&e.ID, &e.RootID, &e.PreviousID, &e.Kind, &e.Scope, &e.Title, &e.Body, &e.Origin, &e.SourceRef, &e.Host, &e.Model, &e.Session, &e.CreatedAt, &e.Current, &e.NeedsReview)
 	e.Links = []Link{}
-	return e, err
+	return withIntegrity(e), err
 }
 
 func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, error) {
@@ -232,14 +255,33 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 	if e.Links == nil {
 		e.Links = []Link{}
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	e = withIntegrity(e)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return Entry{}, err
 	}
 	defer tx.Rollback()
-	// Acquire the SQLite write lock before reading revisions (also across processes).
-	if _, err = tx.ExecContext(ctx, "UPDATE entries SET current=current WHERE id=?", previousID); err != nil {
-		return Entry{}, err
+	fingerprint := writeFingerprint(d, previousID)
+	if d.RequestID != "" {
+		var oldFingerprint, entryID string
+		err = tx.QueryRowContext(ctx, "SELECT fingerprint,entry_id FROM write_requests WHERE scope=? AND request_id=?", d.Scope, d.RequestID).Scan(&oldFingerprint, &entryID)
+		if err == nil {
+			if oldFingerprint != fingerprint {
+				return Entry{}, errors.New("request_id conflict: this ID was used for a different write")
+			}
+			entry, err := scanEntry(tx.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", entryID))
+			if err != nil {
+				return Entry{}, err
+			}
+			entry.Links, err = loadLinks(ctx, tx, entry.ID)
+			if err != nil {
+				return Entry{}, err
+			}
+			return entry, tx.Commit()
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return Entry{}, err
+		}
 	}
 	if previousID != "" {
 		old, err := scanEntry(tx.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", previousID))
@@ -320,6 +362,11 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 			return Entry{}, err
 		}
 	}
+	if d.RequestID != "" {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO write_requests(scope,request_id,fingerprint,entry_id) VALUES (?,?,?,?)", d.Scope, d.RequestID, fingerprint, e.ID); err != nil {
+			return Entry{}, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return Entry{}, err
 	}
@@ -327,9 +374,11 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 }
 
 type ReadResult struct {
-	Entry        Entry       `json:"entry"`
-	CurrentID    string      `json:"current_id"`
-	ReferencedBy []Reference `json:"referenced_by"`
+	Entry                Entry       `json:"entry"`
+	CurrentID            string      `json:"current_id"`
+	ReferencedBy         []Reference `json:"referenced_by"`
+	ReferencesHasMore    bool        `json:"references_has_more"`
+	ReferencesNextCursor string      `json:"references_next_cursor,omitempty"`
 }
 type Reference struct {
 	EntryID     string `json:"entry_id"`
@@ -339,6 +388,19 @@ type Reference struct {
 }
 
 func (s *Store) Read(ctx context.Context, id string) (ReadResult, error) {
+	return s.ReadPage(ctx, id, "")
+}
+
+func (s *Store) ReadPage(ctx context.Context, id, referenceCursor string) (ReadResult, error) {
+	var anchor pageCursor
+	var err error
+	filter := digestText("references:" + id)
+	if referenceCursor != "" {
+		anchor, err = decodeCursor(referenceCursor, filter)
+		if err != nil {
+			return ReadResult{}, err
+		}
+	}
 	// One snapshot prevents a concurrent revision from mixing old/new states.
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
@@ -353,24 +415,18 @@ func (s *Store) Read(ctx context.Context, id string) (ReadResult, error) {
 	if err = tx.QueryRowContext(ctx, "SELECT id FROM entries WHERE root_id=? AND current=1", e.RootID).Scan(&r.CurrentID); err != nil {
 		return r, err
 	}
-	rows, err := tx.QueryContext(ctx, "SELECT target_id,relation FROM links WHERE entry_id=? ORDER BY target_id,relation", id)
+	r.Entry.Links, err = loadLinks(ctx, tx, id)
 	if err != nil {
 		return r, err
 	}
-	for rows.Next() {
-		var l Link
-		if err = rows.Scan(&l.TargetID, &l.Relation); err != nil {
-			rows.Close()
-			return r, err
-		}
-		r.Entry.Links = append(r.Entry.Links, l)
+	query := `SELECT l.entry_id,l.relation,e.kind,e.needs_review FROM links l JOIN entries e ON e.id=l.entry_id WHERE l.target_id=? AND e.current=1`
+	args := []any{id}
+	if referenceCursor != "" {
+		query += " AND (l.entry_id>? OR (l.entry_id=? AND l.relation>?))"
+		args = append(args, anchor.ID, anchor.ID, anchor.Sort)
 	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return r, err
-	}
-	rows, err = tx.QueryContext(ctx, `SELECT l.entry_id,l.relation,e.kind,e.needs_review FROM links l JOIN entries e ON e.id=l.entry_id WHERE l.target_id=? AND e.current=1 ORDER BY l.entry_id,l.relation LIMIT 100`, id)
+	query += " ORDER BY l.entry_id,l.relation LIMIT 101"
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return r, err
 	}
@@ -387,6 +443,12 @@ func (s *Store) Read(ctx context.Context, id string) (ReadResult, error) {
 	if err != nil {
 		return r, err
 	}
+	if len(r.ReferencedBy) > 100 {
+		r.ReferencesHasMore = true
+		r.ReferencedBy = r.ReferencedBy[:100]
+		last := r.ReferencedBy[99]
+		r.ReferencesNextCursor = encodeCursor(pageCursor{Version: 1, Filter: filter, ID: last.EntryID, Sort: last.Relation})
+	}
 	return r, tx.Commit()
 }
 
@@ -396,6 +458,7 @@ type SearchInput struct {
 	IncludeGlobal bool   `json:"include_global,omitempty" jsonschema:"Also include global entries when searching a project; opt in explicitly"`
 	Kind          string `json:"kind,omitempty" jsonschema:"Optional record, case, or hypothesis filter"`
 	Limit         int    `json:"limit,omitempty" jsonschema:"Result limit, default 10, maximum 30"`
+	Cursor        string `json:"cursor,omitempty" jsonschema:"Opaque next_cursor from a prior result; keep scope, query, include_global and kind unchanged"`
 }
 type Hit struct {
 	ID          string `json:"id"`
@@ -409,20 +472,43 @@ type Hit struct {
 }
 
 func (s *Store) Search(ctx context.Context, in SearchInput) ([]Hit, error) {
+	page, err := s.SearchPage(ctx, in)
+	return page.Results, err
+}
+
+type SearchPage struct {
+	Results    []Hit  `json:"results"`
+	HasMore    bool   `json:"has_more"`
+	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+func (s *Store) SearchPage(ctx context.Context, in SearchInput) (SearchPage, error) {
 	if in.Scope != "global" && (!strings.HasPrefix(in.Scope, "project:") || strings.TrimSpace(strings.TrimPrefix(in.Scope, "project:")) == "") {
-		return nil, errors.New("explicit scope required")
+		return SearchPage{}, errors.New("explicit scope required")
 	}
 	if len(in.Query) > 2048 {
-		return nil, errors.New("query too long")
+		return SearchPage{}, errors.New("query too long")
 	}
 	if in.Kind != "" && in.Kind != "record" && in.Kind != "case" && in.Kind != "hypothesis" {
-		return nil, errors.New("invalid kind")
+		return SearchPage{}, errors.New("invalid kind")
 	}
 	if in.Limit == 0 {
 		in.Limit = 10
 	}
 	if in.Limit < 1 || in.Limit > 30 {
-		return nil, errors.New("limit must be 1..30")
+		return SearchPage{}, errors.New("limit must be 1..30")
+	}
+	filter := searchFingerprint(in)
+	var anchor pageCursor
+	if in.Cursor != "" {
+		var err error
+		anchor, err = decodeCursor(in.Cursor, filter)
+		if err != nil {
+			return SearchPage{}, err
+		}
+		if _, err = time.Parse(time.RFC3339Nano, anchor.Sort); err != nil {
+			return SearchPage{}, errors.New("invalid search cursor")
+		}
 	}
 	q := "SELECT id,kind,scope,title,body,origin,needs_review,created_at FROM entries WHERE current=1 AND (scope=?"
 	args := []any{in.Scope}
@@ -436,7 +522,7 @@ func (s *Store) Search(ctx context.Context, in SearchInput) ([]Hit, error) {
 	}
 	words := strings.Fields(in.Query)
 	if len(words) > 8 {
-		return nil, errors.New("at most 8 keywords per search")
+		return SearchPage{}, errors.New("at most 8 keywords per search")
 	}
 	if len(words) > 0 {
 		q += " AND ("
@@ -449,11 +535,15 @@ func (s *Store) Search(ctx context.Context, in SearchInput) ([]Hit, error) {
 		}
 		q += ")"
 	}
+	if in.Cursor != "" {
+		q += " AND (created_at<? OR (created_at=? AND id<?))"
+		args = append(args, anchor.Sort, anchor.Sort, anchor.ID)
+	}
 	q += " ORDER BY created_at DESC,id DESC LIMIT ?"
-	args = append(args, in.Limit)
+	args = append(args, in.Limit+1)
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
-		return nil, err
+		return SearchPage{}, err
 	}
 	defer rows.Close()
 	hits := []Hit{}
@@ -461,12 +551,22 @@ func (s *Store) Search(ctx context.Context, in SearchInput) ([]Hit, error) {
 		var h Hit
 		var body string
 		if err = rows.Scan(&h.ID, &h.Kind, &h.Scope, &h.Title, &body, &h.Origin, &h.NeedsReview, &h.CreatedAt); err != nil {
-			return nil, err
+			return SearchPage{}, err
 		}
 		h.Excerpt = excerpt(body, words)
 		hits = append(hits, h)
 	}
-	return hits, rows.Err()
+	if err = rows.Err(); err != nil {
+		return SearchPage{}, err
+	}
+	page := SearchPage{Results: hits}
+	if len(hits) > in.Limit {
+		page.HasMore = true
+		page.Results = hits[:in.Limit]
+		last := page.Results[in.Limit-1]
+		page.NextCursor = encodeCursor(pageCursor{Version: 1, Filter: filter, ID: last.ID, Sort: last.CreatedAt})
+	}
+	return page, nil
 }
 
 func excerpt(body string, words []string) string {
@@ -554,14 +654,11 @@ func (s *Store) Export(ctx context.Context) (Snapshot, error) {
 // Forget removes the complete revision lineage AND dependent interpretations.
 // It cannot erase copies in exports, host transcripts, backups, or storage snapshots.
 func (s *Store) Forget(ctx context.Context, id string) (int64, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, "UPDATE entries SET current=current WHERE id=?", id); err != nil {
-		return 0, err
-	}
 	var exists int
 	if err = tx.QueryRowContext(ctx, "SELECT count(*) FROM entries WHERE id=?", id).Scan(&exists); err != nil {
 		return 0, err
