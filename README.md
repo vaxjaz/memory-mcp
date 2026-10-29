@@ -154,6 +154,14 @@ python3 scripts/smoke.py ./memory-mcp
 ## 自动构建与分发
 
 GitHub Actions 在 main 更新、拉取请求和手动触发时执行测试及五平台打包。
-成功结果保存为 Actions artifact；main 上尚未发布的新版本同时创建 GitHub Release。
-已经存在的版本不会被自动覆盖；更新发行版本时同时调整程序版本与打包脚本版本。
-构建失败不会创建 Release。工作流只上传打包目录，不包含本机数据库或安装目录。
+创建 `v*` 标签或发布 Release 也会触发构建。发行版本以标签为准：例如 `v0.1.1`
+会从该标签的源码构建，文件名、程序 `version` 与 MCP 报告版本均为 `0.1.1`。
+打包辅助程序与目标源码分别检出，因此修复后的流程也能为旧标签补包，不移动原标签。
+
+成功结果保存为 Actions artifact，并为目标 Release 上传安装包与 `SHA256SUMS`。
+已有 Release 不会直接跳过：只补缺失的程序包，保留已有二进制；必要时更新校验文件，
+校验摘要基于实际上传附件。上传中断后可重试。main 更新也会检查并补齐最近发布的版本。
+任意历史版本可在 Actions → Build and distribute → Run workflow 中填写 `tag` 来补包。
+
+GitHub 自动生成的两个 Source code 附件不包含编译后的程序；新 Release 发布后需要
+等待 Actions 成功完成，程序包才会出现。工作流不上传本机数据库或安装目录。

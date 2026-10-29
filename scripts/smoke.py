@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Exercise an actual packaged stdio executable without a model or MCP client app."""
+import argparse
 import json
 from pathlib import Path
 import queue
 import subprocess
-import sys
 import tempfile
 import threading
 
@@ -69,13 +69,23 @@ class Host:
 
 
 def main():
-    binary = str(Path(sys.argv[1]).resolve())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("binary")
+    parser.add_argument("--expected-version")
+    args = parser.parse_args()
+    binary = str(Path(args.binary).resolve())
+    if args.expected_version:
+        actual = subprocess.check_output([binary, "version"], text=True).strip()
+        assert actual == args.expected_version, (actual, args.expected_version)
     with tempfile.TemporaryDirectory(prefix="memory-mcp-smoke-") as temp:
         data = str(Path(temp) / "local-data")
         host = Host(binary, data)
         try:
             assert len(host.request("tools/list", {})["tools"]) == 5
-            assert host.tool("memory_bootstrap", {})["integration_protocol"] == "1"
+            bootstrap = host.tool("memory_bootstrap", {})
+            assert bootstrap["integration_protocol"] == "1"
+            if args.expected_version:
+                assert bootstrap["version"] == args.expected_version
             draft = {"kind": "record", "scope": "project:smoke", "title": "保存反馈",
                      "body": "方案 B 更清楚，只评价当前表单。", "origin": "host_quote"}
             original = host.tool("memory_record", draft)

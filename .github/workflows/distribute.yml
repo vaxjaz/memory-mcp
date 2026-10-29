@@ -3,14 +3,23 @@ name: Build and distribute
 on:
   push:
     branches: [main]
+    tags: ['v*']
+  release:
+    types: [published]
   pull_request:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build or repair, e.g. v0.1.1; empty builds current source only'
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: distribution-${{ github.ref }}
+  # Serialize repair, tag, and release events so they cannot race asset uploads.
+  group: memory-mcp-distribution
   cancel-in-progress: false
 
 jobs:
@@ -33,49 +42,64 @@ jobs:
 
       - uses: actions/checkout@v5
         with:
+          ref: ${{ github.workflow_sha }}
+          path: tooling
+          persist-credentials: false
+
+      - name: Select release version and exact source tag
+        id: plan
+        run: python3 tooling/scripts/release.py plan
+
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ steps.plan.outputs.source_ref }}
+          path: source
           persist-credentials: false
 
       - uses: actions/setup-go@v6
         with:
           go-version: '1.27.3'
           cache: true
+          cache-dependency-path: source/go.sum
 
       - name: Test and inspect
         run: |
-          go test -count=1 ./...
-          go vet ./...
+          python3 -m unittest discover -s tooling/scripts -p 'test_*.py'
+          go -C source test -count=1 ./...
+          go -C source vet ./...
 
       - name: Build offline packages
-        run: python3 scripts/package.py
+        env:
+          BUILD_VERSION: ${{ steps.plan.outputs.version }}
+        run: |
+          python3 tooling/scripts/package.py --source-dir source \
+            --output-dir dist --version "$BUILD_VERSION"
 
       - name: Verify packaged Linux executable and checksums
+        env:
+          BUILD_VERSION: ${{ steps.plan.outputs.version }}
         run: |
           (cd dist && sha256sum --check SHA256SUMS)
           mkdir -p "$RUNNER_TEMP/memory-mcp-check"
           tar -xzf dist/memory-mcp-*-linux-amd64.tar.gz -C "$RUNNER_TEMP/memory-mcp-check"
           binary=$(find "$RUNNER_TEMP/memory-mcp-check" -type f -name memory-mcp -print -quit)
-          python3 scripts/smoke.py "$binary"
+          python3 tooling/scripts/smoke.py "$binary" --expected-version "$BUILD_VERSION"
 
       - name: Save downloadable build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: memory-mcp-${{ github.sha }}
+          name: memory-mcp-${{ steps.plan.outputs.version }}-${{ github.run_id }}
           path: dist/*
           if-no-files-found: error
           retention-days: 30
 
-      - name: Publish new version to Releases
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+      - name: Publish or repair release assets
+        if: steps.plan.outputs.publish == 'true' && github.event_name != 'pull_request'
+        env:
+          RELEASE_TAG: ${{ steps.plan.outputs.tag }}
         run: |
-          version=$(python3 -c "import runpy; print(runpy.run_path('scripts/package.py')['VERSION'])")
-          tag="v$version"
-          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            echo "Release $tag already exists; leaving published assets unchanged."
-          else
-            gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" --title "memory-mcp $tag" \
-              --notes-file docs/RELEASE_NOTES.md
-          fi
+          python3 tooling/scripts/release.py publish --tag "$RELEASE_TAG" \
+            --dist dist --source-dir source
 
       - name: Report build result
         if: always() && github.event_name != 'pull_request'
