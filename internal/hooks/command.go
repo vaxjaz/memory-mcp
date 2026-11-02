@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/vaxjaz/memory-mcp/internal/textguard"
 	"io"
 	"os"
 	"path/filepath"
@@ -30,6 +31,7 @@ func Run(ctx context.Context, args []string) error {
 	capture := fs.Bool("capture-user-text", false, "enable raw prompt and supplied answer capture in bound projects")
 	review := fs.Bool("review-on-stop", false, "request one host-model business-memory review at turn end; adds a model continuation")
 	dry := fs.Bool("dry-run", false, "show setup targets without writing config or opening the database")
+	checkText := fs.Bool("check-text", false, "doctor: scan stored text for invalid UTF-8/U+FFFD without changing it")
 	_ = fs.String("managed-id", "", "installer ownership marker")
 	if err = fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -90,6 +92,13 @@ func Run(ctx context.Context, args []string) error {
 			return er
 		}
 		r["config_exists"] = len(c) > 0
+		if *checkText {
+			audit, er := store.AuditText(ctx)
+			if er != nil {
+				return er
+			}
+			r["text_integrity"] = audit
+		}
 		return json.NewEncoder(os.Stdout).Encode(r)
 	}
 	raw, err := io.ReadAll(io.LimitReader(os.Stdin, 1024*1024+1))
@@ -100,6 +109,9 @@ func Run(ctx context.Context, args []string) error {
 		return fail(errors.New("hook input exceeds 1 MiB"))
 	}
 	var e Event
+	if err = textguard.JSON(raw); err != nil {
+		return fail(err)
+	}
 	if err = json.Unmarshal(raw, &e); err != nil {
 		return fail(err)
 	}

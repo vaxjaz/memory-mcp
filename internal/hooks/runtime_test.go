@@ -342,3 +342,31 @@ func TestCaptureAndRecallCanRunWithoutModelReview(t *testing.T) {
 		t.Fatal("project binding silently replaced")
 	}
 }
+
+func TestResourceExplanationIsDeliveredEvenForPreviouslySeenCase(t *testing.T) {
+	s, r, p := fixture(t)
+	target := putCase(t, s, "project:demo", "页面校验", "TaskOrderCommonService 处理页面保存边界。", "", "")
+	first := handle(t, r, event("UserPromptSubmit", p, "s", "TaskOrderCommonService 的页面保存怎么处理？"))
+	if !strings.Contains(text(first), target.ID) || !strings.Contains(text(first), "任务关键词") {
+		t.Fatal(first)
+	}
+	e := event("PreToolUse", p, "s", "")
+	e.Tool = "Edit"
+	e.Input = map[string]any{"file_path": filepath.Join(p, "TaskOrderCommonService.java")}
+	changed := handle(t, r, e)
+	if !strings.Contains(text(changed), "当前类名/符号") || !strings.Contains(text(changed), "案例正文") {
+		t.Fatal("new resource reason suppressed by ID-only dedup", changed)
+	}
+	if len(handle(t, r, e)) != 0 {
+		t.Fatal("identical resource reason repeated")
+	}
+	diag, err := s.HookDiagnostics(testCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, run := range diag["recent_events"].([]map[string]string) {
+		if strings.Contains(run["detail"], "页面保存怎么处理") {
+			t.Fatal("private query text copied to diagnostics")
+		}
+	}
+}

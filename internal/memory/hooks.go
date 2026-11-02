@@ -8,12 +8,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vaxjaz/memory-mcp/internal/textguard"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
-	"unicode"
 )
 
 const HookSourcePrefix = "hook-event:"
@@ -24,17 +23,21 @@ func hookRequestID(session, event string) string {
 }
 
 type HookTurn struct {
-	SourceID string `json:"source_id"`
-	Scope    string `json:"scope"`
-	Session  string `json:"session"`
-	CWD      string `json:"cwd"`
-	Query    string `json:"query"`
-	AnswerID string `json:"answer_id,omitempty"`
-	Attempts int    `json:"review_attempts"`
-	Status   string `json:"status"`
-	Recall   string `json:"-"`
-	Note     string `json:"note,omitempty"`
-	Created  string `json:"created_at"`
+	SourceID         string            `json:"source_id"`
+	Scope            string            `json:"scope"`
+	Session          string            `json:"session"`
+	CWD              string            `json:"cwd"`
+	Query            string            `json:"query"`
+	AnswerID         string            `json:"answer_id,omitempty"`
+	Attempts         int               `json:"review_attempts"`
+	Status           string            `json:"status"`
+	Recall           string            `json:"-"`
+	Note             string            `json:"note,omitempty"`
+	Created          string            `json:"created_at"`
+	ReviewNote       string            `json:"review_note,omitempty"`
+	ReviewNoteBytes  int               `json:"review_note_bytes,omitempty"`
+	ReviewNoteSHA256 string            `json:"review_note_sha256,omitempty"`
+	TextIssues       []textguard.Issue `json:"text_issues,omitempty"`
 }
 
 func (s *Store) InitHooks(ctx context.Context) error {
@@ -121,6 +124,17 @@ const hookColumns = "source_id,scope,session,cwd,query_text,answer_id,attempts,s
 func scanTurn(row rowScanner) (HookTurn, error) {
 	var t HookTurn
 	err := row.Scan(&t.SourceID, &t.Scope, &t.Session, &t.CWD, &t.Query, &t.AnswerID, &t.Attempts, &t.Status, &t.Recall, &t.Note, &t.Created)
+	var receipt struct {
+		Explanation string `json:"explanation"`
+	}
+	if textguard.JSON([]byte(t.Note)) == nil && json.Unmarshal([]byte(t.Note), &receipt) == nil {
+		t.ReviewNote = receipt.Explanation
+		t.ReviewNoteBytes = len(receipt.Explanation)
+		t.ReviewNoteSHA256 = digestText(receipt.Explanation)
+	}
+	if issue := textguard.Inspect("note", t.Note); issue != nil {
+		t.TextIssues = []textguard.Issue{*issue}
+	}
 	return t, err
 }
 func (s *Store) HookLatest(ctx context.Context, scope, session string) (HookTurn, error) {
@@ -166,7 +180,7 @@ func (s *Store) HookStart(ctx context.Context, scope, session, cwd, prompt, even
 			query = prev.Query
 		}
 	}
-	d := Draft{Kind: "record", Scope: scope, Title: "原始用户输入（尚未整理为业务决策）", Body: prompt, Origin: "host_quote", Host: "zcode", Session: session, SourceRef: HookSourcePrefix + "zcode:user"}
+	d := Draft{Kind: "record", Scope: scope, Title: "原始用户输入（尚未整理为业务决策）", Body: prompt, Origin: "host_quote", Host: "zcode", Session: session, SourceRef: HookSourcePrefix + "zcode:user", AllowReplacementCharacters: true}
 	if eventID != "" {
 		d.RequestID = hookRequestID(session, eventID)
 	}
@@ -189,7 +203,7 @@ func (s *Store) HookAttachAnswer(ctx context.Context, t HookTurn, answer string)
 	if answer == "" || t.AnswerID != "" {
 		return t, nil
 	}
-	e, err := s.Put(ctx, Draft{Kind: "record", Scope: t.Scope, Title: "本轮业务答复原文（宿主交付）", Body: answer, Origin: "host_quote", Host: "zcode", Session: t.Session, SourceRef: HookSourcePrefix + "zcode:assistant", RequestID: "hook-answer:" + t.SourceID, Links: []Link{{TargetID: t.SourceID, Relation: "context"}}}, "")
+	e, err := s.Put(ctx, Draft{Kind: "record", Scope: t.Scope, Title: "本轮业务答复原文（宿主交付）", Body: answer, Origin: "host_quote", Host: "zcode", Session: t.Session, SourceRef: HookSourcePrefix + "zcode:assistant", RequestID: "hook-answer:" + t.SourceID, Links: []Link{{TargetID: t.SourceID, Relation: "context"}}, AllowReplacementCharacters: true}, "")
 	if err != nil {
 		return t, err
 	}
@@ -213,13 +227,17 @@ func (s *Store) HookSetRecall(ctx context.Context, id, fingerprint string) error
 }
 
 type ReviewInput struct {
-	Scope    string   `json:"scope"`
-	SourceID string   `json:"source_id" jsonschema:"Raw user entry ID delivered by a hook. Read it and its contextual links before reviewing."`
-	CaseIDs  []string `json:"case_ids,omitempty" jsonschema:"Already saved case/revision IDs linked to this source. Empty only when no business decision or correction needs recording."`
-	Note     string   `json:"note" jsonschema:"Free-text explanation of what was recorded, or why this turn contains no business decision. This is host reasoning, not independent verification."`
+	Scope                      string   `json:"scope"`
+	SourceID                   string   `json:"source_id" jsonschema:"Raw user entry ID delivered by a hook. Read it and its contextual links before reviewing."`
+	CaseIDs                    []string `json:"case_ids,omitempty" jsonschema:"Already saved case/revision IDs linked to this source. Empty only when no business decision or correction needs recording."`
+	Note                       string   `json:"note" jsonschema:"Free-text explanation of what was recorded, or why this turn contains no business decision. This is host reasoning, not independent verification."`
+	AllowReplacementCharacters bool     `json:"allow_replacement_characters,omitempty" jsonschema:"Only true for U+FFFD intentionally present in the original note, not for forcing through already damaged text."`
 }
 
 func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, error) {
+	if err := textguard.Check("note", in.Note, in.AllowReplacementCharacters); err != nil {
+		return HookTurn{}, err
+	}
 	if err := s.InitHooks(ctx); err != nil {
 		return HookTurn{}, err
 	}
@@ -308,113 +326,4 @@ func (s *Store) HookDiagnostics(ctx context.Context) (map[string]any, error) {
 		runs = append(runs, map[string]string{"event": ev, "scope": sc, "session": se, "result": re, "detail": de, "created_at": at})
 	}
 	return map[string]any{"pending_reviews": pending, "recent_events": runs, "model_used_material": "unknown unless verified in the host"}, rows.Err()
-}
-
-// Hook recall compares literal words and Han bigrams across current project
-// materials. It does not summarize, embed, or claim semantic completeness.
-func recallTerms(text string) map[string]int {
-	out := map[string]int{}
-	text = strings.ToLower(text)
-	var word, han []rune
-	flush := func() {
-		if len(word) > 1 {
-			out[string(word)] = 1
-		}
-		word = nil
-		if len(han) > 1 {
-			for i := 0; i < len(han)-1; i++ {
-				out[string(han[i:i+2])] = 1
-			}
-		}
-		han = nil
-	}
-	for _, r := range text {
-		if unicode.Is(unicode.Han, r) {
-			if len(word) > 0 {
-				flush()
-			}
-			han = append(han, r)
-		} else if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			if len(han) > 0 {
-				flush()
-			}
-			word = append(word, r)
-		} else {
-			flush()
-		}
-	}
-	flush()
-	for _, w := range []string{"一个", "这个", "我们", "你们", "可以", "需要", "进行", "相关", "一下", "现在", "怎么", "什么", "是否", "应该", "用户", "业务", "本轮", "原话", "项目", "请问", "帮我", "the", "this", "with", "please"} {
-		delete(out, w)
-	}
-	if strings.Contains(text, "migration") || strings.Contains(text, ".sql") {
-		out["迁移"] = 1
-		out["数据库"] = 1
-	}
-	return out
-}
-
-type RecallResult struct {
-	Entries   []Entry
-	Truncated bool
-	Scanned   int
-}
-
-func (s *Store) HookRecall(ctx context.Context, scope, query string) (RecallResult, error) {
-	terms := recallTerms(query)
-	result := RecallResult{Entries: []Entry{}}
-	if len(terms) == 0 {
-		return result, nil
-	}
-	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM entries WHERE current=1 AND scope=? AND source_ref NOT LIKE 'hook-event:%' ORDER BY created_at DESC,id DESC LIMIT 1001", scope)
-	if err != nil {
-		return result, err
-	}
-	type ranked struct {
-		e     Entry
-		score int
-	}
-	found := []ranked{}
-	for rows.Next() {
-		e, er := scanEntry(rows)
-		if er != nil {
-			rows.Close()
-			return result, er
-		}
-		result.Scanned++
-		if result.Scanned > 1000 {
-			result.Truncated = true
-			break
-		}
-		body, title := strings.ToLower(e.Body), strings.ToLower(e.Title)
-		score := 0
-		for w := range terms {
-			if strings.Contains(title, w) {
-				score += 4
-			}
-			if strings.Contains(body, w) {
-				score++
-			}
-		}
-		if score > 0 {
-			found = append(found, ranked{e, score})
-		}
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return result, err
-	}
-	sort.SliceStable(found, func(i, j int) bool { return found[i].score > found[j].score })
-	if len(found) > 3 {
-		found = found[:3]
-	}
-	for _, r := range found {
-		read, er := s.Read(ctx, r.e.ID)
-		if er != nil {
-			return result, er
-		}
-		result.Entries = append(result.Entries, read.Entry)
-	}
-	return result, nil
 }

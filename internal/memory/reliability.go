@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vaxjaz/memory-mcp/internal/textguard"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,6 +24,12 @@ func digestText(text string) string {
 func withIntegrity(e Entry) Entry {
 	e.BodyBytes = len(e.Body)
 	e.BodySHA256 = digestText(e.Body)
+	e.TextIssues = nil
+	for _, field := range []struct{ name, value string }{{"title", e.Title}, {"body", e.Body}, {"source_ref", e.SourceRef}} {
+		if issue := textguard.Inspect(field.name, field.value); issue != nil {
+			e.TextIssues = append(e.TextIssues, *issue)
+		}
+	}
 	return e
 }
 

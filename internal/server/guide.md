@@ -1,5 +1,22 @@
 # Local decision memory: host integration protocol v1
 
+## Evidence, applicability, and text integrity
+
+Historical memory is guidance: use it to find sources, past reasoning and pitfalls.
+The host owns judgment, investigation and action. Verify present-day code facts
+and consult the original applicable specification/ADR rather than treating a
+memory quotation as normative authority. Match reasons identify actual text or
+resource matches, not a semantic conclusion that the case applies.
+
+Malformed UTF-8 and unpaired Unicode escapes are rejected before tool decoding.
+Writes reject suspicious U+FFFD replacement characters by default. On an encoding
+error, retrieve intact source text and resend; do not remove bad characters,
+guess the wording, or enable allow_replacement_characters merely to force a write.
+That option is only for deliberately recording U+FFFD present in the original.
+Read text_issues warns about suspicious existing evidence without rewriting it.
+Compare body_bytes/body_sha256 and review_note_bytes/review_note_sha256 against
+the source; those receipts verify delivered text, not truth or original intent.
+
 ## Host-adapted hook workflow (0.1.3 candidates)
 
 Use docs/HOOK_SETUP.md as the common installation and validation entry point.

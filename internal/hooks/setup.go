@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vaxjaz/memory-mcp/internal/textguard"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,6 +43,9 @@ func readConfig(p string) (map[string]any, []byte, error) {
 		return nil, nil, err
 	}
 	var c map[string]any
+	if err = textguard.JSON(raw); err != nil {
+		return nil, nil, err
+	}
 	if err = json.Unmarshal(raw, &c); err != nil {
 		return nil, nil, err
 	}
@@ -178,6 +182,9 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		fallback := filepath.Join(home, ".agents", "mcp.json")
 		if b, er := os.ReadFile(fallback); er == nil {
 			var f map[string]any
+			if er = textguard.JSON(b); er != nil {
+				return nil, fmt.Errorf("invalid .agents MCP text encoding: %w", er)
+			}
 			if er = json.Unmarshal(b, &f); er != nil {
 				return nil, fmt.Errorf("invalid .agents MCP fallback: %w", er)
 			}
