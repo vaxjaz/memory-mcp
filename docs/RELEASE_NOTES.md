@@ -1,4 +1,10 @@
-# 0.1.3-rc.1：ZCode 业务决策与纠偏 hook 候选
+# 0.1.3-rc.2：通用接入入口与宿主适配说明
+
+- README 统一引导宿主 Agent 通过 docs/HOOK_SETUP.md 自主识别客户端和能力、选择适配方式并验证，不将产品限定为某个客户端。
+- ZCode 配置细节移至 docs/adapters/ZCODE.md，保留其作为首个已实现适配器的事实，不冒称其他客户端的自动 hook 已支持。
+- setup/hook 要求显式 --host，避免默认安装到错误客户端；通用 MCP 核心继续供不同 Agent 使用。
+
+# 0.1.3-rc.1：首个 ZCode 业务决策与纠偏 hook 候选
 
 - 新增原生 Go `setup`、`hook`、`doctor`，无需 Node/Python 或独立模型 Key。
 - UserPromptSubmit 自动保存原话并检索当前项目材料；写入新资源前补查并去重交付。

@@ -132,7 +132,7 @@ func backupFile(p string, raw []byte) (string, error) {
 }
 func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	if !o.Capture {
-		return nil, errors.New("setup requires --capture-user-text to explicitly enable raw input/answer collection for bound projects; read docs/ZCODE_HOOKS.md first")
+		return nil, errors.New("setup requires --capture-user-text to explicitly enable raw input/answer collection for bound projects; read docs/HOOK_SETUP.md first")
 	}
 	if o.Project == "" || o.Scope == "" {
 		return nil, errors.New("setup requires --project DIR --scope project:<identifier>")

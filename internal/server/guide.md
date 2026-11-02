@@ -1,6 +1,15 @@
 # Local decision memory: host integration protocol v1
 
-## ZCode hook workflow (0.1.3-rc.1)
+## Host-adapted hook workflow (0.1.3 candidates)
+
+Use docs/HOOK_SETUP.md as the common installation and validation entry point.
+Identify the actual client, version, execution mode and supported lifecycle
+capabilities. The memory core is host-independent; the first built-in hook
+adapter is ZCode. Other hosts may use the MCP core and require their own verified
+event/configuration adapter. Never pretend another client is ZCode or assume
+that a matching event name implies compatible input/output. Setup/hook require
+an explicit supported --host. Native file configuration is not evidence that
+a hosted cloud orchestrator loaded it.
 
 When installed through user-level setup, hooks capture actual inputs/answers in
 explicitly bound projects and retrieve related business materials before work.

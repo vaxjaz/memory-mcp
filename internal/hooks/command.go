@@ -17,7 +17,7 @@ import (
 func Run(ctx context.Context, args []string) error {
 	cmd := args[0]
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-	host := fs.String("host", "zcode", "verified protocol adapter (currently zcode)")
+	host := fs.String("host", "", "explicit protocol adapter; see docs/HOOK_SETUP.md (currently zcode is implemented)")
 	dir := fs.String("data-dir", "", "memory directory")
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -40,7 +40,10 @@ func Run(ctx context.Context, args []string) error {
 	if fs.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
 	}
-	if *host != "zcode" {
+	if *host == "" && cmd != "doctor" {
+		return errors.New("explicit --host required; identify the actual client and read docs/HOOK_SETUP.md")
+	}
+	if *host != "" && *host != "zcode" {
 		return fmt.Errorf("host %q is not implemented; no guessed adapter is installed", *host)
 	}
 	if cmd == "setup" {
