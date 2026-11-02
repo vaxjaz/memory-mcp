@@ -1,5 +1,46 @@
 # Local decision memory: host integration protocol v1
 
+## Evidence, applicability, and text integrity
+
+Historical memory is guidance: use it to find sources, past reasoning and pitfalls.
+The host owns judgment, investigation and action. Verify present-day code facts
+and consult the original applicable specification/ADR rather than treating a
+memory quotation as normative authority. Match reasons identify actual text or
+resource matches, not a semantic conclusion that the case applies.
+
+Malformed UTF-8 and unpaired Unicode escapes are rejected before tool decoding.
+Writes reject suspicious U+FFFD replacement characters by default. On an encoding
+error, retrieve intact source text and resend; do not remove bad characters,
+guess the wording, or enable allow_replacement_characters merely to force a write.
+That option is only for deliberately recording U+FFFD present in the original.
+Read text_issues warns about suspicious existing evidence without rewriting it.
+Compare body_bytes/body_sha256 and review_note_bytes/review_note_sha256 against
+the source; those receipts verify delivered text, not truth or original intent.
+
+## Host-adapted hook workflow (0.1.3 candidates)
+
+Use docs/HOOK_SETUP.md as the common installation and validation entry point.
+Identify the actual client, version, execution mode and supported lifecycle
+capabilities. The memory core is host-independent; the first built-in hook
+adapter is ZCode. Other hosts may use the MCP core and require their own verified
+event/configuration adapter. Never pretend another client is ZCode or assume
+that a matching event name implies compatible input/output. Setup/hook require
+an explicit supported --host. Native file configuration is not evidence that
+a hosted cloud orchestrator loaded it.
+
+When installed through user-level setup, hooks capture actual inputs/answers in
+explicitly bound projects and retrieve related business materials before work.
+Raw hook events are hidden from ordinary search; include_events opts into them.
+A Stop hook may request ONE host-model continuation to review this turn. Read the
+supplied raw IDs and context, search existing decisions, then save meaningful
+business decisions as cases or revise current cases for corrections. Preserve
+exact words, applicability, uncertainty and history. Ordinary chat may be skipped.
+Call memory_review_done with saved case IDs linked to the raw user source, or
+an empty list and an explanation. A receipt proves bookkeeping, not correctness.
+No second model is embedded; this continuation consumes the host's model budget.
+Configuration, event receipt, case storage, and correct later use are separate
+checks. Missing review completion remains visible in doctor, not silently done.
+
 This MCP is local storage and retrieval, not a model, judge, authorization system,
 conversation listener, or background learner. Use your own reasoning capability.
 No sampling, host-specific API, account, or external model key is needed.
@@ -85,3 +126,4 @@ user evaluates two concrete alternatives, record the exact feedback and context.
 Only then, if helpful, create a limited hypothesis linking the case. When a later
 case conflicts, preserve it and revise the hypothesis rather than overwriting
 history or generalizing a local choice into a universal preference.
+

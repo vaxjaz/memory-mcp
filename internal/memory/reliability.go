@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vaxjaz/memory-mcp/internal/textguard"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,6 +24,12 @@ func digestText(text string) string {
 func withIntegrity(e Entry) Entry {
 	e.BodyBytes = len(e.Body)
 	e.BodySHA256 = digestText(e.Body)
+	e.TextIssues = nil
+	for _, field := range []struct{ name, value string }{{"title", e.Title}, {"body", e.Body}, {"source_ref", e.SourceRef}} {
+		if issue := textguard.Inspect(field.name, field.value); issue != nil {
+			e.TextIssues = append(e.TextIssues, *issue)
+		}
+	}
 	return e
 }
 
@@ -88,8 +95,8 @@ func decodeCursor(value, filter string) (pageCursor, error) {
 func searchFingerprint(in SearchInput) string {
 	b, _ := json.Marshal(struct {
 		Scope, Query, Kind string
-		Global             bool
-	}{in.Scope, strings.Join(strings.Fields(in.Query), " "), in.Kind, in.IncludeGlobal})
+		Global, Events     bool
+	}{in.Scope, strings.Join(strings.Fields(in.Query), " "), in.Kind, in.IncludeGlobal, in.IncludeEvents})
 	return digestText(string(b))
 }
 

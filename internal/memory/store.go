@@ -17,30 +17,32 @@ import (
 
 	"github.com/ncruces/go-sqlite3"
 	"github.com/ncruces/go-sqlite3/driver"
+	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
 
 const SchemaVersion = 2
 
 // Entry bodies are free text. These fields track provenance, not semantic truth.
 type Entry struct {
-	ID          string `json:"id"`
-	RootID      string `json:"root_id"`
-	PreviousID  string `json:"previous_id,omitempty"`
-	Kind        string `json:"kind"`
-	Scope       string `json:"scope"`
-	Title       string `json:"title"`
-	Body        string `json:"body"`
-	BodyBytes   int    `json:"body_bytes"`
-	BodySHA256  string `json:"body_sha256"`
-	Origin      string `json:"origin"`
-	SourceRef   string `json:"source_ref,omitempty"`
-	Host        string `json:"host,omitempty"`
-	Model       string `json:"model,omitempty"`
-	Session     string `json:"session,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	Current     bool   `json:"current"`
-	NeedsReview bool   `json:"needs_review"`
-	Links       []Link `json:"links"`
+	ID          string            `json:"id"`
+	RootID      string            `json:"root_id"`
+	PreviousID  string            `json:"previous_id,omitempty"`
+	Kind        string            `json:"kind"`
+	Scope       string            `json:"scope"`
+	Title       string            `json:"title"`
+	Body        string            `json:"body"`
+	BodyBytes   int               `json:"body_bytes"`
+	BodySHA256  string            `json:"body_sha256"`
+	Origin      string            `json:"origin"`
+	SourceRef   string            `json:"source_ref,omitempty"`
+	Host        string            `json:"host,omitempty"`
+	Model       string            `json:"model,omitempty"`
+	Session     string            `json:"session,omitempty"`
+	CreatedAt   string            `json:"created_at"`
+	Current     bool              `json:"current"`
+	NeedsReview bool              `json:"needs_review"`
+	Links       []Link            `json:"links"`
+	TextIssues  []textguard.Issue `json:"text_issues,omitempty"`
 }
 
 type Link struct {
@@ -49,17 +51,18 @@ type Link struct {
 }
 
 type Draft struct {
-	Kind      string `json:"kind" jsonschema:"record for supplied material; case for a contextual decision; hypothesis is only created through memory_revise"`
-	Scope     string `json:"scope" jsonschema:"Explicit scope: project:<stable project identifier> or global; never infer global applicability"`
-	Title     string `json:"title" jsonschema:"Short descriptive title, not a mandatory preference conclusion"`
-	Body      string `json:"body" jsonschema:"Free text preserving context, alternatives, exact feedback when available, and unknowns; distinguish quotes from inference"`
-	Origin    string `json:"origin" jsonschema:"host_quote (host-relayed quotation, not verified transcript), user_supplied, imported, or model_inference"`
-	SourceRef string `json:"source_ref,omitempty" jsonschema:"Optional source locator; use only a real supplied reference, never invent one"`
-	Host      string `json:"host,omitempty" jsonschema:"Host name if known; omit rather than guess"`
-	Model     string `json:"model,omitempty" jsonschema:"Model identifier if actually known; omit rather than guess"`
-	Session   string `json:"session,omitempty" jsonschema:"Optional originating session identifier"`
-	Links     []Link `json:"links,omitempty" jsonschema:"Optional links to existing supporting, contradicting, or contextual entries"`
-	RequestID string `json:"request_id,omitempty" jsonschema:"Optional stable ID for one logical write. Reuse it with the same payload when retrying an uncertain response; use a new ID for a different write. Scoped to this project or global scope."`
+	Kind                       string `json:"kind" jsonschema:"record for supplied material; case for a contextual decision; hypothesis is only created through memory_revise"`
+	Scope                      string `json:"scope" jsonschema:"Explicit scope: project:<stable project identifier> or global; never infer global applicability"`
+	Title                      string `json:"title" jsonschema:"Short descriptive title, not a mandatory preference conclusion"`
+	Body                       string `json:"body" jsonschema:"Free text preserving context, alternatives, exact feedback when available, and unknowns; distinguish quotes from inference"`
+	Origin                     string `json:"origin" jsonschema:"host_quote (host-relayed quotation, not verified transcript), user_supplied, imported, or model_inference"`
+	SourceRef                  string `json:"source_ref,omitempty" jsonschema:"Optional source locator; use only a real supplied reference, never invent one"`
+	Host                       string `json:"host,omitempty" jsonschema:"Host name if known; omit rather than guess"`
+	Model                      string `json:"model,omitempty" jsonschema:"Model identifier if actually known; omit rather than guess"`
+	Session                    string `json:"session,omitempty" jsonschema:"Optional originating session identifier"`
+	Links                      []Link `json:"links,omitempty" jsonschema:"Optional links to existing supporting, contradicting, or contextual entries"`
+	RequestID                  string `json:"request_id,omitempty" jsonschema:"Optional stable ID for one logical write. Reuse it with the same payload when retrying an uncertain response; use a new ID for a different write. Scoped to this project or global scope."`
+	AllowReplacementCharacters bool   `json:"allow_replacement_characters,omitempty" jsonschema:"Default false: reject U+FFFD which can indicate already damaged input. Set true only to preserve that character intentionally present in the original, never to bypass a corruption error."`
 }
 
 type Store struct {
@@ -110,8 +113,17 @@ func Open(dir string) (*Store, error) {
 	}
 	// Initialize EVERY physical connection, including replacements opened by database/sql.
 	db, err := driver.Open(filepath.Join(abs, "memory.db"), func(conn *sqlite3.Conn) error {
-		return conn.Exec(`PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON;
+		// Independent hook processes may race the first WAL transition. SQLite
+		// can report BUSY for that PRAGMA before its busy handler can wait.
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			err := conn.Exec(`PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON;
 PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;`)
+			if err == nil || !errors.Is(err, sqlite3.BUSY) || time.Now().After(deadline) {
+				return err
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
 	})
 	if err != nil {
 		return nil, err
@@ -181,6 +193,11 @@ PRAGMA user_version=2;`)
 }
 
 func Validate(d Draft) error {
+	for _, field := range []struct{ name, value string }{{"scope", d.Scope}, {"title", d.Title}, {"body", d.Body}, {"source_ref", d.SourceRef}, {"host", d.Host}, {"model", d.Model}, {"session", d.Session}, {"request_id", d.RequestID}} {
+		if err := textguard.Check(field.name, field.value, d.AllowReplacementCharacters); err != nil {
+			return err
+		}
+	}
 	for _, value := range []string{d.Scope, d.Title, d.Body, d.SourceRef, d.Host, d.Model, d.Session, d.RequestID} {
 		if !utf8.ValidString(value) {
 			return errors.New("text fields must be valid UTF-8; raw text is not normalized or repaired")
@@ -459,6 +476,7 @@ type SearchInput struct {
 	Kind          string `json:"kind,omitempty" jsonschema:"Optional record, case, or hypothesis filter"`
 	Limit         int    `json:"limit,omitempty" jsonschema:"Result limit, default 10, maximum 30"`
 	Cursor        string `json:"cursor,omitempty" jsonschema:"Opaque next_cursor from a prior result; keep scope, query, include_global and kind unchanged"`
+	IncludeEvents bool   `json:"include_events,omitempty" jsonschema:"Opt in to raw hook input/output events. Normally hidden so captured chat is not mistaken for a business decision."`
 }
 type Hit struct {
 	ID          string `json:"id"`
@@ -516,6 +534,9 @@ func (s *Store) SearchPage(ctx context.Context, in SearchInput) (SearchPage, err
 		q += " OR scope='global'"
 	}
 	q += ")"
+	if !in.IncludeEvents {
+		q += " AND source_ref NOT LIKE 'hook-event:%'"
+	}
 	if in.Kind != "" {
 		q += " AND kind=?"
 		args = append(args, in.Kind)

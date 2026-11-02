@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vaxjaz/memory-mcp/internal/hooks"
 	"github.com/vaxjaz/memory-mcp/internal/memory"
 	"github.com/vaxjaz/memory-mcp/internal/server"
 )
@@ -43,11 +44,15 @@ Usage:
   memory-mcp export --out FILE [--data-dir DIR]
   memory-mcp backup --out FILE [--data-dir DIR]  Consistent standalone SQLite snapshot
   memory-mcp forget --id ID --yes [--data-dir DIR]
+  memory-mcp setup --host HOST --project DIR --scope project:ID --capture-user-text --review-on-stop
+  memory-mcp hook --host HOST [--data-dir DIR]    User-level event handler (not an MCP server)
+  memory-mcp doctor [--data-dir DIR]             Event/recall/review receipts, no chat bodies
   memory-mcp guide                          Print host integration guide
   memory-mcp config                         Print generic MCP JSON configuration
   memory-mcp version                        Print version
 
 MEMORY_MCP_DATA_DIR overrides the platform default data directory.
+Read docs/HOOK_SETUP.md to select a supported host adapter; do not infer the client from the model name.
 No model, account, network service, or runtime dependencies required.
 Export is plaintext JSON. Forget also removes revisions and dependents;
 it cannot erase exports, host transcripts, backups, or storage snapshots.
@@ -72,6 +77,9 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 		return encoder.Encode(map[string]any{"mcpServers": map[string]any{"decision-memory": map[string]any{"command": path, "args": []string{"serve"}}}})
 	}
 	cmd := args[0]
+	if cmd == "setup" || cmd == "hook" || cmd == "doctor" {
+		return hooks.Run(context.Background(), args)
+	}
 	switch cmd {
 	case "serve", "status", "export", "backup", "forget":
 	default:

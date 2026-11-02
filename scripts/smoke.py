@@ -82,7 +82,8 @@ def main():
         data = str(Path(temp) / "local-data")
         host = Host(binary, data)
         try:
-            assert len(host.request("tools/list", {})["tools"]) == 5
+            discovered = {t["name"] for t in host.request("tools/list", {})["tools"]}
+            assert {"memory_bootstrap", "memory_search", "memory_read", "memory_record", "memory_revise"} <= discovered
             bootstrap = host.tool("memory_bootstrap", {})
             assert bootstrap["integration_protocol"] == "1"
             if args.expected_version:
@@ -155,8 +156,9 @@ def main():
         assert status["entries_including_history"] == 0
         config = json.loads(subprocess.check_output([binary, "config"], text=True))
         assert config["mcpServers"]["decision-memory"]["command"] == binary
-    print("PASS: legacy MCP stdio, 5 tools, revisions, stale evidence, persistence, export, forget, config")
+    print("PASS: legacy MCP stdio tools, revisions, stale evidence, persistence, export, forget, config")
 
 
 if __name__ == "__main__":
     main()
+
