@@ -110,8 +110,17 @@ func Open(dir string) (*Store, error) {
 	}
 	// Initialize EVERY physical connection, including replacements opened by database/sql.
 	db, err := driver.Open(filepath.Join(abs, "memory.db"), func(conn *sqlite3.Conn) error {
-		return conn.Exec(`PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON;
+		// Independent hook processes may race the first WAL transition. SQLite
+		// can report BUSY for that PRAGMA before its busy handler can wait.
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			err := conn.Exec(`PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON;
 PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;`)
+			if err == nil || !errors.Is(err, sqlite3.BUSY) || time.Now().After(deadline) {
+				return err
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
 	})
 	if err != nil {
 		return nil, err
@@ -459,6 +468,7 @@ type SearchInput struct {
 	Kind          string `json:"kind,omitempty" jsonschema:"Optional record, case, or hypothesis filter"`
 	Limit         int    `json:"limit,omitempty" jsonschema:"Result limit, default 10, maximum 30"`
 	Cursor        string `json:"cursor,omitempty" jsonschema:"Opaque next_cursor from a prior result; keep scope, query, include_global and kind unchanged"`
+	IncludeEvents bool   `json:"include_events,omitempty" jsonschema:"Opt in to raw hook input/output events. Normally hidden so captured chat is not mistaken for a business decision."`
 }
 type Hit struct {
 	ID          string `json:"id"`
@@ -516,6 +526,9 @@ func (s *Store) SearchPage(ctx context.Context, in SearchInput) (SearchPage, err
 		q += " OR scope='global'"
 	}
 	q += ")"
+	if !in.IncludeEvents {
+		q += " AND source_ref NOT LIKE 'hook-event:%'"
+	}
 	if in.Kind != "" {
 		q += " AND kind=?"
 		args = append(args, in.Kind)

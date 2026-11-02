@@ -33,8 +33,8 @@ func TestMCPDiscoveryAndLearningRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 5 {
-		t.Fatalf("expected 5 tools, got %d", len(tools.Tools))
+	if len(tools.Tools) != 6 {
+		t.Fatalf("expected 6 tools, got %d", len(tools.Tools))
 	}
 	call := func(name string, args any, output any) {
 		t.Helper()

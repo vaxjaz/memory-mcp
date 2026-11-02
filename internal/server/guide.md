@@ -1,5 +1,20 @@
 # Local decision memory: host integration protocol v1
 
+## ZCode hook workflow (0.1.3-rc.1)
+
+When installed through user-level setup, hooks capture actual inputs/answers in
+explicitly bound projects and retrieve related business materials before work.
+Raw hook events are hidden from ordinary search; include_events opts into them.
+A Stop hook may request ONE host-model continuation to review this turn. Read the
+supplied raw IDs and context, search existing decisions, then save meaningful
+business decisions as cases or revise current cases for corrections. Preserve
+exact words, applicability, uncertainty and history. Ordinary chat may be skipped.
+Call memory_review_done with saved case IDs linked to the raw user source, or
+an empty list and an explanation. A receipt proves bookkeeping, not correctness.
+No second model is embedded; this continuation consumes the host's model budget.
+Configuration, event receipt, case storage, and correct later use are separate
+checks. Missing review completion remains visible in doctor, not silently done.
+
 This MCP is local storage and retrieval, not a model, judge, authorization system,
 conversation listener, or background learner. Use your own reasoning capability.
 No sampling, host-specific API, account, or external model key is needed.
@@ -85,3 +100,4 @@ user evaluates two concrete alternatives, record the exact feedback and context.
 Only then, if helpful, create a limited hypothesis linking the case. When a later
 case conflicts, preserve it and revise the hypothesis rather than overwriting
 history or generalizing a local choice into a universal preference.
+

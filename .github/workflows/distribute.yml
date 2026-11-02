@@ -84,6 +84,7 @@ jobs:
           tar -xzf dist/memory-mcp-*-linux-amd64.tar.gz -C "$RUNNER_TEMP/memory-mcp-check"
           binary=$(find "$RUNNER_TEMP/memory-mcp-check" -type f -name memory-mcp -print -quit)
           python3 tooling/scripts/smoke.py "$binary" --expected-version "$BUILD_VERSION"
+          python3 tooling/scripts/check_zcode_business_flow.py "$binary" --if-supported
 
       - name: Save downloadable build artifacts
         uses: actions/upload-artifact@v4
@@ -117,3 +118,4 @@ jobs:
             -f state="$state" -f context=distribution \
             -f description="Build and distribution: $RESULT" \
             -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" > /dev/null
+

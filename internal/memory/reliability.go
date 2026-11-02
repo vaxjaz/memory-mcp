@@ -88,8 +88,8 @@ func decodeCursor(value, filter string) (pageCursor, error) {
 func searchFingerprint(in SearchInput) string {
 	b, _ := json.Marshal(struct {
 		Scope, Query, Kind string
-		Global             bool
-	}{in.Scope, strings.Join(strings.Fields(in.Query), " "), in.Kind, in.IncludeGlobal})
+		Global, Events     bool
+	}{in.Scope, strings.Join(strings.Fields(in.Query), " "), in.Kind, in.IncludeGlobal, in.IncludeEvents})
 	return digestText(string(b))
 }
 

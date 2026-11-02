@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/vaxjaz/memory-mcp/internal/hooks"
 	"github.com/vaxjaz/memory-mcp/internal/memory"
 	"github.com/vaxjaz/memory-mcp/internal/server"
 )
@@ -43,6 +44,9 @@ Usage:
   memory-mcp export --out FILE [--data-dir DIR]
   memory-mcp backup --out FILE [--data-dir DIR]  Consistent standalone SQLite snapshot
   memory-mcp forget --id ID --yes [--data-dir DIR]
+  memory-mcp setup --host zcode --project DIR --scope project:ID --capture-user-text --review-on-stop
+  memory-mcp hook --host zcode [--data-dir DIR]   User-level event handler (not an MCP server)
+  memory-mcp doctor [--data-dir DIR]             Event/recall/review receipts, no chat bodies
   memory-mcp guide                          Print host integration guide
   memory-mcp config                         Print generic MCP JSON configuration
   memory-mcp version                        Print version
@@ -72,6 +76,9 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 		return encoder.Encode(map[string]any{"mcpServers": map[string]any{"decision-memory": map[string]any{"command": path, "args": []string{"serve"}}}})
 	}
 	cmd := args[0]
+	if cmd == "setup" || cmd == "hook" || cmd == "doctor" {
+		return hooks.Run(context.Background(), args)
+	}
 	switch cmd {
 	case "serve", "status", "export", "backup", "forget":
 	default:

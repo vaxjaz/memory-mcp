@@ -1,6 +1,6 @@
 # 基于宿主 hooks 的无侵入记忆接入设计
 
-状态：设计稿，面向后续版本。v0.1.0 尚未实现本文的 hook、setup、doctor 或项目识别命令。
+状态：长期设计稿。0.1.3-rc.1 已实现 ZCode 的 hook、setup、doctor、显式项目绑定及一次 Stop 宿主整理请求，见 [候选实现与验收](ZCODE_HOOKS.md)。本文其他宿主、自动 Git 身份路由等仍未实现；文中的第一阶段“不使用 Stop 续跑”已由本候选的一次受限继续执行实验取代，不能视为当前行为保证。
 文档核对日期：2026-10-29。文档支持、配置生成、事件实测、真实使用效果分别验收。
 
 ## 目标与范围
@@ -216,3 +216,4 @@ doctor 至少区分：程序可执行、MCP 可连接、hook 已配置、hook �
 - [Qoder IDE hooks](https://docs.qoder.com/extensions/hooks)
 - [ZCode hooks](https://zcode.z.ai/en/docs/hooks)
 - [Cursor hooks](https://cursor.com/docs/hooks)
+
