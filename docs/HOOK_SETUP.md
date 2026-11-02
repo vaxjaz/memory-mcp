@@ -35,7 +35,7 @@ memory-mcp 为不同宿主 Agent 提供同一套项目记忆：记录用户明�
 
 | 客户端／模式 | 当前实现状态 | 接入入口 |
 | --- | --- | --- |
-| ZCode 本地进程 hooks | 已有原生 Go setup/hook/doctor 候选；完整语义整理仍需真实客户端验收 | [ZCode 适配说明](adapters/ZCODE.md) |
+| ZCode 本地进程 hooks | 已有原生 Go setup/hook/doctor；完整语义整理仍需真实客户端验收 | [ZCode 适配说明](adapters/ZCODE.md) |
 | Codex 本地客户端 | 通用 stdio MCP 可接；本包尚无 Codex hook 安装适配器 | 按 README 注册 MCP；宿主 Agent 核对其版本官方文档后，单独实现并验证用户级适配，不冒用 --host zcode |
 | 其他支持 stdio MCP 的宿主 | 通用核心可接；hook 能力按客户端实测 | 由宿主 Agent 依据官方文档完成原生接入，明确已验证范围 |
 | 托管云端编排 | 事件与工具挂载取决于平台支持 | 不能用容器里的 CLI 配置证明云端宿主已加载；按实际平台入口核对 |
