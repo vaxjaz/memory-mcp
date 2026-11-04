@@ -229,7 +229,7 @@ func (s *Store) HookSetRecall(ctx context.Context, id, fingerprint string) error
 type ReviewInput struct {
 	Scope                      string   `json:"scope"`
 	SourceID                   string   `json:"source_id" jsonschema:"Raw user entry ID delivered by a hook. Read it and its contextual links before reviewing."`
-	CaseIDs                    []string `json:"case_ids,omitempty" jsonschema:"Already saved case/revision IDs linked to this source. Empty only when no business decision or correction needs recording."`
+	CaseIDs                    []string `json:"case_ids,omitempty" jsonschema:"Already saved case/revision IDs linked to this source. Empty when no case needs creating or revising, including feedback already covered without a material update; explain why in note."`
 	Note                       string   `json:"note" jsonschema:"Free-text explanation of what was recorded, or why this turn contains no business decision. This is host reasoning, not independent verification."`
 	AllowReplacementCharacters bool     `json:"allow_replacement_characters,omitempty" jsonschema:"Only true for U+FFFD intentionally present in the original note, not for forcing through already damaged text."`
 }

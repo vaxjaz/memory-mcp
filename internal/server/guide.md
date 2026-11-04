@@ -2,11 +2,18 @@
 
 ## Evidence, applicability, and text integrity
 
-Historical memory is guidance: use it to find sources, past reasoning and pitfalls.
-The host owns judgment, investigation and action. Verify present-day code facts
-and consult the original applicable specification/ADR rather than treating a
-memory quotation as normative authority. Match reasons identify actual text or
-resource matches, not a semantic conclusion that the case applies.
+Use retrieved memory in the current task, not just as a separate reading step.
+Read the relevant full entries and sources to establish applicability. Carry
+applicable, source-backed explicit user agreements into your existing work plan
+or delivery approach AND the actual output. Reporting that you searched or read
+memory does not fulfill an agreement. Do not create a separate memory checklist
+or ask the user to reconfirm an already explicit, applicable agreement.
+
+Historical code/data descriptions remain investigation leads: verify current
+facts and consult original applicable specifications/ADRs. Do not turn an
+assistant interpretation into user confirmation. Match reasons locate text or
+resources; they do not establish applicability. The host owns judgment,
+investigation and action. These prompts do not enforce or verify correct use.
 
 Malformed UTF-8 and unpaired Unicode escapes are rejected before tool decoding.
 Writes reject suspicious U+FFFD replacement characters by default. On an encoding
@@ -56,9 +63,16 @@ No sampling, host-specific API, account, or external model key is needed.
    Search excerpts are navigation aids, not complete evidence. Search is literal
    keyword OR matching, newest first, not semantic ranking or an exhaustive audit.
    For Chinese use several short relevant terms. Reformulate queries as needed.
-3. On meaningful feedback, save the user's words WITH the evaluated alternatives,
-   task context, and artifact references if actually available. Do not convert
-   every message into a preference. A case may have no conclusion.
+3. Before saving meaningful feedback as a case, search and read existing full
+   cases and their current revisions. Decide whether this is a new issue, a
+   material addition/correction to the same issue, or already covered with no
+   material change. Create a case for a new issue; revise the current case for
+   an update to the same issue; skip redundant case writes. Do not append a new
+   case or another "remember to use memory" rule just to complete a receipt, or
+   force unrelated contexts into one case. Raw inputs stay preserved even when
+   no case is added. Preserve the user's words WITH evaluated alternatives, task
+   context, applicability, unknowns and artifact references if actually available.
+   Do not convert every message into a preference. A case may have no conclusion.
 4. `host_quote` means you relayed a quotation; the server cannot verify it against
    the host transcript. `user_supplied` is material directly supplied for saving;
    `imported` is an actual imported source. Never claim an exact transcript when
