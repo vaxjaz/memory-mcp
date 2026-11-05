@@ -42,8 +42,14 @@ A Stop hook may request ONE host-model continuation to review this turn. Read th
 supplied raw IDs and context, search existing decisions, then save meaningful
 business decisions as cases or revise current cases for corrections. Preserve
 exact words, applicability, uncertainty and history. Ordinary chat may be skipped.
-Call memory_review_done with saved case IDs linked to the raw user source, or
-an empty list and an explanation. A receipt proves bookkeeping, not correctness.
+Before memory_review_done, inspect the raw source's incoming references (with
+pagination) for current cases in this project already linked to this turn. If a
+case was saved before Stop and needs no update, report its existing ID without
+creating a duplicate. An empty receipt is only for a turn with no linked current
+case and no case needing creation/revision, including feedback covered solely by
+historical cases. With linked_case_receipts, an empty receipt is rejected if a
+current case already links the source; supply the reported IDs and retry. A
+receipt proves bookkeeping, not correctness.
 No second model is embedded; this continuation consumes the host's model budget.
 Configuration, event receipt, case storage, and correct later use are separate
 checks. Missing review completion remains visible in doctor, not silently done.
@@ -66,12 +72,18 @@ No sampling, host-specific API, account, or external model key is needed.
 3. Before saving meaningful feedback as a case, search and read existing full
    cases and their current revisions. Decide whether this is a new issue, a
    material addition/correction to the same issue, or already covered with no
-   material change. Create a case for a new issue; revise the current case for
-   an update to the same issue; skip redundant case writes. Do not append a new
+   material change. Revise only a current case in the same scope for an update
+   to the same issue. If a case is warranted but only relevant records/hypotheses
+   exist, create its first case linking usable material and the current raw
+   source when available; do not change an entry's kind. Create cases for new
+   issues and skip redundant case writes. Do not append a new
    case or another "remember to use memory" rule just to complete a receipt, or
-   force unrelated contexts into one case. Raw inputs stay preserved even when
-   no case is added. Preserve the user's words WITH evaluated alternatives, task
-   context, applicability, unknowns and artifact references if actually available.
+   force unrelated contexts into one case. Raw inputs remain stored only when a
+   hook successfully captured this turn or you explicitly saved them as a record.
+   A stdio connection alone does not capture chat. If the actual supplied wording
+   needs preserving and no captured source is confirmed, explicitly save a record
+   even when skipping a redundant case. Preserve the user's words WITH evaluated
+   alternatives, task context, applicability, unknowns and real artifact references.
    Do not convert every message into a preference. A case may have no conclusion.
 4. `host_quote` means you relayed a quotation; the server cannot verify it against
    the host transcript. `user_supplied` is material directly supplied for saving;
