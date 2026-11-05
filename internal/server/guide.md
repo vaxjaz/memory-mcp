@@ -2,11 +2,18 @@
 
 ## Evidence, applicability, and text integrity
 
-Historical memory is guidance: use it to find sources, past reasoning and pitfalls.
-The host owns judgment, investigation and action. Verify present-day code facts
-and consult the original applicable specification/ADR rather than treating a
-memory quotation as normative authority. Match reasons identify actual text or
-resource matches, not a semantic conclusion that the case applies.
+Use retrieved memory in the current task, not just as a separate reading step.
+Read the relevant full entries and sources to establish applicability. Carry
+applicable, source-backed explicit user agreements into your existing work plan
+or delivery approach AND the actual output. Reporting that you searched or read
+memory does not fulfill an agreement. Do not create a separate memory checklist
+or ask the user to reconfirm an already explicit, applicable agreement.
+
+Historical code/data descriptions remain investigation leads: verify current
+facts and consult original applicable specifications/ADRs. Do not turn an
+assistant interpretation into user confirmation. Match reasons locate text or
+resources; they do not establish applicability. The host owns judgment,
+investigation and action. These prompts do not enforce or verify correct use.
 
 Malformed UTF-8 and unpaired Unicode escapes are rejected before tool decoding.
 Writes reject suspicious U+FFFD replacement characters by default. On an encoding
@@ -17,7 +24,7 @@ Read text_issues warns about suspicious existing evidence without rewriting it.
 Compare body_bytes/body_sha256 and review_note_bytes/review_note_sha256 against
 the source; those receipts verify delivered text, not truth or original intent.
 
-## Host-adapted hook workflow (0.1.3 candidates)
+## Host-adapted hook workflow (0.1.4)
 
 Use docs/HOOK_SETUP.md as the common installation and validation entry point.
 Identify the actual client, version, execution mode and supported lifecycle
@@ -35,8 +42,14 @@ A Stop hook may request ONE host-model continuation to review this turn. Read th
 supplied raw IDs and context, search existing decisions, then save meaningful
 business decisions as cases or revise current cases for corrections. Preserve
 exact words, applicability, uncertainty and history. Ordinary chat may be skipped.
-Call memory_review_done with saved case IDs linked to the raw user source, or
-an empty list and an explanation. A receipt proves bookkeeping, not correctness.
+Before memory_review_done, inspect the raw source's incoming references (with
+pagination) for current cases in this project already linked to this turn. If a
+case was saved before Stop and needs no update, report its existing ID without
+creating a duplicate. An empty receipt is only for a turn with no linked current
+case and no case needing creation/revision, including feedback covered solely by
+historical cases. With linked_case_receipts, an empty receipt is rejected if a
+current case already links the source; supply the reported IDs and retry. A
+receipt proves bookkeeping, not correctness.
 No second model is embedded; this continuation consumes the host's model budget.
 Configuration, event receipt, case storage, and correct later use are separate
 checks. Missing review completion remains visible in doctor, not silently done.
@@ -56,9 +69,22 @@ No sampling, host-specific API, account, or external model key is needed.
    Search excerpts are navigation aids, not complete evidence. Search is literal
    keyword OR matching, newest first, not semantic ranking or an exhaustive audit.
    For Chinese use several short relevant terms. Reformulate queries as needed.
-3. On meaningful feedback, save the user's words WITH the evaluated alternatives,
-   task context, and artifact references if actually available. Do not convert
-   every message into a preference. A case may have no conclusion.
+3. Before saving meaningful feedback as a case, search and read existing full
+   cases and their current revisions. Decide whether this is a new issue, a
+   material addition/correction to the same issue, or already covered with no
+   material change. Revise only a current case in the same scope for an update
+   to the same issue. If a case is warranted but only relevant records/hypotheses
+   exist, create its first case linking usable material and the current raw
+   source when available; do not change an entry's kind. Create cases for new
+   issues and skip redundant case writes. Do not append a new
+   case or another "remember to use memory" rule just to complete a receipt, or
+   force unrelated contexts into one case. Raw inputs remain stored only when a
+   hook successfully captured this turn or you explicitly saved them as a record.
+   A stdio connection alone does not capture chat. If the actual supplied wording
+   needs preserving and no captured source is confirmed, explicitly save a record
+   even when skipping a redundant case. Preserve the user's words WITH evaluated
+   alternatives, task context, applicability, unknowns and real artifact references.
+   Do not convert every message into a preference. A case may have no conclusion.
 4. `host_quote` means you relayed a quotation; the server cannot verify it against
    the host transcript. `user_supplied` is material directly supplied for saving;
    `imported` is an actual imported source. Never claim an exact transcript when

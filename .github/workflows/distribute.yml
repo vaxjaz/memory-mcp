@@ -86,6 +86,7 @@ jobs:
           python3 tooling/scripts/smoke.py "$binary" --expected-version "$BUILD_VERSION"
           python3 tooling/scripts/check_zcode_business_flow.py "$binary" --if-supported
           python3 tooling/scripts/check_text_integrity.py "$binary" --if-supported
+          python3 tooling/scripts/check_review_boundaries.py "$binary" --if-supported
 
       - name: Save downloadable build artifacts
         uses: actions/upload-artifact@v4

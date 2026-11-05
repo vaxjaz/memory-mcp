@@ -229,8 +229,8 @@ func (s *Store) HookSetRecall(ctx context.Context, id, fingerprint string) error
 type ReviewInput struct {
 	Scope                      string   `json:"scope"`
 	SourceID                   string   `json:"source_id" jsonschema:"Raw user entry ID delivered by a hook. Read it and its contextual links before reviewing."`
-	CaseIDs                    []string `json:"case_ids,omitempty" jsonschema:"Already saved case/revision IDs linked to this source. Empty only when no business decision or correction needs recording."`
-	Note                       string   `json:"note" jsonschema:"Free-text explanation of what was recorded, or why this turn contains no business decision. This is host reasoning, not independent verification."`
+	CaseIDs                    []string `json:"case_ids,omitempty" jsonschema:"Current case IDs in this project linked to source_id, including cases saved before Stop. Empty only when no current case links this source and no case needs creating or revising; historical coverage alone can justify skipping."`
+	Note                       string   `json:"note" jsonschema:"Explain cases saved, reused or revised, or why no case needs creating or revising. This is host reasoning, not independent verification."`
 	AllowReplacementCharacters bool     `json:"allow_replacement_characters,omitempty" jsonschema:"Only true for U+FFFD intentionally present in the original note, not for forcing through already damaged text."`
 }
 
@@ -286,12 +286,45 @@ func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, e
 	if len(in.CaseIDs) == 0 {
 		status = "skipped"
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE hook_turns SET status=?,note=? WHERE source_id=? AND status IN ('pending','review_requested')`, status, string(payload), t.SourceID)
+	query := `UPDATE hook_turns SET status=?,note=? WHERE source_id=? AND status IN ('pending','review_requested')`
+	args := []any{status, string(payload), t.SourceID}
+	if len(in.CaseIDs) == 0 {
+		// Check in the UPDATE itself so another process cannot attach a current
+		// case between a preflight check and committing an irreversible skip.
+		query += ` AND NOT EXISTS (SELECT 1 FROM links l JOIN entries e ON e.id=l.entry_id
+ WHERE l.target_id=? AND e.scope=? AND e.kind='case' AND e.current=1)`
+		args = append(args, t.SourceID, t.Scope)
+	}
+	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return t, err
 	}
 	n, _ := result.RowsAffected()
 	current, err := s.HookTurn(ctx, t.SourceID)
+	if err == nil && n == 0 && len(in.CaseIDs) == 0 && (current.Status == "pending" || current.Status == "review_requested") {
+		rows, e := s.db.QueryContext(ctx, `SELECT DISTINCT e.id FROM links l JOIN entries e ON e.id=l.entry_id
+ WHERE l.target_id=? AND e.scope=? AND e.kind='case' AND e.current=1 ORDER BY e.id LIMIT 20`, t.SourceID, t.Scope)
+		if e != nil {
+			return current, e
+		}
+		ids := []string{}
+		for rows.Next() {
+			var id string
+			if e = rows.Scan(&id); e != nil {
+				rows.Close()
+				return current, e
+			}
+			ids = append(ids, id)
+		}
+		e = rows.Err()
+		rows.Close()
+		if e != nil {
+			return current, e
+		}
+		if len(ids) > 0 {
+			return current, fmt.Errorf("source already has current cases in this project: %s; supply these case_ids without creating duplicates; review status was not changed", strings.Join(ids, ", "))
+		}
+	}
 	if err == nil && n == 0 && current.Note != string(payload) {
 		return current, errors.New("review receipt conflict")
 	}
