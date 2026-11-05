@@ -24,7 +24,7 @@ Read text_issues warns about suspicious existing evidence without rewriting it.
 Compare body_bytes/body_sha256 and review_note_bytes/review_note_sha256 against
 the source; those receipts verify delivered text, not truth or original intent.
 
-## Host-adapted hook workflow (0.1.3 candidates)
+## Host-adapted hook workflow (0.1.4)
 
 Use docs/HOOK_SETUP.md as the common installation and validation entry point.
 Identify the actual client, version, execution mode and supported lifecycle
