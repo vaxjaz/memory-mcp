@@ -370,3 +370,53 @@ func TestResourceExplanationIsDeliveredEvenForPreviouslySeenCase(t *testing.T) {
 		}
 	}
 }
+
+func TestStopContinuationChecksReplayWithoutRepeatingReview(t *testing.T) {
+	s, r, p := fixture(t)
+	original := "## 业务报告\n\n详情和编辑沿用原入口。"
+	for _, tc := range []struct {
+		name   string
+		answer string
+		want   string
+	}{
+		{"identical", original, "answer_replay_verified"},
+		{"changed", original + "\n已完成记忆整理。", "answer_replay_mismatch"},
+		{"missing", "", "answer_replay_unverified"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			handle(t, r, event("UserPromptSubmit", p, tc.name, "测试业务答复"))
+			stop := event("Stop", p, tc.name, "")
+			stop.Answer = original
+			out := handle(t, r, stop)
+			turn := latest(t, s, tc.name)
+			if out["decision"] != "block" || turn.AnswerID == "" ||
+				!strings.Contains(out["reason"].(string), "memory_read(id="+turn.AnswerID+")") {
+				t.Fatal("missing replay instruction", out)
+			}
+			if _, err := s.HookReviewDone(testCtx, memory.ReviewInput{
+				Scope: turn.Scope, SourceID: turn.SourceID, Note: "测试空回执",
+			}); err != nil {
+				t.Fatal(err)
+			}
+			stop.StopActiveAlias = true
+			stop.Answer = tc.answer
+			if out := handle(t, r, stop); len(out) != 0 {
+				t.Fatal("replay triggered another continuation", out)
+			}
+			updated := latest(t, s, tc.name)
+			if updated.Status != "skipped" || updated.Attempts != 1 || updated.AnswerID != turn.AnswerID {
+				t.Fatal("replay changed review state", updated)
+			}
+			diagnostics, err := s.HookDiagnostics(testCtx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range diagnostics["recent_events"].([]map[string]string) {
+				if row["session"] == tc.name && row["result"] == tc.want && row["detail"] == turn.SourceID {
+					return
+				}
+			}
+			t.Fatal("missing replay outcome", diagnostics)
+		})
+	}
+}
