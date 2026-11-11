@@ -72,9 +72,10 @@ the source; those receipts verify delivered text, not truth or original intent.
 
 Use docs/HOOK_SETUP.md as the common installation and validation entry point.
 Identify the actual client, version, execution mode and supported lifecycle
-capabilities. The memory core is host-independent; the first built-in hook
-adapter is ZCode. Other hosts may use the MCP core and require their own verified
-event/configuration adapter. Never pretend another client is ZCode or assume
+capabilities. The memory core is host-independent; v0.2.1 implements zcode,
+codex, qoder and qoder-ide adapters. Run `adapters` and read docs/adapters/README.md.
+Protocol regressions do not establish native event delivery or correct business use.
+Other hosts require their own verified adapter. Never pretend another client is ZCode or assume
 that a matching event name implies compatible input/output. Setup/hook require
 an explicit supported --host. Native file configuration is not evidence that
 a hosted cloud orchestrator loaded it.

@@ -3,6 +3,7 @@ module github.com/vaxjaz/memory-mcp
 go 1.26.0
 
 require (
+	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/ncruces/go-sqlite3 v0.35.6
 )

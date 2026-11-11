@@ -11,7 +11,7 @@
 
 ## 安装顺序
 
-1. 识别实际宿主、操作系统与程序执行位置。内置适配器目前只有 ZCode。
+1. 识别实际宿主、版本、操作系统与程序执行位置。运行 `adapters`，按 [适配说明](adapters/README.md) 选择 zcode、codex、qoder 或 qoder-ide；清单列的是协议实现，不是本机原生验收证明。
    Windows 程序使用 Windows 绝对路径，WSL 程序使用 Linux 路径。不要混用两套配置与数据目录。
 2. 从现有用户级 MCP 配置读取该服务的 executable、args 和 data-dir；再用 doctor 核对。
    复用原库，不因默认路径不同而新建空库。多个安装/数据目录有歧义时，先说明候选并确认。
@@ -23,11 +23,13 @@
 6. 对当前项目执行以下命令，所有占位符必须替换为已核实的绝对路径：
 
 ```text
-<新程序> setup --host zcode --config <实际用户配置> --data-dir <原数据目录> --project <实际业务项目目录> --scope project:<稳定标识> --capture-user-text --review-on-stop
+<新程序> setup --host <实际适配器> --config <实际用户配置> --data-dir <原数据目录> --project <实际业务项目目录> --scope project:<稳定标识> --capture-user-text --review-on-stop
 ```
 
 setup 会复用已有服务名；多服务时显式传 `--server-name <已核实服务名>`。
-v0.2.0 setup 同时安装 `--context-check`，升级旧包后也必须重新 setup 更新 managed hooks。
+setup 同时安装 `--context-check`，升级旧包后也必须重新 setup 更新 managed hooks。
+Codex 优先取当前进程的 CODEX_HOME，否则取用户目录下 `.codex/config.toml`；与实际宿主环境不同时必须传实际 `--config`。hooks.json 位于同目录。
+Codex 仍须通过原生 Hooks 管理入口信任新配置，再重启/新建会话。本程序不会修改信任或审批设置。
 它只调整本服务的配置，保留其他服务和用户 hooks。每个需启用的历史项目分别 setup；不得未经确认批量推定绑定。
 
 7. 检查 setup 输出：`binding_verified=true`、正确的 project/scope/data_dir，以及 config/database backup。
@@ -35,10 +37,11 @@ v0.2.0 setup 同时安装 `--context-check`，升级旧包后也必须重新 set
 8. 运行：
 
 ```text
-<新程序> doctor --host zcode --config <实际用户配置> --data-dir <原数据目录> --project <实际业务项目目录> --scope project:<稳定标识> --reviews
+<新程序> doctor --host <实际适配器> --config <实际用户配置> --data-dir <原数据目录> --project <实际业务项目目录> --scope project:<稳定标识> --reviews
 ```
 
 核对 `binding_verified`、`resolved_scope`、`memory_services[].matches_opened_data_dir` 和 `context_check_handlers`。
+查看按宿主区分的 `adapter_receipts`：只有事件名、项目、会话、原生轮次和时间，不含聊天正文。手工回放也会生成回执，必须与真实客户端会话交叉核对；`native_event_verified=false` 不由配置自动改成 true。
 只有 bindings 中存在记录还不够：传入当前实际工作目录，验证最长路径匹配后的 scope。
 
 ## 重启后的真实验收

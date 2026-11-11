@@ -26,6 +26,10 @@ var sourceVersion string
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
+		var hookExit *hooks.HookExitError
+		if errors.As(err, &hookExit) {
+			os.Exit(hookExit.Code)
+		}
 		fmt.Fprintln(os.Stderr, "memory-mcp:", err)
 		os.Exit(1)
 	}
@@ -48,6 +52,7 @@ Usage:
   memory-mcp setup --host HOST --project DIR --scope project:ID --capture-user-text --review-on-stop
   memory-mcp hook --host HOST [--data-dir DIR]    User-level event handler (not an MCP server)
   memory-mcp doctor [--data-dir DIR]             Event/recall/review receipts, no chat bodies
+  memory-mcp adapters                           List implemented host protocols and validation limits
   memory-mcp guide                          Print host integration guide
   memory-mcp config                         Print generic MCP JSON configuration
   memory-mcp version                        Print version
@@ -86,7 +91,7 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 		return encoder.Encode(map[string]any{"mcpServers": map[string]any{"decision-memory": map[string]any{"command": path, "args": []string{"serve"}}}})
 	}
 	cmd := args[0]
-	if cmd == "setup" || cmd == "hook" || cmd == "doctor" {
+	if cmd == "setup" || cmd == "hook" || cmd == "doctor" || cmd == "adapters" {
 		return hooks.Run(context.Background(), args)
 	}
 	switch cmd {

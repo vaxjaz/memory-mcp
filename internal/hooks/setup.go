@@ -17,6 +17,7 @@ import (
 const ManagedID = "decision-memory-hooks-v1"
 
 type SetupOptions struct {
+	Host                                    string
 	Config, DataDir, Project, Scope, Binary string
 	ServerName                              string
 	Capture, Review, DryRun                 bool
@@ -92,6 +93,22 @@ func configData(entry map[string]any) string {
 	}
 	return ""
 }
+
+func isMemoryCommand(command string) bool {
+	if strings.TrimSuffix(strings.ToLower(filepath.Base(command)), ".exe") == "memory-mcp" {
+		return true
+	}
+	actual, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	a, err := canonicalForDoctor(command)
+	if err != nil {
+		return false
+	}
+	b, err := canonicalForDoctor(actual)
+	return err == nil && a != "" && a == b
+}
 func writeFileAtomic(p string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0700); err != nil {
 		return err
@@ -135,6 +152,13 @@ func backupFile(p string, raw []byte) (string, error) {
 	return dest, err
 }
 func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
+	if o.Host == "" {
+		o.Host = "zcode"
+	}
+	adapter, err := AdapterFor(o.Host)
+	if err != nil {
+		return nil, err
+	}
 	if !o.Capture {
 		return nil, errors.New("setup requires --capture-user-text to explicitly enable raw input/answer collection for bound projects; read docs/HOOK_SETUP.md first")
 	}
@@ -144,7 +168,6 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	if err := memory.Validate(memory.Draft{Kind: "record", Scope: o.Scope, Title: "scope check", Body: "scope check", Origin: "host_quote"}); err != nil || o.Scope == "global" {
 		return nil, errors.New("valid project scope required; global is not inferred")
 	}
-	var err error
 	o.Config, err = filepath.Abs(o.Config)
 	if err != nil {
 		return nil, err
@@ -161,7 +184,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	if e == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
 		return nil, errors.New("user configuration must be outside the project; project files are never modified")
 	}
-	c, raw, err := readConfig(o.Config)
+	c, raw, extra, err := readAdapterConfig(adapter, o.Config)
 	if err != nil {
 		return nil, err
 	}
@@ -174,7 +197,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		return nil, err
 	}
 	// Native MCP config suppresses .agents fallback. Preserve those effective servers.
-	if len(servers) == 0 {
+	if len(servers) == 0 && o.Host == "zcode" {
 		home, er := os.UserHomeDir()
 		if er != nil {
 			return nil, er
@@ -209,8 +232,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		for k, v := range servers {
 			if ent, ok := v.(map[string]any); ok {
 				cmd, _ := ent["command"].(string)
-				base := strings.TrimSuffix(strings.ToLower(filepath.Base(cmd)), ".exe")
-				if base == "memory-mcp" {
+				if isMemoryCommand(cmd) {
 					matches = append(matches, k)
 				}
 			}
@@ -221,6 +243,9 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		if len(matches) == 1 {
 			name = matches[0]
 		}
+	}
+	if name == "." || name == ".." || strings.ContainsAny(name, "/\\|\r\n\x00") {
+		return nil, errors.New("unsafe existing MCP server name; reconcile before setup")
 	}
 	entry := map[string]any{}
 	if old, ok := servers[name]; ok {
@@ -299,7 +324,18 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 				if !ok {
 					return nil, errors.New("invalid existing hook handler")
 				}
-				if !managed(handler, name) {
+				if o.Host == "qoder" || o.Host == "qoder-ide" {
+					other := o
+					if o.Host == "qoder" {
+						other.Host = "qoder-ide"
+					} else {
+						other.Host = "qoder"
+					}
+					if handler["command"] == nativeCommand(other, name) {
+						return nil, errors.New("Qoder CLI/IDE share this configuration and another memory hook profile is installed; reconcile it or use separate user configurations, never capture each input twice")
+					}
+				}
+				if !(o.Host == "zcode" && managed(handler, name) || o.Host != "zcode" && handler["command"] == nativeCommand(o, name)) {
 					rest = append(rest, handler)
 				}
 			}
@@ -310,15 +346,22 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		}
 		events[event] = kept
 	}
-	args := []any{"hook", "--host", "zcode", "--data-dir", o.DataDir, "--managed-id", ManagedID + "|" + name, "--server-name", name, "--capture-user-text"}
+	args := []any{"hook", "--host", o.Host, "--data-dir", o.DataDir, "--managed-id", ManagedID + "|" + name, "--server-name", name, "--capture-user-text"}
 	args = append(args, "--context-check")
 	if o.Review {
 		args = append(args, "--review-on-stop")
 	}
 	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "Stop"} {
 		group := map[string]any{"hooks": []any{map[string]any{"type": "process", "command": o.Binary, "args": args, "enabled": true, "timeoutMs": 10000}}}
+		if o.Host != "zcode" {
+			group["hooks"] = []any{map[string]any{"type": "command", "command": nativeCommand(o, name), "timeout": 10}}
+		}
 		if event == "PreToolUse" {
-			group["matcher"] = ".*"
+			if o.Host == "zcode" {
+				group["matcher"] = ".*"
+			} else {
+				group["matcher"] = "*"
+			}
 		}
 		existing, _ := events[event].([]any)
 		events[event] = append(existing, group)
@@ -326,23 +369,29 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	h["enabled"] = true
 	entry["command"] = o.Binary
 	entry["args"] = []string{"serve", "--data-dir", o.DataDir}
-	entry["enable"] = true
+	if o.Host == "zcode" {
+		entry["enable"] = true
+	} else if o.Host == "codex" {
+		entry["enabled"] = true
+	}
 	servers[name] = entry
 	report := map[string]any{"config": o.Config, "data_dir": o.DataDir, "project": o.Project, "scope": o.Scope, "mcp_server": name, "review_on_stop": o.Review, "raw_capture": true, "host_event_verified": false, "restart_required": true, "dry_run": o.DryRun}
 	report["context_check"] = true
+	report["host"] = o.Host
+	report["hook_trust_required"] = adapter.RequiresTrust
+	report["hooks_config"] = adapter.DefaultHooks(o.Config)
 	report["historical_projects_auto_bound"] = false
-	report["verification_command"] = fmt.Sprintf("doctor --host zcode --data-dir %q --project %q --scope %q", o.DataDir, o.Project, o.Scope)
+	report["verification_command"] = fmt.Sprintf("doctor --host %s --data-dir %q --project %q --scope %q", o.Host, o.DataDir, o.Project, o.Scope)
+	plans, err := adapterFiles(adapter, o, c, raw, extra, name, args)
+	if err != nil {
+		return nil, err
+	}
 	if o.DryRun {
 		return report, nil
 	}
 	if err = os.MkdirAll(filepath.Dir(o.Config), 0700); err != nil {
 		return nil, err
 	}
-	backup, err := backupFile(o.Config, raw)
-	if err != nil {
-		return nil, err
-	}
-	report["config_backup"] = backup
 	store, err := memory.Open(o.DataDir)
 	if err != nil {
 		return nil, err
@@ -365,13 +414,13 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		return nil, errors.New("project binding verification failed")
 	}
 	report["binding_verified"] = true
-	b, err := json.MarshalIndent(c, "", "  ")
+	backupsWritten, err := applyConfigPlans(plans)
 	if err != nil {
 		return nil, err
 	}
-	b = append(b, '\n')
-	if err = writeFileAtomic(o.Config, b); err != nil {
-		return nil, err
+	report["config_backups"] = backupsWritten
+	if len(backupsWritten) > 0 {
+		report["config_backup"] = backupsWritten[0]
 	}
 	return report, nil
 }

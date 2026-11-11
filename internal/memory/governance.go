@@ -224,7 +224,7 @@ func userSource(ctx context.Context, q queryer, id, scope string) (Entry, error)
 	if err != nil {
 		return e, err
 	}
-	if e.Scope != scope || e.Kind != "record" || e.Origin == "model_inference" || strings.HasPrefix(e.SourceRef, HookSourcePrefix) && e.SourceRef != HookSourcePrefix+"zcode:user" {
+	if e.Scope != scope || e.Kind != "record" || e.Origin == "model_inference" || strings.HasPrefix(e.SourceRef, HookSourcePrefix) && (e.Host == "" || e.SourceRef != HookSourcePrefix+e.Host+":user") {
 		return e, errors.New("requires an actual user-source record in this scope, not an assistant answer")
 	}
 	return e, nil

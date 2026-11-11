@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"github.com/vaxjaz/memory-mcp/internal/textguard"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,14 +18,17 @@ import (
 
 func Run(ctx context.Context, args []string) error {
 	cmd := args[0]
+	if cmd == "adapters" {
+		return json.NewEncoder(os.Stdout).Encode(Adapters())
+	}
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-	host := fs.String("host", "", "explicit protocol adapter; see docs/HOOK_SETUP.md (currently zcode is implemented)")
+	host := fs.String("host", "", "explicit protocol adapter; run adapters for supported hosts")
 	dir := fs.String("data-dir", "", "memory directory")
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
-	config := fs.String("config", filepath.Join(home, ".zcode", "cli", "config.json"), "user-level ZCode configuration")
+	config := fs.String("config", "", "actual user-level host configuration; defaults by adapter")
 	project := fs.String("project", "", "project directory to bind without modifying it")
 	scope := fs.String("scope", "", "project:<stable identifier>")
 	serverName := fs.String("server-name", "", "explicit MCP server name (use a distinct name and data directory for isolated acceptance)")
@@ -49,15 +51,27 @@ func Run(ctx context.Context, args []string) error {
 	if *host == "" && cmd != "doctor" {
 		return errors.New("explicit --host required; identify the actual client and read docs/HOOK_SETUP.md")
 	}
-	if *host != "" && *host != "zcode" {
-		return fmt.Errorf("host %q is not implemented; no guessed adapter is installed", *host)
+	// Preserve the original read-only doctor default for existing ZCode scripts.
+	// Installation and event processing always require an explicit actual host.
+	if *host == "" && cmd == "doctor" {
+		*host = "zcode"
+	}
+	adapter := Adapter{}
+	if *host != "" {
+		adapter, err = AdapterFor(*host)
+		if err != nil {
+			return err
+		}
+	}
+	if *config == "" && *host != "" {
+		*config = adapter.DefaultConfig(home)
 	}
 	if cmd == "setup" {
 		exe, er := os.Executable()
 		if er != nil {
 			return er
 		}
-		r, er := Setup(ctx, SetupOptions{Config: *config, DataDir: *dir, Project: *project, Scope: *scope, Binary: exe, ServerName: *serverName, Capture: *capture, Review: *review, DryRun: *dry})
+		r, er := Setup(ctx, SetupOptions{Host: *host, Config: *config, DataDir: *dir, Project: *project, Scope: *scope, Binary: exe, ServerName: *serverName, Capture: *capture, Review: *review, DryRun: *dry})
 		if er != nil {
 			return er
 		}
@@ -91,18 +105,34 @@ func Run(ctx context.Context, args []string) error {
 		r["data_dir"] = store.Dir
 		r["config"] = *config
 		r["host_runtime_connected"] = "not determined by configuration files"
-		c, _, er := readConfig(*config)
-		if er != nil {
-			return er
+		c := map[string]any{}
+		if *host != "" {
+			var readErr error
+			c, _, _, readErr = readAdapterConfig(adapter, *config)
+			if readErr != nil {
+				return readErr
+			}
 		}
-		r["config_exists"] = len(c) > 0
+		r["host"] = *host
+		r["hook_trust_required"] = adapter.RequiresTrust
+		r["hooks_config"] = adapter.DefaultHooks(*config)
+		r["protocol_validation"] = adapter.Validation
+		r["native_event_verified"] = false
+		r["native_event_verification"] = "requires matching these receipts to an actual client session; manual replay also creates receipts"
+		receipts, readErr := store.HookAdapterDiagnostics(ctx, *host)
+		if readErr != nil {
+			return readErr
+		}
+		r["adapter_receipts"] = receipts
+		_, statErr := os.Stat(*config)
+		r["config_exists"] = statErr == nil
 		services := []map[string]any{}
 		if mc, ok := c["mcp"].(map[string]any); ok {
 			if servers, ok := mc["servers"].(map[string]any); ok {
 				for name, v := range servers {
 					if ent, ok := v.(map[string]any); ok {
 						command, _ := ent["command"].(string)
-						if strings.TrimSuffix(strings.ToLower(filepath.Base(command)), ".exe") == "memory-mcp" {
+						if isMemoryCommand(command) {
 							data := configData(ent)
 							a, _ := canonicalForDoctor(data)
 							b, _ := canonicalForDoctor(store.Dir)
@@ -126,6 +156,14 @@ func Run(ctx context.Context, args []string) error {
 											for _, arg := range stringArgs(handler["args"]) {
 												if arg == "--context-check" {
 													contextHandlers++
+												}
+											}
+											if *host != "" && *host != "zcode" {
+												for _, service := range services {
+													name, _ := service["server"].(string)
+													if (*serverName == "" || *serverName == name) && handler["command"] == nativeCommand(SetupOptions{Host: *host, Config: *config}, name) {
+														contextHandlers++
+													}
 												}
 											}
 										}
@@ -189,21 +227,33 @@ func Run(ctx context.Context, args []string) error {
 	if len(raw) > 1024*1024 {
 		return fail(errors.New("hook input exceeds 1 MiB"))
 	}
-	var e Event
-	if err = textguard.JSON(raw); err != nil {
-		return fail(err)
-	}
-	if err = json.Unmarshal(raw, &e); err != nil {
+	e, err := adapter.Decode(raw)
+	if err != nil {
 		return fail(err)
 	}
 	deadline, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	r, er := (Runtime{Store: store, Capture: *capture, Review: *review, ServerName: *serverName, ContextCheck: *contextCheck}).Handle(deadline, e)
+	r, er := (Runtime{Host: *host, Store: store, Capture: *capture, Review: *review, ServerName: *serverName, ContextCheck: *contextCheck}).Handle(deadline, e)
 	if er != nil {
 		_ = store.HookLog(ctx, e.Name, "", e.Session, "failed", er.Error())
 		return fail(er)
 	}
-	return json.NewEncoder(os.Stdout).Encode(r)
+	response, err := adapter.Encode(e, r)
+	if err != nil {
+		return fail(err)
+	}
+	if len(response.Stdout) > 0 {
+		if _, err = os.Stdout.Write(response.Stdout); err != nil {
+			return err
+		}
+	}
+	if response.Stderr != "" {
+		fmt.Fprintln(os.Stderr, response.Stderr)
+	}
+	if response.ExitCode != 0 {
+		return &HookExitError{Code: response.ExitCode}
+	}
+	return nil
 }
 
 func canonicalForDoctor(p string) (string, error) {

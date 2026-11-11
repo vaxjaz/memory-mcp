@@ -36,12 +36,14 @@ memory-mcp 为不同宿主 Agent 提供同一套项目记忆：记录用户明�
 | 客户端／模式 | 当前实现状态 | 接入入口 |
 | --- | --- | --- |
 | ZCode 本地进程 hooks | 已有原生 Go setup/hook/doctor；完整语义整理仍需真实客户端验收 | [ZCode 适配说明](adapters/ZCODE.md) |
-| Codex 本地客户端 | 通用 stdio MCP 可接；本包尚无 Codex hook 安装适配器 | 按 README 注册 MCP；宿主 Agent 核对其版本官方文档后，单独实现并验证用户级适配，不冒用 --host zcode |
+| Codex 本地客户端 | 内置 TOML MCP + hooks.json 安装与事件转换；须原生信任与真实事件验收 | [Codex](adapters/CODEX.md) |
+| Qoder CLI | 内置用户 settings.json 安装、事件转换与 exit 2 阻止 | [Qoder](adapters/QODER.md)；本机未安装原生客户端，已验证隔离命令通路 |
+| Qoder IDE/JB | 独立 qoder-ide 协议档案；不从 CLI 测试推断 IDE 已生效 | [Qoder](adapters/QODER.md)；需核对实际版本和用户配置 |
 | 其他支持 stdio MCP 的宿主 | 通用核心可接；hook 能力按客户端实测 | 由宿主 Agent 依据官方文档完成原生接入，明确已验证范围 |
 | 托管云端编排 | 事件与工具挂载取决于平台支持 | 不能用容器里的 CLI 配置证明云端宿主已加载；按实际平台入口核对 |
 | 仅支持远程 HTTP MCP 的宿主 | 本包仅提供 stdio，不能直接连接 | 报告传输限制，不伪造本地连接成功 |
 
-setup 和 hook 必须显式指定真实 --host。当前内置值只有 zcode；它只是适配器能力清单，不是对通用记忆核心的客户端限制。
+setup 和 hook 必须显式指定真实 --host。运行 `adapters` 查看清单；未知宿主明确报错，不回退到 ZCode。安装、事件回执与模型正确使用分别验收。
 
 ## 4. 共同的业务处理原则
 

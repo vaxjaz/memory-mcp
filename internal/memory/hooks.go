@@ -169,6 +169,12 @@ func (s *Store) HookTurn(ctx context.Context, id string) (HookTurn, error) {
 	return scanTurn(s.db.QueryRowContext(ctx, "SELECT "+hookColumns+" FROM hook_turns WHERE source_id=?", id))
 }
 func (s *Store) HookStart(ctx context.Context, scope, session, cwd, prompt, eventID string) (HookTurn, error) {
+	return s.HookStartForHost(ctx, "zcode", scope, session, cwd, prompt, eventID)
+}
+func (s *Store) HookStartForHost(ctx context.Context, host, scope, session, cwd, prompt, eventID string) (HookTurn, error) {
+	if host != "zcode" && host != "codex" && host != "qoder" && host != "qoder-ide" {
+		return HookTurn{}, errors.New("unsupported hook host")
+	}
 	if err := s.InitHooks(ctx); err != nil {
 		return HookTurn{}, err
 	}
@@ -177,7 +183,7 @@ func (s *Store) HookStart(ctx context.Context, scope, session, cwd, prompt, even
 	}
 	if eventID != "" {
 		var id string
-		err := s.db.QueryRowContext(ctx, `SELECT entry_id FROM write_requests WHERE scope=? AND request_id=?`, scope, hookRequestID(session, eventID)).Scan(&id)
+		err := s.db.QueryRowContext(ctx, `SELECT entry_id FROM write_requests WHERE scope=? AND request_id=?`, scope, hostRequestID(host, session, eventID)).Scan(&id)
 		if err == nil {
 			r, e := s.Read(ctx, id)
 			if e != nil {
@@ -194,7 +200,7 @@ func (s *Store) HookStart(ctx context.Context, scope, session, cwd, prompt, even
 			return HookTurn{}, err
 		}
 	}
-	prev, err := s.HookLatest(ctx, scope, session)
+	prev, err := s.HookLatestForHost(ctx, host, scope, session)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return HookTurn{}, err
 	}
@@ -205,9 +211,9 @@ func (s *Store) HookStart(ctx context.Context, scope, session, cwd, prompt, even
 			query = prev.Query
 		}
 	}
-	d := Draft{Kind: "record", Scope: scope, Title: "原始用户输入（尚未整理为业务决策）", Body: prompt, Origin: "host_quote", Host: "zcode", Session: session, SourceRef: HookSourcePrefix + "zcode:user", AllowReplacementCharacters: true}
+	d := Draft{Kind: "record", Scope: scope, Title: "原始用户输入（尚未整理为业务决策）", Body: prompt, Origin: "host_quote", Host: host, Session: session, SourceRef: HookSourcePrefix + host + ":user", AllowReplacementCharacters: true}
 	if eventID != "" {
-		d.RequestID = hookRequestID(session, eventID)
+		d.RequestID = hostRequestID(host, session, eventID)
 	}
 	if prev.AnswerID != "" {
 		if r, e := s.Read(ctx, prev.AnswerID); e == nil && r.Entry.Current {
@@ -228,7 +234,12 @@ func (s *Store) HookAttachAnswer(ctx context.Context, t HookTurn, answer string)
 	if answer == "" || t.AnswerID != "" {
 		return t, nil
 	}
-	e, err := s.Put(ctx, Draft{Kind: "record", Scope: t.Scope, Title: "本轮业务答复原文（宿主交付）", Body: answer, Origin: "host_quote", Host: "zcode", Session: t.Session, SourceRef: HookSourcePrefix + "zcode:assistant", RequestID: "hook-answer:" + t.SourceID, Links: []Link{{TargetID: t.SourceID, Relation: "context"}}, AllowReplacementCharacters: true}, "")
+	source, err := s.Read(ctx, t.SourceID)
+	if err != nil {
+		return t, err
+	}
+	host := source.Entry.Host
+	e, err := s.Put(ctx, Draft{Kind: "record", Scope: t.Scope, Title: "本轮业务答复原文（宿主交付）", Body: answer, Origin: "host_quote", Host: host, Session: t.Session, SourceRef: HookSourcePrefix + host + ":assistant", RequestID: "hook-answer:" + t.SourceID, Links: []Link{{TargetID: t.SourceID, Relation: "context"}}, AllowReplacementCharacters: true}, "")
 	if err != nil {
 		return t, err
 	}

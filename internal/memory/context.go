@@ -71,7 +71,7 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (ContextResult, er
 		if er != nil {
 			return ContextResult{}, er
 		}
-		latest, er := s.HookLatest(ctx, in.Scope, t.Session)
+		latest, er := s.HookLatestForHost(ctx, source.Host, in.Scope, t.Session)
 		if er != nil {
 			return ContextResult{}, er
 		}

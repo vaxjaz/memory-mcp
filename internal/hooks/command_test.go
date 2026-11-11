@@ -13,7 +13,7 @@ func TestInstallAndHookRequireAnExplicitActualHost(t *testing.T) {
 			t.Fatalf("%s defaulted a host: %v", command, err)
 		}
 	}
-	err := Run(context.Background(), []string{"setup", "--host", "codex"})
+	err := Run(context.Background(), []string{"setup", "--host", "unknown-agent"})
 	if err == nil || !strings.Contains(err.Error(), "not implemented") {
 		t.Fatalf("unsupported adapter was guessed: %v", err)
 	}
