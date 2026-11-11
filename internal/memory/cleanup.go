@@ -313,7 +313,12 @@ func (s *Store) DecideCleanup(ctx context.Context, in CleanupDecision, undo bool
 	if undo {
 		after = p.DecidedAt
 	}
-	if source.CreatedAt <= after || !strings.Contains(source.Body, in.ApprovalQuote) {
+	approvalTime, timeErr := time.Parse(time.RFC3339Nano, source.CreatedAt)
+	boundaryTime, boundaryErr := time.Parse(time.RFC3339Nano, after)
+	if timeErr != nil || boundaryErr != nil {
+		return p, errors.New("invalid approval/plan timestamp; inspect the original records before applying cleanup")
+	}
+	if !approvalTime.After(boundaryTime) || !strings.Contains(source.Body, in.ApprovalQuote) {
 		return p, errors.New("approval must quote a new user message after the preview; ask the user to approve this plan")
 	}
 	// Provenance checks cannot establish the meaning of an approval. The host is

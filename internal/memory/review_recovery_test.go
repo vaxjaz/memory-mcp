@@ -218,3 +218,24 @@ func TestReviewVersionMismatchListsRequiredCurrentIDs(t *testing.T) {
 		t.Fatal("missing actionable version diff", err)
 	}
 }
+
+func TestFreshCleanupApprovalComparesInstantsNotTimestampText(t *testing.T) {
+	s := testStore(t)
+	target, current := staleCase(t, s)
+	p, err := s.PreviewCleanup(ctx, CleanupPreview{Scope: target.Scope, Operations: []CleanupOperation{reviewOp(target, current.ID)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	yes := approval(t, s, p.Scope, "Approve this exact source-review plan")
+	// RFC3339Nano drops trailing zeros: .11Z is LATER than .1Z, but sorts
+	// lexically before it. This must not reject a genuinely fresh approval.
+	if _, err = s.db.Exec("UPDATE cleanup_plans SET created_at=? WHERE id=?", "2026-01-01T00:00:00.1Z", p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.db.Exec("UPDATE entries SET created_at=? WHERE id=?", "2026-01-01T00:00:00.11Z", yes.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.DecideCleanup(ctx, CleanupDecision{p.ID, yes.ID, yes.Body}, false); err != nil {
+		t.Fatal("later approval rejected due to fractional precision", err)
+	}
+}
