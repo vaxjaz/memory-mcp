@@ -121,7 +121,7 @@ func TestScopeAndEvidenceBoundaries(t *testing.T) {
 		t.Fatal("model-only confirmation chain allowed")
 	}
 	d = recordDraft()
-	d.Links = []Link{{h.ID, "context"}}
+	d.Links = []Link{{h.ID, "supports"}}
 	if _, err := s.Put(ctx, d, e.ID); err == nil {
 		t.Fatal("lineage cycle allowed")
 	}
@@ -144,6 +144,11 @@ func TestSearchUnicodeLiteralScopeAndConflicts(t *testing.T) {
 	d = hypothesis(e)
 	d.Body = "相反案例：有未保存修改时应该提示。"
 	d.Links[0].Relation = "contradicts"
+	counterEvidence := recordDraft()
+	counterEvidence.Title = "相反情境的实际反馈"
+	counterEvidence.Body = "有未保存内容时用户要求离开前提示。"
+	actual := put(t, s, counterEvidence, "")
+	d.Links = append(d.Links, Link{actual.ID, "supports"})
 	counter := put(t, s, d, "")
 	hits, err := s.Search(ctx, SearchInput{Scope: e.Scope, Query: "确认"})
 	if err != nil {

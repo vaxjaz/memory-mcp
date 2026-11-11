@@ -166,7 +166,7 @@ func TestAdapterSetupPreservationAndIdempotency(t *testing.T) {
 			a, _ := AdapterFor(host)
 			config := a.DefaultConfig(root)
 			os.MkdirAll(filepath.Dir(config), 0700)
-			initial := []byte(`{"theme":"keep","mcpServers":{"other":{"command":"node","args":[]}},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`)
+			initial := []byte(`{"theme":"keep","untouched_integer":9007199254740993,"mcpServers":{"other":{"command":"node","args":[]}},"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`)
 			if host == "codex" {
 				initial = []byte("# keep this comment\nmodel='keep'\n[mcp_servers.other]\ncommand='node'\nargs=[]\n")
 				os.WriteFile(a.DefaultHooks(config), []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`), 0600)
@@ -207,6 +207,9 @@ func TestAdapterSetupPreservationAndIdempotency(t *testing.T) {
 					t.Fatal(string(second), e)
 				}
 			}
+			if host != "codex" && !bytes.Contains(second, []byte("9007199254740993")) {
+				t.Fatal("unrelated integer setting changed precision")
+			}
 			files, _ := os.ReadDir(project)
 			if len(files) != 0 {
 				t.Fatal("project modified")
@@ -240,5 +243,68 @@ func TestConfigApplyRollsBackAndDetectsRace(t *testing.T) {
 	actual, _ := os.ReadFile(one)
 	if string(actual) != "old" {
 		t.Fatal("partial config left behind")
+	}
+}
+
+func TestNativeTurnRedeliveryAndCompletedContinuation(t *testing.T) {
+	for _, host := range []string{"codex", "qoder"} {
+		t.Run(host, func(t *testing.T) {
+			s, r, p := fixture(t)
+			r.Host = host
+			input := event("UserPromptSubmit", p, "s", "实际用户原话")
+			input.TurnID = "original"
+			input.EventID = "delivery-one"
+			handle(t, r, input)
+			first, _ := s.HookNativeTurn(testCtx, host, "project:demo", "s", "original")
+			// Different delivery identifiers for the same native turn cannot append a raw record.
+			before, _ := s.Stats(testCtx)
+			input.EventID = "delivery-two"
+			handle(t, r, input)
+			after, _ := s.Stats(testCtx)
+			if before.Entries != after.Entries {
+				t.Fatal("native input duplicated")
+			}
+			stop := event("Stop", p, "s", "")
+			stop.TurnID = "original"
+			stop.Answer = "实际业务答复"
+			out := handle(t, r, stop)
+			reason, _ := out["reason"].(string)
+			if reason == "" {
+				t.Fatal(out)
+			}
+			// Redelivery between Stop and continuation must not erase the pending token.
+			handle(t, r, input)
+			continuation := event("UserPromptSubmit", p, "s", reason)
+			continuation.TurnID = "synthetic"
+			handle(t, r, continuation)
+			mapped, err := s.HookNativeTurn(testCtx, host, "project:demo", "s", "synthetic")
+			if err != nil || mapped.SourceID != first.SourceID {
+				t.Fatal(mapped, err)
+			}
+			if _, err = s.HookReviewDone(testCtx, memory.ReviewInput{Scope: "project:demo", SourceID: first.SourceID, Note: "原文无值得新增的决定，不生成案例"}); err != nil {
+				t.Fatal(err)
+			}
+			before, _ = s.Stats(testCtx)
+			handle(t, r, continuation)
+			after, _ = s.Stats(testCtx)
+			if before.Entries != after.Entries {
+				t.Fatal("known synthetic retry captured after completion")
+			}
+			// A genuinely new turn can quote the SAME text after review; it is real user evidence.
+			quoted := continuation
+			quoted.TurnID = "real-new-input"
+			handle(t, r, quoted)
+			next, err := s.HookNativeTurn(testCtx, host, "project:demo", "s", quoted.TurnID)
+			if err != nil || next.SourceID == first.SourceID {
+				t.Fatal("new user quote swallowed", next, err)
+			}
+			// Late synthetic retries remain identifiable even after another real input arrived.
+			before, _ = s.Stats(testCtx)
+			handle(t, r, continuation)
+			after, _ = s.Stats(testCtx)
+			if before.Entries != after.Entries {
+				t.Fatal("late synthetic retry captured")
+			}
+		})
 	}
 }

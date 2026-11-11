@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,6 +80,7 @@ func (s *Store) PreviewCleanup(ctx context.Context, in CleanupPreview) (CleanupP
 		return e, nil
 	}
 	seen := map[string]bool{}
+	reviewed := map[string]bool{}
 	for opIndex := range in.Operations {
 		op := in.Operations[opIndex]
 		op.AffectedForReview = nil
@@ -170,6 +170,10 @@ func (s *Store) PreviewCleanup(ctx context.Context, in CleanupPreview) (CleanupP
 			if op.ReplacementID != "" || op.Summary != "" {
 				return p, errors.New("source recheck does not rewrite or replace content")
 			}
+			if _, er = reviewSources(ctx, tx, e, op.EvidenceIDs, reviewed); er != nil {
+				return p, er
+			}
+			reviewed[e.ID] = true
 		default:
 			return p, errors.New("unknown cleanup action")
 		}
@@ -309,7 +313,12 @@ func (s *Store) DecideCleanup(ctx context.Context, in CleanupDecision, undo bool
 	if undo {
 		after = p.DecidedAt
 	}
-	if source.CreatedAt <= after || !strings.Contains(source.Body, in.ApprovalQuote) {
+	approvalTime, timeErr := time.Parse(time.RFC3339Nano, source.CreatedAt)
+	boundaryTime, boundaryErr := time.Parse(time.RFC3339Nano, after)
+	if timeErr != nil || boundaryErr != nil {
+		return p, errors.New("invalid approval/plan timestamp; inspect the original records before applying cleanup")
+	}
+	if !approvalTime.After(boundaryTime) || !strings.Contains(source.Body, in.ApprovalQuote) {
 		return p, errors.New("approval must quote a new user message after the preview; ask the user to approve this plan")
 	}
 	// Provenance checks cannot establish the meaning of an approval. The host is
@@ -500,53 +509,9 @@ func clearReviewedTx(ctx context.Context, tx *sql.Tx, scope, id string, sources 
 	if e.Scope != scope || !e.Current {
 		return errors.New("review target must be current in this scope")
 	}
-	// Require the exact CURRENT version of every linked source. If a source still
-	// needs review, resolve it first. This cannot validate unchanged semantics.
-	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT current.id,current.needs_review FROM links l JOIN entries old ON old.id=l.target_id JOIN entries current ON current.root_id=old.root_id AND current.current=1 WHERE l.entry_id=?`, id)
+	sources, err = reviewSources(ctx, tx, e, sources, nil)
 	if err != nil {
 		return err
-	}
-	expected := map[string]bool{}
-	linkedIDs := []string{}
-	for rows.Next() {
-		var x string
-		var nr bool
-		if err = rows.Scan(&x, &nr); err != nil {
-			rows.Close()
-			return err
-		}
-		if nr {
-			rows.Close()
-			return errors.New("linked source still needs review")
-		}
-		linkedIDs = append(linkedIDs, x)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return err
-	}
-	for _, sourceID := range linkedIDs {
-		source, er := resolveCurrent(ctx, tx, sourceID)
-		if er != nil {
-			return er
-		}
-		if source.State.State != "active" || source.NeedsReview {
-			return errors.New("effective linked source is inactive or needs review")
-		}
-		expected[source.ID] = true
-	}
-	supplied := map[string]bool{}
-	for _, x := range sources {
-		supplied[x] = true
-	}
-	if len(expected) != len(supplied) {
-		return errors.New("recheck every linked source at its current version")
-	}
-	for x := range expected {
-		if !supplied[x] {
-			return fmt.Errorf("missing current source %s", x)
-		}
 	}
 	// A management plan provides an audit trail without creating another case.
 	payload, _ := json.Marshal(sources)

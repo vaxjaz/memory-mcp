@@ -79,6 +79,7 @@ apply 必须引用预览之后新的用户确认原文和精确摘录；升级�
 
 doctor --scope project:ID --reviews 或 memory_search(needs_review=true) 提供分页队列。
 来源改变但结论仍成立时，读当前依据后 recheck_sources，提交所有当前有效来源 ID 和说明，生成复查预览；用户确认后 apply 才清除标记，保存复查账，不制造同文版本。结论变化则 revise。
+v0.2.1：预览即检查上游并列出阻塞 ID；可按上游→下游顺序放在同一计划复查。contradicts/context 可以关联待复查、历史或非活动条目，但不能代替有效依据，亦不会清除被引用条目的警告；详见 [恢复说明](REVIEW_RECOVERY.md)。
 复查保留后续来源变化的失效传播，不能批量清空标志。
 
 回归使用普通结束语、重复决定、旧约定替代、token 症状、范围不同和相反决定等样本。

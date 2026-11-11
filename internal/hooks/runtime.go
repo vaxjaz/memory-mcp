@@ -84,6 +84,9 @@ func (r Runtime) Handle(ctx context.Context, e Event) (map[string]any, error) {
 		return empty, nil
 	}
 	if e.Name == "UserPromptSubmit" {
+		if e.TurnID != "" && (r.host() != "zcode" || e.EventID == "") {
+			e.EventID = e.TurnID
+		}
 		if !r.Capture {
 			log("capture_disabled", "no input collected")
 			return empty, nil

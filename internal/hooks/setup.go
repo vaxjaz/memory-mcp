@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +16,14 @@ import (
 )
 
 const ManagedID = "decision-memory-hooks-v1"
+
+func managedHookArgs(o SetupOptions, name string) []any {
+	args := []any{"hook", "--host", o.Host, "--data-dir", o.DataDir, "--managed-id", ManagedID + "|" + name, "--server-name", name, "--capture-user-text", "--context-check"}
+	if o.Review {
+		args = append(args, "--review-on-stop")
+	}
+	return args
+}
 
 type SetupOptions struct {
 	Host                                    string
@@ -47,7 +56,9 @@ func readConfig(p string) (map[string]any, []byte, error) {
 	if err = textguard.JSON(raw); err != nil {
 		return nil, nil, err
 	}
-	if err = json.Unmarshal(raw, &c); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err = decoder.Decode(&c); err != nil {
 		return nil, nil, err
 	}
 	if c == nil {
@@ -346,11 +357,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		}
 		events[event] = kept
 	}
-	args := []any{"hook", "--host", o.Host, "--data-dir", o.DataDir, "--managed-id", ManagedID + "|" + name, "--server-name", name, "--capture-user-text"}
-	args = append(args, "--context-check")
-	if o.Review {
-		args = append(args, "--review-on-stop")
-	}
+	args := managedHookArgs(o, name)
 	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "Stop"} {
 		group := map[string]any{"hooks": []any{map[string]any{"type": "process", "command": o.Binary, "args": args, "enabled": true, "timeoutMs": 10000}}}
 		if o.Host != "zcode" {
@@ -381,7 +388,8 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	report["hook_trust_required"] = adapter.RequiresTrust
 	report["hooks_config"] = adapter.DefaultHooks(o.Config)
 	report["historical_projects_auto_bound"] = false
-	report["verification_command"] = fmt.Sprintf("doctor --host %s --data-dir %q --project %q --scope %q", o.Host, o.DataDir, o.Project, o.Scope)
+	report["verification_command"] = fmt.Sprintf("doctor --host %s --config %q --data-dir %q --project %q --scope %q", o.Host, o.Config, o.DataDir, o.Project, o.Scope)
+	report["verification_argv"] = []string{o.Binary, "doctor", "--host", o.Host, "--config", o.Config, "--data-dir", o.DataDir, "--project", o.Project, "--scope", o.Scope, "--server-name", name}
 	plans, err := adapterFiles(adapter, o, c, raw, extra, name, args)
 	if err != nil {
 		return nil, err
@@ -419,8 +427,10 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		return nil, err
 	}
 	report["config_backups"] = backupsWritten
-	if len(backupsWritten) > 0 {
-		report["config_backup"] = backupsWritten[0]
+	for _, backup := range backupsWritten {
+		if strings.HasPrefix(backup, o.Config+".memory-mcp-backup-") {
+			report["config_backup"] = backup
+		}
 	}
 	return report, nil
 }

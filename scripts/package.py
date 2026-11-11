@@ -19,6 +19,12 @@ TARGETS = [("linux", "amd64"), ("linux", "arm64"),
            ("darwin", "amd64"), ("darwin", "arm64"), ("windows", "amd64")]
 
 
+def bundle_tar_mode(info):
+    """A Windows cross-builder must still ship runnable Unix executables."""
+    info.mode = 0o755 if info.isdir() or Path(info.name).name == 'memory-mcp' else 0o644
+    return info
+
+
 def normalize_version(value):
     value = value.removeprefix("v")
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", value):
@@ -97,7 +103,7 @@ def main():
             else:
                 archive = dist / (name + ".tar.gz")
                 with tarfile.open(archive, "w:gz") as t:
-                    t.add(bundle, arcname=name)
+                    t.add(bundle, arcname=name, filter=bundle_tar_mode)
             artifacts.append(archive)
             print(f"Built {archive.name}", flush=True)
     source = dist / f"memory-mcp-{version}-source.zip"

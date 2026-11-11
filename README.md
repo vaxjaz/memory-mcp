@@ -3,9 +3,10 @@
 一个通用的 stdio MCP。保存真实协作材料、决策案例和可修正的偏好假设。
 不内置模型、不提供云端服务、不进行网络请求，由宿主 AI 完成理解和学习。
 
-**当前版本：v0.2.1，增加 ZCode、Codex、Qoder CLI 和 Qoder IDE 的宿主 adapter，保留 v0.2.0 的质量与清洗流程。**
+**当前分支：v0.2.2-adapters.1 试用升级包，未发布 GitHub Release。包含 ZCode、Codex、Qoder CLI/IDE adapter，以及此前的复查恢复和检索修复。**
 由宿主 Agent 识别客户端能力并完成用户级接入，目标是记录用户业务决策与纠偏，在后续相关开发中检索使用。
 运行 `memory-mcp adapters` 查看已实现协议与验证边界；接入方式见 [宿主适配说明](docs/adapters/README.md)。其他宿主仍可使用通用 MCP。
+修复范围及实际恢复步骤见 [复查与检索修复](docs/REVIEW_RECOVERY.md)。
 不内置模型；只有筛选出有价值候选时，回合末整理才增加一次宿主模型继续执行。完整业务效果仍需真实验收，不宣称已经实现可靠的偏好学习。
 
 ZCode 启用 `--review-on-stop` 时，宿主在保存案例回执后会收到原样输出业务答复的提示，让报告回到最终答复位置。诊断会比对宿主回传的答复与原文。接入和真实验收见 [ZCode 适配器](docs/adapters/ZCODE.md)。

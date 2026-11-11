@@ -160,7 +160,8 @@ func adapterFiles(a Adapter, o SetupOptions, c map[string]any, raw []byte, x ada
 	if e != nil && !os.IsNotExist(e) {
 		return nil, e
 	}
-	plans = append(plans, configPlan{path, before, launcher(o, args)})
+	// Make the executable launcher available before exposing a new hook entry.
+	plans = append([]configPlan{{path, before, launcher(o, args)}}, plans...)
 	for _, p := range plans {
 		rel, e := filepath.Rel(o.Project, p.Path)
 		if e == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {

@@ -41,6 +41,7 @@ Codex 仍须通过原生 Hooks 管理入口信任新配置，再重启/新建会
 ```
 
 核对 `binding_verified`、`resolved_scope`、`memory_services[].matches_opened_data_dir` 和 `context_check_handlers`。
+使用 setup 输出的 `verification_argv` 执行核对，包含自定义配置与实际服务名，不要丢掉 `--config` 再查错默认文件。Codex/Qoder 还要核对 `managed_launchers`：脚本缺失、被改动或 data-dir 不符时，不能把四条配置引用当成四个有效 handler。它仍只检查文件定义，不证明原生已触发。
 查看按宿主区分的 `adapter_receipts`：只有事件名、项目、会话、原生轮次和时间，不含聊天正文。手工回放也会生成回执，必须与真实客户端会话交叉核对；`native_event_verified=false` 不由配置自动改成 true。
 只有 bindings 中存在记录还不够：传入当前实际工作目录，验证最长路径匹配后的 scope。
 

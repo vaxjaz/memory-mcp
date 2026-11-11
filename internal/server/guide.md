@@ -1,5 +1,30 @@
 # Local decision memory: host integration protocol v2
 
+## v0.2.1 recovery and search fixes
+
+needs_review means an interpretation needs reassessment, not that it cannot be
+corrected. Revise a CURRENT flagged target directly with fresh valid evidence;
+do not clear its flag first or manufacture another case. supports requires a
+current, active, reviewed source. contradicts/context may cite flagged, historical
+or inactive wording without validating it. A case/hypothesis still needs current
+valid record/case grounding (support or provenance); stale background or an
+opposing target alone cannot justify a new conclusion. Factual corrective records
+can be saved with those references even before upstream reassessment.
+
+For unchanged conclusions, recheck_sources validates upstream requirements during
+preview and names the blocking IDs. source_ids acknowledges the effective current
+versions of ALL linked references, including weak references; this does not clear
+their own warnings. preview can contain ordered upstream-then-downstream rechecks.
+Show the exact plan and obtain a fresh user confirmation before apply as before.
+Do not use recheck to bless a changed conclusion; revise with fresh evidence.
+
+memory_context prepare accepts more than eight keywords. Whitespace/duplicates
+are normalized, all distinct terms are searched using bounded literal OR matching,
+and keyword_search reports the exact used terms/status. If normalized query text
+exceeds 2048 bytes, preparation returns the paginated directory and explicitly
+reports directory_only; keyword search was NOT run. Do not infer no matches from
+that state. Refine terms from the task context or inspect directory pages.
+
 ## v0.2.0 workflow (takes precedence over legacy hook descriptions below)
 
 Installation/upgrades MUST follow docs/AGENT_INSTALL.md: identify actual host and execution OS,
@@ -72,7 +97,7 @@ the source; those receipts verify delivered text, not truth or original intent.
 
 Use docs/HOOK_SETUP.md as the common installation and validation entry point.
 Identify the actual client, version, execution mode and supported lifecycle
-capabilities. The memory core is host-independent; v0.2.1 implements zcode,
+capabilities. The memory core is host-independent; v0.2.2-adapters.1 implements zcode,
 codex, qoder and qoder-ide adapters. Run `adapters` and read docs/adapters/README.md.
 Protocol regressions do not establish native event delivery or correct business use.
 Other hosts require their own verified adapter. Never pretend another client is ZCode or assume

@@ -1,6 +1,7 @@
 package hooks
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -65,6 +66,12 @@ func Run(ctx context.Context, args []string) error {
 	}
 	if *config == "" && *host != "" {
 		*config = adapter.DefaultConfig(home)
+	}
+	if *config != "" {
+		*config, err = filepath.Abs(*config)
+		if err != nil {
+			return err
+		}
 	}
 	if cmd == "setup" {
 		exe, er := os.Executable()
@@ -143,6 +150,26 @@ func Run(ctx context.Context, args []string) error {
 			}
 		}
 		r["memory_services"] = services
+		launchers := []map[string]any{}
+		verifiedLauncher := map[string]bool{}
+		if *host != "zcode" {
+			for _, service := range services {
+				name, _ := service["server"].(string)
+				binary, _ := service["command"].(string)
+				data, _ := service["data_dir"].(string)
+				o := SetupOptions{Host: *host, Config: *config, Binary: binary, DataDir: data}
+				path := launcherPath(o, name)
+				actual, readErr := os.ReadFile(path)
+				matches := false
+				for _, review := range []bool{false, true} {
+					o.Review = review
+					matches = matches || readErr == nil && bytes.Equal(actual, launcher(o, managedHookArgs(o, name)))
+				}
+				verifiedLauncher[name] = matches && service["matches_opened_data_dir"] == true
+				launchers = append(launchers, map[string]any{"server": name, "path": path, "exists": readErr == nil, "matches_managed_definition": matches, "uses_opened_data_dir": service["matches_opened_data_dir"], "note": "file/configuration verification only; not proof of native event delivery"})
+			}
+		}
+		r["managed_launchers"] = launchers
 		contextHandlers := 0
 		if h, ok := c["hooks"].(map[string]any); ok {
 			if events, ok := h["events"].(map[string]any); ok {
@@ -161,7 +188,7 @@ func Run(ctx context.Context, args []string) error {
 											if *host != "" && *host != "zcode" {
 												for _, service := range services {
 													name, _ := service["server"].(string)
-													if (*serverName == "" || *serverName == name) && handler["command"] == nativeCommand(SetupOptions{Host: *host, Config: *config}, name) {
+													if verifiedLauncher[name] && (*serverName == "" || *serverName == name) && handler["command"] == nativeCommand(SetupOptions{Host: *host, Config: *config}, name) {
 														contextHandlers++
 													}
 												}

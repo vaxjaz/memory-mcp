@@ -74,10 +74,28 @@ def main():
                 after = cli('status', '--data-dir', str(data))['entries_including_history']
                 assert before == after, 'synthetic continuation captured as a user'
                 hook('Stop', turn='synthetic', stop_hook_active=True)
+                mcp.tool('memory_review_done', dict(scope=scope, source_id=sid, note='After comparing the isolated fixture, no additional case is warranted'))
+                before = cli('status', '--data-dir', str(data))['entries_including_history']
+                hook('UserPromptSubmit', turn='actual-user-quote', prompt=reason)
+                after = cli('status', '--data-dir', str(data))['entries_including_history']
+                assert after == before + 1, 'completed review swallowed a genuinely new user quote'
+                hook('UserPromptSubmit', turn='synthetic', prompt=reason)
+                assert cli('status', '--data-dir', str(data))['entries_including_history'] == after, 'late synthetic retry captured as user'
                 doctor = cli('doctor', '--host', adapter, '--config', str(config), '--data-dir', str(data),
                              '--project', str(project), '--scope', scope)
                 assert doctor['context_check_handlers'] == 4 and doctor['binding_verified'], doctor
                 assert doctor['adapter_receipts'] and not doctor['native_event_verified']
+                assert doctor['managed_launchers'][0]['matches_managed_definition']
+                launcher = Path(doctor['managed_launchers'][0]['path'])
+                original = launcher.read_bytes()
+                launcher.write_bytes(original + b'\n# unexpected modification\n')
+                changed = cli('doctor', '--host', adapter, '--config', str(config), '--data-dir', str(data))
+                assert changed['context_check_handlers'] == 0 and not changed['managed_launchers'][0]['matches_managed_definition']
+                launcher.unlink()
+                missing = cli('doctor', '--host', adapter, '--config', str(config), '--data-dir', str(data))
+                assert missing['context_check_handlers'] == 0 and not missing['managed_launchers'][0]['exists']
+                repaired = cli('setup', *options)
+                assert repaired['verification_argv'][repaired['verification_argv'].index('--config') + 1] == str(config)
                 assert not list(project.iterdir())
             finally:
                 mcp.close()

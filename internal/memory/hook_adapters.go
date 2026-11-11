@@ -19,6 +19,7 @@ func hostRequestID(host, session, event string) string {
 func (s *Store) initAdapterTurns(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS hook_native_turns(host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,turn_id TEXT NOT NULL,source_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,PRIMARY KEY(host,scope,session,turn_id));
 	CREATE TABLE IF NOT EXISTS hook_adapter_receipts(id INTEGER PRIMARY KEY AUTOINCREMENT,host TEXT NOT NULL,event TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,turn_id TEXT NOT NULL,created_at TEXT NOT NULL);
+ CREATE TABLE IF NOT EXISTS hook_continuation_turns(host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,turn_id TEXT NOT NULL,source_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,reason_digest TEXT NOT NULL,PRIMARY KEY(host,scope,session,turn_id));
  CREATE TABLE IF NOT EXISTS hook_continuations(host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,source_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,reason_digest TEXT NOT NULL,PRIMARY KEY(host,scope,session));`)
 	return err
 }
@@ -50,7 +51,7 @@ func (s *Store) HookAdapterDiagnostics(ctx context.Context, host string) ([]map[
 	return out, rows.Err()
 }
 func (s *Store) HookLatestForHost(ctx context.Context, host, scope, session string) (HookTurn, error) {
-	return scanTurn(s.db.QueryRowContext(ctx, "SELECT "+hookColumns+" FROM hook_turns WHERE scope=? AND session=? AND source_id IN (SELECT id FROM entries WHERE host=?) ORDER BY created_at DESC,source_id DESC LIMIT 1", scope, session, host))
+	return scanTurn(s.db.QueryRowContext(ctx, "SELECT "+hookColumns+" FROM hook_turns WHERE scope=? AND session=? AND source_id IN (SELECT id FROM entries WHERE host=?) ORDER BY rowid DESC LIMIT 1", scope, session, host))
 }
 func (s *Store) HookBindTurn(ctx context.Context, host, scope, session, turn, id string) error {
 	if err := s.initAdapterTurns(ctx); err != nil {
@@ -98,6 +99,19 @@ func (s *Store) HookContinuation(ctx context.Context, host, scope, session, prom
 		return HookTurn{}, false, err
 	}
 	var id, hash string
+	if turn != "" {
+		err := s.db.QueryRowContext(ctx, "SELECT source_id,reason_digest FROM hook_continuation_turns WHERE host=? AND scope=? AND session=? AND turn_id=?", host, scope, session, turn).Scan(&id, &hash)
+		if err == nil {
+			if hash != digestText(prompt) {
+				return HookTurn{}, false, errors.New("native continuation turn ID reused with different prompt")
+			}
+			t, er := s.HookTurn(ctx, id)
+			return t, er == nil, er
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return HookTurn{}, false, err
+		}
+	}
 	err := s.db.QueryRowContext(ctx, "SELECT source_id,reason_digest FROM hook_continuations WHERE host=? AND scope=? AND session=?", host, scope, session).Scan(&id, &hash)
 	if errors.Is(err, sql.ErrNoRows) {
 		return HookTurn{}, false, nil
@@ -110,14 +124,29 @@ func (s *Store) HookContinuation(ctx context.Context, host, scope, session, prom
 		return HookTurn{}, false, err
 	}
 	if hash != digestText(prompt) || latest.SourceID != id {
+		// Redelivery of the original input must not erase the outstanding Stop token.
+		if turn != "" {
+			if mapped, er := s.HookNativeTurn(ctx, host, scope, session, turn); er == nil && mapped.SourceID == id {
+				return HookTurn{}, false, nil
+			}
+		}
 		_, err = s.db.ExecContext(ctx, "DELETE FROM hook_continuations WHERE host=? AND scope=? AND session=?", host, scope, session)
 		return HookTurn{}, false, err
+	}
+	t, err := s.HookTurn(ctx, id)
+	if err != nil {
+		return HookTurn{}, false, err
+	}
+	if t.Status != "review_requested" {
+		return HookTurn{}, false, nil
 	}
 	if turn != "" {
 		if err = s.HookBindTurn(ctx, host, scope, session, turn, id); err != nil {
 			return HookTurn{}, false, err
 		}
+		if _, err = s.db.ExecContext(ctx, "INSERT OR IGNORE INTO hook_continuation_turns(host,scope,session,turn_id,source_id,reason_digest)VALUES(?,?,?,?,?,?)", host, scope, session, turn, id, hash); err != nil {
+			return HookTurn{}, false, err
+		}
 	}
-	t, err := s.HookTurn(ctx, id)
-	return t, err == nil, err
+	return t, true, nil
 }
