@@ -219,6 +219,13 @@ func (s *Store) PreviewCleanup(ctx context.Context, in CleanupPreview) (CleanupP
 	if _, err = tx.ExecContext(ctx, "INSERT INTO cleanup_plans(id,scope,operations_json,snapshots_json,before_json,created_at)VALUES(?,?,?,?,?,?)", p.ID, p.Scope, string(ops), string(snaps), string(before), p.CreatedAt); err != nil {
 		return p, err
 	}
+	order, err := nextOperationOrder(ctx, tx)
+	if err != nil {
+		return p, err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE cleanup_plans SET created_order=? WHERE id=?", order, p.ID); err != nil {
+		return p, err
+	}
 	if _, err = tx.ExecContext(ctx, "UPDATE maintenance_policy SET notified_at=changes,initial_due=0 WHERE scope=?", in.Scope); err != nil {
 		return p, err
 	}
@@ -305,21 +312,8 @@ func (s *Store) DecideCleanup(ctx context.Context, in CleanupDecision, undo bool
 	if strings.TrimSpace(in.ApprovalQuote) == "" || len(in.ApprovalQuote) > 8192 {
 		return p, errors.New("exact user approval excerpt required")
 	}
-	source, err := userSource(ctx, s.db, in.ApprovalSourceID, p.Scope)
-	if err != nil {
+	if err = validateCleanupApproval(ctx, s.db, p, in, undo); err != nil {
 		return p, err
-	}
-	after := p.CreatedAt
-	if undo {
-		after = p.DecidedAt
-	}
-	approvalTime, timeErr := time.Parse(time.RFC3339Nano, source.CreatedAt)
-	boundaryTime, boundaryErr := time.Parse(time.RFC3339Nano, after)
-	if timeErr != nil || boundaryErr != nil {
-		return p, errors.New("invalid approval/plan timestamp; inspect the original records before applying cleanup")
-	}
-	if !approvalTime.After(boundaryTime) || !strings.Contains(source.Body, in.ApprovalQuote) {
-		return p, errors.New("approval must quote a new user message after the preview; ask the user to approve this plan")
 	}
 	// Provenance checks cannot establish the meaning of an approval. The host is
 	// responsible for showing the plan and interpreting an explicit user response.
@@ -345,7 +339,7 @@ func (s *Store) DecideCleanup(ctx context.Context, in CleanupDecision, undo bool
 	if err = checkPlanSnapshot(ctx, tx, p, undo); err != nil {
 		return p, err
 	}
-	if _, err = userSource(ctx, tx, in.ApprovalSourceID, p.Scope); err != nil {
+	if err = validateCleanupApproval(ctx, tx, p, in, undo); err != nil {
 		return p, err
 	}
 	for _, op := range p.Operations {
@@ -396,7 +390,11 @@ func (s *Store) DecideCleanup(ctx context.Context, in CleanupDecision, undo bool
 			}
 		}
 	}
-	_, err = tx.ExecContext(ctx, "UPDATE cleanup_plans SET status=?,approval_source_id=?,approval_quote=?,backup_path=?,decided_at=? WHERE id=?", desired, in.ApprovalSourceID, in.ApprovalQuote, backup, time.Now().UTC().Format(time.RFC3339Nano), p.ID)
+	order, err := nextOperationOrder(ctx, tx)
+	if err != nil {
+		return p, err
+	}
+	_, err = tx.ExecContext(ctx, "UPDATE cleanup_plans SET status=?,approval_source_id=?,approval_quote=?,backup_path=?,decided_at=?,decided_order=? WHERE id=?", desired, in.ApprovalSourceID, in.ApprovalQuote, backup, time.Now().UTC().Format(time.RFC3339Nano), order, p.ID)
 	if err != nil {
 		return p, err
 	}

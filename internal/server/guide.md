@@ -17,6 +17,12 @@ versions of ALL linked references, including weak references; this does not clea
 their own warnings. preview can contain ordered upstream-then-downstream rechecks.
 Show the exact plan and obtain a fresh user confirmation before apply as before.
 Do not use recheck to bless a changed conclusion; revise with fresh evidence.
+New cleanup plans use a durable database operation order for approval freshness,
+not wall-clock string ordering. A pre-preview source/retry cannot become a new
+approval; distinct post-preview records remain distinguishable on equal Windows
+timestamps. Old plans without this metadata keep the strict timestamp fallback;
+recreate and show their preview if freshness cannot be established. Stop old
+instances before upgrade; records written by them have no new ordering metadata.
 
 memory_context prepare accepts more than eight keywords. Whitespace/duplicates
 are normalized, all distinct terms are searched using bounded literal OR matching,

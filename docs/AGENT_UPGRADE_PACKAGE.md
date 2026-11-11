@@ -13,7 +13,7 @@
 ## 复用原安装
 
 4. 从**实际生效**的用户级 MCP 配置定位已有服务名、executable、args、data-dir 和 hook 命令。保留原数据目录、现有服务名与所有项目绑定；多个候选存在歧义时只询问缺失信息，不猜默认目录。
-5. 识别使用该库的旧进程。按宿主支持方式停用旧实例，备份完整原数据目录（包括仍存在的 WAL）与配置；不能只拷贝正在使用的主 db 文件。先备份，再运行任何 status/doctor/setup/serve。数据库仍为 v3，不主动修改旧条目的正文或 needs_review。
+5. 识别使用该库的旧进程。按宿主支持方式停用旧实例，备份完整原数据目录（包括仍存在的 WAL）与配置；不能只拷贝正在使用的主 db 文件。先备份，再运行任何 status/doctor/setup/serve。数据库仍为 v3，会补齐兼容的操作顺序元数据，不主动修改旧条目的正文或 needs_review。不要混用旧进程记下的确认与新流程。
 6. 仅更新本 MCP 的 executable 及必要的配套命令路径，原 args/data-dir、其他 MCP、用户 hook、信任配置保持原意。不要留下旧、新两套采集 hook 并行工作。
 7. **ZCode**：使用包内 `docs/AGENT_INSTALL.md` 和 `docs/adapters/ZCODE.md`，对当前实际业务项目重新 setup（显式 `--host zcode`），复用原 data-dir、服务名和稳定 scope，更新本程序管理的 hooks。不要把安装包目录当业务项目，也不要默认绑定全部历史项目。
 8. **Codex**：按 `docs/adapters/CODEX.md` 用 `setup --host codex`，实际 config.toml 由 `--config` 指定，hooks.json 位于同目录。保留其他设置。之前若只有手工 SessionStart 软引导，先读取脚本和配置确认其来源，再移除对应旧项，避免双重提示；不要删除其他用户 hook。新 hook 必须通过原生 Hooks 管理入口信任，再重启/新建会话，本程序不会绕过信任。
@@ -22,7 +22,7 @@
 
 ## 验证与交付
 
-11. 按宿主要求重启服务或新建会话。实际调用 `memory_bootstrap`，核对版本、原 data_dir、features 中的 `review_recovery`、`bounded_literal_search` 和 `host_adapters`。命令行自测只能证明程序可运行，不能代替宿主已经调用新程序。
+11. 按宿主要求重启服务或新建会话。实际调用 `memory_bootstrap`，核对版本、原 data_dir、features 中的 `review_recovery`、`bounded_literal_search`、`host_adapters` 和 `operation_ordered_approvals`。命令行自测只能证明程序可运行，不能代替宿主已经调用新程序。
 12. 使用只读搜索和完整读取核对原项目资料、历史和绑定仍在。doctor 必须带真实 `--host`、实际 `--project/--scope` 验证路由，不能只看 setup 退出码。核对 `context_check_handlers`、服务与 hook 的 data-dir、原生信任和实际新事件。手工回放也会生成 adapter_receipts，需与真实宿主会话交叉核对；native_event_verified 不会因配置存在自动变成 true。
 13. 实际问题按 `docs/REVIEW_RECOVERY.md` 恢复：更正结论直接 revise 并引用新依据；原结论不变则先 recheck 预览，展示后等用户对该方案的新确认，再 apply。升级授权不是批量清标记或清洗授权。不在正式库写虚构验证案例。
 14. 简短报告：升级前后版本、源码提交、程序路径、原数据目录、备份位置、服务名和当前 scope；分别说明配置更新、宿主实际工具版本、项目绑定及尚未实测的部分。失败时保留原库和旧程序，按备份回退配置，不直接修改数据库解除拦截。

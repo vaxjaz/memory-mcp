@@ -137,6 +137,10 @@ PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;`)
 		db.Close()
 		return nil, err
 	}
+	if err := s.initOperationOrder(); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -400,6 +404,13 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO entries (`+columns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, e.ID, e.RootID, e.PreviousID, e.Kind, e.Scope, e.Title, e.Body, e.Origin, e.SourceRef, e.Host, e.Model, e.Session, e.CreatedAt, e.Current, e.NeedsReview)
 	if err != nil {
+		return Entry{}, err
+	}
+	order, err := nextOperationOrder(ctx, tx)
+	if err != nil {
+		return Entry{}, err
+	}
+	if _, err = tx.ExecContext(ctx, "UPDATE entries SET write_order=? WHERE id=?", order, e.ID); err != nil {
 		return Entry{}, err
 	}
 	for _, l := range e.Links {

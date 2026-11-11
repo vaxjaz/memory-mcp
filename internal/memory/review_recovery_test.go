@@ -229,7 +229,7 @@ func TestFreshCleanupApprovalComparesInstantsNotTimestampText(t *testing.T) {
 	yes := approval(t, s, p.Scope, "Approve this exact source-review plan")
 	// RFC3339Nano drops trailing zeros: .11Z is LATER than .1Z, but sorts
 	// lexically before it. This must not reject a genuinely fresh approval.
-	if _, err = s.db.Exec("UPDATE cleanup_plans SET created_at=? WHERE id=?", "2026-01-01T00:00:00.1Z", p.ID); err != nil {
+	if _, err = s.db.Exec("UPDATE cleanup_plans SET created_at=?,created_order=0 WHERE id=?", "2026-01-01T00:00:00.1Z", p.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.db.Exec("UPDATE entries SET created_at=? WHERE id=?", "2026-01-01T00:00:00.11Z", yes.ID); err != nil {
