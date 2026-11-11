@@ -49,7 +49,7 @@ type Entry struct {
 
 type Link struct {
 	TargetID string `json:"target_id" jsonschema:"ID of an existing source entry; read it before interpreting it"`
-	Relation string `json:"relation" jsonschema:"supports, contradicts, or context; this describes the host's interpretation, not verified truth"`
+	Relation string `json:"relation" jsonschema:"supports requires a current active reviewed source; contradicts/context may reference stale or historical material for correction or provenance, without validating it"`
 }
 
 type Draft struct {
@@ -325,7 +325,6 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 		}
 		e.RootID = old.RootID
 	}
-	grounded := false
 	for _, l := range d.Links {
 		source, err := scanEntry(tx.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", l.TargetID))
 		if err != nil {
@@ -334,10 +333,12 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 		if source.Scope != d.Scope && source.Scope != "global" {
 			return Entry{}, errors.New("source outside scope: global hypotheses cannot depend on project data; projects may use their own or global sources")
 		}
-		if !source.Current || source.NeedsReview {
-			return Entry{}, errors.New("source is superseded or needs review; resolve it before deriving new content")
+		if l.Relation == "supports" {
+			if err = requireSupport(ctx, tx, source); err != nil {
+				return Entry{}, err
+			}
 		}
-		if previousID != "" {
+		if previousID != "" && l.Relation == "supports" {
 			// Prevent a revised lineage from depending on itself through its descendants.
 			var cycle int
 			err = tx.QueryRowContext(ctx, `WITH RECURSIVE ancestry(id) AS (
@@ -350,12 +351,6 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 				return Entry{}, errors.New("revision would create a lineage dependency cycle")
 			}
 		}
-		if source.Kind != "hypothesis" {
-			grounded = true
-		}
-	}
-	if d.Kind == "hypothesis" && !grounded {
-		return Entry{}, errors.New("hypothesis needs at least one record or case; repeated model hypotheses alone are not evidence")
 	}
 	if previousID != "" {
 		// Invalidate all dependent interpretations, not just direct children.
@@ -371,6 +366,9 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 		}
 		// A source may have become stale through the invalidation above.
 		for _, l := range d.Links {
+			if l.Relation != "supports" {
+				continue
+			}
 			var stale bool
 			if err = tx.QueryRowContext(ctx, "SELECT needs_review FROM entries WHERE id=?", l.TargetID).Scan(&stale); err != nil {
 				return Entry{}, err
@@ -379,6 +377,26 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 				return Entry{}, errors.New("source became stale during revision")
 			}
 		}
+	}
+	// Check after invalidation too: a background reference may have become stale
+	// while revising its ancestor. It can remain a citation, never sole grounding.
+	grounded := false
+	for _, l := range d.Links {
+		if l.Relation == "contradicts" {
+			continue
+		}
+		source, err := scanEntry(tx.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", l.TargetID))
+		if err != nil {
+			return Entry{}, err
+		}
+		valid, err := validGround(ctx, tx, source)
+		if err != nil {
+			return Entry{}, err
+		}
+		grounded = grounded || valid
+	}
+	if (d.Kind == "hypothesis" || d.Kind == "case" && d.Profile != nil) && !grounded {
+		return Entry{}, errors.New("case/hypothesis needs at least one current active reviewed record or case as support or provenance; stale/context-only invalid material and contradiction targets cannot ground a new conclusion; preserve a factual correction as a record or add fresh evidence")
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO entries (`+columns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, e.ID, e.RootID, e.PreviousID, e.Kind, e.Scope, e.Title, e.Body, e.Origin, e.SourceRef, e.Host, e.Model, e.Session, e.CreatedAt, e.Current, e.NeedsReview)
 	if err != nil {
@@ -541,9 +559,11 @@ func (s *Store) SearchPage(ctx context.Context, in SearchInput) (SearchPage, err
 	if in.Scope != "global" && (!strings.HasPrefix(in.Scope, "project:") || strings.TrimSpace(strings.TrimPrefix(in.Scope, "project:")) == "") {
 		return SearchPage{}, errors.New("explicit scope required")
 	}
-	if len(in.Query) > 2048 {
-		return SearchPage{}, errors.New("query too long")
+	query, words, err := normalizeSearchQuery(in.Query)
+	if err != nil {
+		return SearchPage{}, err
 	}
+	in.Query = query
 	if in.Kind != "" && in.Kind != "record" && in.Kind != "case" && in.Kind != "hypothesis" {
 		return SearchPage{}, errors.New("invalid kind")
 	}
@@ -585,20 +605,12 @@ func (s *Store) SearchPage(ctx context.Context, in SearchInput) (SearchPage, err
 		q += " AND kind=?"
 		args = append(args, in.Kind)
 	}
-	words := strings.Fields(in.Query)
-	if len(words) > 8 {
-		return SearchPage{}, errors.New("at most 8 keywords per search")
-	}
 	if len(words) > 0 {
-		q += " AND ("
-		for i, w := range words {
-			if i > 0 {
-				q += " OR "
-			}
-			q += "instr(lower(title || char(10) || body || char(10) || coalesce((SELECT profile_json FROM entry_profiles p WHERE p.entry_id=entries.id),'')),lower(?))>0"
-			args = append(args, w)
-		}
-		q += ")"
+		// One bounded JSON parameter avoids SQL expression-depth/variable limits
+		// without truncating terms or changing literal OR matching/pagination.
+		encoded, _ := json.Marshal(words)
+		q += " AND EXISTS (SELECT 1 FROM json_each(?) term WHERE instr(lower(title || char(10) || body || char(10) || coalesce((SELECT profile_json FROM entry_profiles p WHERE p.entry_id=entries.id),'')),lower(term.value))>0)"
+		args = append(args, string(encoded))
 	}
 	if in.Cursor != "" {
 		q += " AND (created_at<? OR (created_at=? AND id<?))"

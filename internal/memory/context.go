@@ -16,25 +16,26 @@ type ContextInput struct {
 	SourceID      string   `json:"source_id" jsonschema:"Current actual user source ID; never an assistant answer"`
 	Task          string   `json:"task,omitempty" jsonschema:"Concrete current task reconstructed from project and visible conversation, not just the last user sentence; no private chain of thought"`
 	Questions     string   `json:"questions,omitempty" jsonschema:"Decision, conditions, unresolved references and counterevidence to look for"`
-	Keywords      []string `json:"keywords,omitempty" jsonschema:"Up to eight grounded retrieval terms chosen from current context and prior relevant memories"`
+	Keywords      []string `json:"keywords,omitempty" jsonschema:"Grounded literal retrieval terms chosen from project/conversation and relevant memories; duplicates/whitespace normalized, no eight-term cap. Overlong queries return a directory with explicit keyword-search status"`
 	Cursor        string   `json:"cursor,omitempty"`
 	SelectedIDs   []string `json:"selected_ids,omitempty" jsonschema:"Current applicable entries ACTUALLY read with context_source_id; empty if none applicable"`
 	Decision      string   `json:"decision,omitempty" jsonschema:"Concrete constraints carried into the intended action, or why memory is not applicable; not proof an error was prevented"`
 	SaveCandidate bool     `json:"save_candidate,omitempty" jsonschema:"Only true if this turn contains a material decision, correction or reusable finding passing the forward/reverse admission challenge"`
 }
 type ContextResult struct {
-	Questions       string          `json:"questions"`
-	SourceID        string          `json:"source_id"`
-	Status          string          `json:"status"`
-	Task            string          `json:"task"`
-	Directory       []InventoryItem `json:"directory,omitempty"`
-	NextCursor      string          `json:"next_cursor,omitempty"`
-	Matches         []Hit           `json:"matches,omitempty"`
-	MatchNextCursor string          `json:"match_next_cursor,omitempty"`
-	SelectedIDs     []string        `json:"selected_ids"`
-	Decision        string          `json:"decision"`
-	SaveCandidate   bool            `json:"save_candidate"`
-	Notice          string          `json:"notice"`
+	Questions       string             `json:"questions"`
+	SourceID        string             `json:"source_id"`
+	Status          string             `json:"status"`
+	Task            string             `json:"task"`
+	Directory       []InventoryItem    `json:"directory,omitempty"`
+	NextCursor      string             `json:"next_cursor,omitempty"`
+	Matches         []Hit              `json:"matches,omitempty"`
+	MatchNextCursor string             `json:"match_next_cursor,omitempty"`
+	SelectedIDs     []string           `json:"selected_ids"`
+	Decision        string             `json:"decision"`
+	SaveCandidate   bool               `json:"save_candidate"`
+	Notice          string             `json:"notice"`
+	KeywordSearch   *KeywordSearchInfo `json:"keyword_search,omitempty"`
 }
 
 func (s *Store) RequireContext(ctx context.Context, t HookTurn) error {
@@ -95,9 +96,7 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (ContextResult, er
 		if strings.TrimSpace(in.Task) == "" {
 			return ContextResult{}, errors.New("reconstruct the current task from project and conversation first")
 		}
-		if len(in.Keywords) > 8 {
-			return ContextResult{}, errors.New("at most eight search terms")
-		}
+		query, terms, queryErr := normalizeSearchQuery(strings.Join(in.Keywords, " "))
 		// Re-preparing means the task changed: earlier full-read receipts cannot
 		// silently authorize a different action. Paging the SAME task preserves them.
 		old, er := s.ContextStatus(ctx, in.SourceID)
@@ -127,13 +126,17 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (ContextResult, er
 		if er != nil {
 			return r, er
 		}
-		if len(in.Keywords) > 0 {
-			p, er := s.SearchPage(ctx, SearchInput{Scope: in.Scope, Query: strings.Join(in.Keywords, " "), Limit: 15})
+		r.KeywordSearch = &KeywordSearchInfo{Status: "not_requested", Notice: "No literal search terms supplied; use the paginated directory and context to choose material."}
+		if queryErr != nil {
+			r.KeywordSearch = &KeywordSearchInfo{Status: "directory_only", Notice: queryErr.Error() + ". Directory preparation succeeded; keyword search was NOT executed. This is not evidence that no relevant memory exists. Refine the terms or inspect directory pages."}
+		} else if len(terms) > 0 {
+			p, er := s.SearchPage(ctx, SearchInput{Scope: in.Scope, Query: query, Limit: 15})
 			if er != nil {
 				return r, er
 			}
 			r.Matches = p.Results
 			r.MatchNextCursor = p.NextCursor
+			r.KeywordSearch = &KeywordSearchInfo{Status: "searched", UsedTerms: terms, Query: query, Notice: "All distinct supplied terms were searched with literal OR semantics. No terms were silently truncated; matching is not applicability."}
 		}
 		return r, nil
 	case "skip":
@@ -260,6 +263,22 @@ func (s *Store) CheckWriteContext(ctx context.Context, d Draft) error {
 		return nil
 	}
 	for _, l := range d.Links {
+		if l.Relation == "contradicts" {
+			continue
+		}
+		if l.Relation == "context" {
+			source, err := scanEntry(s.db.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", l.TargetID))
+			if err != nil {
+				return err
+			}
+			valid, err := validGround(ctx, s.db, source)
+			if err != nil {
+				return err
+			}
+			if !valid {
+				continue
+			}
+		}
 		var n int
 		if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM context_checks WHERE source_id=?", l.TargetID).Scan(&n); err != nil {
 			return err
