@@ -311,13 +311,14 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		events[event] = kept
 	}
 	args := []any{"hook", "--host", "zcode", "--data-dir", o.DataDir, "--managed-id", ManagedID + "|" + name, "--server-name", name, "--capture-user-text"}
+	args = append(args, "--context-check")
 	if o.Review {
 		args = append(args, "--review-on-stop")
 	}
 	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "Stop"} {
 		group := map[string]any{"hooks": []any{map[string]any{"type": "process", "command": o.Binary, "args": args, "enabled": true, "timeoutMs": 10000}}}
 		if event == "PreToolUse" {
-			group["matcher"] = "Write|Edit|apply_patch"
+			group["matcher"] = ".*"
 		}
 		existing, _ := events[event].([]any)
 		events[event] = append(existing, group)
@@ -328,6 +329,9 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	entry["enable"] = true
 	servers[name] = entry
 	report := map[string]any{"config": o.Config, "data_dir": o.DataDir, "project": o.Project, "scope": o.Scope, "mcp_server": name, "review_on_stop": o.Review, "raw_capture": true, "host_event_verified": false, "restart_required": true, "dry_run": o.DryRun}
+	report["context_check"] = true
+	report["historical_projects_auto_bound"] = false
+	report["verification_command"] = fmt.Sprintf("doctor --host zcode --data-dir %q --project %q --scope %q", o.DataDir, o.Project, o.Scope)
 	if o.DryRun {
 		return report, nil
 	}
@@ -356,6 +360,11 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	if err = store.HookBind(ctx, o.Project, o.Scope); err != nil {
 		return nil, err
 	}
+	resolved, er := store.HookResolve(ctx, o.Project)
+	if er != nil || resolved != o.Scope {
+		return nil, errors.New("project binding verification failed")
+	}
+	report["binding_verified"] = true
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return nil, err

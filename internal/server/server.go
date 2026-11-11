@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/vaxjaz/memory-mcp/internal/memory"
@@ -22,6 +23,7 @@ type BootstrapOutput struct {
 	Features        []string `json:"features"`
 }
 type ReadInput struct {
+	ContextSourceID string `json:"context_source_id,omitempty" jsonschema:"Current user source from memory_context.prepare; records an actual full read for this turn"`
 	ID              string `json:"id" jsonschema:"Immutable entry ID to inspect; superseded entries report their current revision"`
 	ReferenceCursor string `json:"reference_cursor,omitempty" jsonschema:"references_next_cursor from a prior read of this same ID, to continue incoming references"`
 }
@@ -48,11 +50,17 @@ func New(store *memory.Store, version string) *mcp.Server {
 		return &mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)}
 	}
 	mcp.AddTool(s, &mcp.Tool{Name: "memory_bootstrap", Description: "Start here. Learn the local memory protocol, limits, and how to adapt to your actual host capabilities. Does not modify host configuration.", Annotations: readOnly()}, func(ctx context.Context, req *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, BootstrapOutput, error) {
-		return nil, BootstrapOutput{Version: version, ProtocolVersion: "1", DataDir: store.Dir, Storage: "Local SQLite; no outbound network or model calls", Guide: Guide, SchemaVersion: memory.SchemaVersion, Features: []string{"request_id", "search_cursor", "reference_cursor", "body_sha256", "zcode_hook_workflow", "include_events", "review_receipts", "strict_text_integrity", "resource_recall_reasons", "linked_case_receipts"}}, nil
+		return nil, BootstrapOutput{Version: version, ProtocolVersion: "2", DataDir: store.Dir, Storage: "Local SQLite; no outbound network or model calls", Guide: Guide, SchemaVersion: memory.SchemaVersion, Features: []string{"request_id", "search_cursor", "reference_cursor", "body_sha256", "zcode_hook_workflow", "include_events", "review_receipts", "strict_text_integrity", "resource_recall_reasons", "linked_case_receipts", "quality_admission", "contextual_retrieval", "before_action_check", "case_reuse", "user_approved_cleanup", "cleanup_schedule", "managed_lifecycle", "needs_review_filter"}}, nil
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "memory_record", Description: "Save supplied material or a contextual decision case locally. Before creating a case, search and read existing material. Revise only a current case in the same scope for updates to that issue. If a case is warranted but only records/hypotheses exist, create its first case linking usable sources; do not change their kind. Skip redundant cases and keep unrelated contexts separate. Stdio alone does not capture chat: explicitly save a record if uncaptured original wording needs preserving. Returns an immutable ID, body byte length and SHA-256. Reuse request_id only for retries of the same payload. Does not verify quotes or infer preferences.", Annotations: write()}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.Draft) (*mcp.CallToolResult, memory.Entry, error) {
 		if in.Kind != "record" && in.Kind != "case" {
 			return nil, memory.Entry{}, errors.New("memory_record accepts record or case; use memory_revise for a hypothesis")
+		}
+		if err := memory.ValidateAdmission(in); err != nil {
+			return nil, memory.Entry{}, err
+		}
+		if err := store.CheckWriteContext(ctx, in); err != nil {
+			return nil, memory.Entry{}, err
 		}
 		e, err := store.Put(ctx, in, "")
 		return nil, e, err
@@ -66,11 +74,29 @@ func New(store *memory.Store, version string) *mcp.Server {
 			return nil, memory.ReadResult{}, errors.New("id required")
 		}
 		r, err := store.ReadPage(ctx, in.ID, in.ReferenceCursor)
+		if err == nil && in.ContextSourceID != "" {
+			err = store.TrackContextRead(ctx, in.ContextSourceID, in.ID)
+		}
 		return nil, r, err
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "memory_revise", Description: "Create an evidenced hypothesis or append a correction. Provide full replacement content and links. Reuse draft.request_id only for retries of that exact operation, including previous_id. Preserves history, rejects revision conflicts, and marks dependents for review. Link checks do not prove truth.", Annotations: write()}, func(ctx context.Context, req *mcp.CallToolRequest, in ReviseInput) (*mcp.CallToolResult, memory.Entry, error) {
 		if in.PreviousID == "" && in.Draft.Kind != "hypothesis" {
 			return nil, memory.Entry{}, errors.New("new entries via memory_revise must be hypotheses; otherwise supply previous_id")
+		}
+		if in.PreviousID != "" && in.Draft.Kind == "record" {
+			old, err := store.Read(ctx, in.PreviousID)
+			if err != nil {
+				return nil, memory.Entry{}, err
+			}
+			if strings.HasPrefix(old.Entry.SourceRef, memory.HookSourcePrefix) {
+				return nil, memory.Entry{}, errors.New("captured original events cannot be revised; preserve original wording and create an evidenced case")
+			}
+		}
+		if err := memory.ValidateAdmission(in.Draft); err != nil {
+			return nil, memory.Entry{}, err
+		}
+		if err := store.CheckWriteContext(ctx, in.Draft); err != nil {
+			return nil, memory.Entry{}, err
 		}
 		e, err := store.Put(ctx, in.Draft, in.PreviousID)
 		return nil, e, err
@@ -79,6 +105,7 @@ func New(store *memory.Store, version string) *mcp.Server {
 		t, err := store.HookReviewDone(ctx, in)
 		return nil, t, err
 	})
+	addGovernanceTools(s, store, readOnly(), write())
 	return s
 }
 

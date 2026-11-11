@@ -19,6 +19,7 @@ import (
 
 // version may be supplied by the release linker; source builds use VERSION.
 var version string
+var buildCommit string
 
 //go:embed VERSION
 var sourceVersion string
@@ -50,6 +51,7 @@ Usage:
   memory-mcp guide                          Print host integration guide
   memory-mcp config                         Print generic MCP JSON configuration
   memory-mcp version                        Print version
+  memory-mcp build-info                     Print version and exact packaged source commit
 
 MEMORY_MCP_DATA_DIR overrides the platform default data directory.
 Read docs/HOOK_SETUP.md to select a supported host adapter; do not infer the client from the model name.
@@ -62,6 +64,13 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 	if args[0] == "version" {
 		fmt.Println(buildVersion)
 		return nil
+	}
+	if args[0] == "build-info" {
+		commit := buildCommit
+		if commit == "" {
+			commit = "unknown (unpackaged source build)"
+		}
+		return json.NewEncoder(os.Stdout).Encode(map[string]any{"version": buildVersion, "source_commit": commit, "schema_version": memory.SchemaVersion})
 	}
 	if args[0] == "guide" {
 		fmt.Print(server.Guide)

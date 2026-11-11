@@ -5,6 +5,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -258,7 +259,7 @@ func (s *Store) HookRecallContext(ctx context.Context, scope string, c RecallCon
 		words = append(words, w)
 	}
 	sort.Strings(words)
-	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM entries WHERE current=1 AND scope=? AND source_ref NOT LIKE 'hook-event:%' ORDER BY created_at DESC,id DESC LIMIT 1001", scope)
+	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM entries WHERE current=1 AND scope=? AND source_ref NOT LIKE 'hook-event:%' ORDER BY created_at DESC,id DESC LIMIT 10001", scope)
 	if err != nil {
 		return result, err
 	}
@@ -275,7 +276,7 @@ func (s *Store) HookRecallContext(ctx context.Context, scope string, c RecallCon
 			return result, er
 		}
 		result.Scanned++
-		if result.Scanned > 1000 {
+		if result.Scanned > 10000 {
 			result.Truncated = true
 			break
 		}
@@ -370,6 +371,39 @@ func (s *Store) HookRecallContext(ctx context.Context, scope string, c RecallCon
 	if err != nil {
 		return result, err
 	}
+	// Legacy hooks also respect user-approved replacements. A source match must
+	// never inject a retired conclusion or occupy multiple slots for one lineage.
+	normalized := []ranked{}
+	byRoot := map[string]int{}
+	for _, candidate := range found {
+		e, er := s.ResolveCurrent(ctx, candidate.e.ID)
+		if er != nil {
+			return result, er
+		}
+		if e.State.State != "active" {
+			continue
+		}
+		if e.Profile != nil && e.Profile.ExpiresAt != "" {
+			expiry, _ := time.Parse(time.RFC3339, e.Profile.ExpiresAt)
+			if time.Now().After(expiry) {
+				continue
+			}
+		}
+		candidate.e = e
+		if at, ok := byRoot[e.RootID]; ok {
+			old := &normalized[at]
+			if candidate.tier > old.tier {
+				old.tier = candidate.tier
+			}
+			old.resourceScore += candidate.resourceScore
+			old.taskScore += candidate.taskScore
+			old.reasons = append(old.reasons, candidate.reasons...)
+		} else {
+			byRoot[e.RootID] = len(normalized)
+			normalized = append(normalized, candidate)
+		}
+	}
+	found = normalized
 	// Resource matches rank ahead of arbitrarily many generic prompt matches.
 	sort.SliceStable(found, func(i, j int) bool {
 		a, b := found[i], found[j]

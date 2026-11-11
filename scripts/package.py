@@ -69,6 +69,10 @@ def main():
     dist = (args.output_dir or root / "dist").resolve()
     dist.mkdir(parents=True, exist_ok=True)
     licenses = notices(root)
+    try:
+        source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True, stderr=subprocess.DEVNULL).strip()
+    except (OSError, subprocess.CalledProcessError):
+        source_commit = "unknown"
     artifacts = []
     for target_os, arch in TARGETS:
         name = f"memory-mcp-{version}-{target_os}-{arch}"
@@ -77,7 +81,7 @@ def main():
             bundle.mkdir()
             exe = "memory-mcp.exe" if target_os == "windows" else "memory-mcp"
             env = dict(os.environ, GOOS=target_os, GOARCH=arch, CGO_ENABLED="0")
-            subprocess.run([GO, "build", "-buildvcs=false", "-trimpath", "-ldflags", f"-s -w -X main.version={version}",
+            subprocess.run([GO, "build", "-buildvcs=false", "-trimpath", "-ldflags", f"-s -w -X main.version={version} -X main.buildCommit={source_commit}",
                             "-o", str(bundle / exe), "./cmd/memory-mcp"], cwd=root, env=env, check=True)
             shutil.copy2(root / "README.md", bundle / "README.md")
             shutil.copytree(root / "docs", bundle / "docs")
