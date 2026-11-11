@@ -82,7 +82,7 @@ func reviewSources(ctx context.Context, tx *sql.Tx, e Entry, sources []string, r
 		}
 		expected[source.ID] = true
 	}
-	if (e.Kind == "hypothesis" || e.Kind == "case" && e.Profile != nil) && !grounded {
+	if (e.Kind == "hypothesis" || e.Kind == "case") && !grounded {
 		return nil, fmt.Errorf("recheck target %s has no current active reviewed record/case grounding; revise it with fresh evidence instead of clearing its warning", e.ID)
 	}
 	supplied := map[string]bool{}

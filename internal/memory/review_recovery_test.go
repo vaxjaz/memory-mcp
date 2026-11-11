@@ -203,8 +203,8 @@ func TestRecheckCannotBlessOnlyStaleBackground(t *testing.T) {
 	if _, err := s.Put(ctx, legacyDraft, legacy.ID); err == nil {
 		t.Fatal("stale-only revision became valid")
 	}
-	// For a hypothesis this restriction also applies to historical profiles.
-	s.db.Exec("UPDATE entries SET kind='hypothesis' WHERE id=?", legacy.ID)
+	// Legacy cases without profiles need fresh grounding for recheck too; an
+	// older schema must not turn a stale background citation into valid evidence.
 	if _, err := s.PreviewCleanup(ctx, CleanupPreview{Scope: legacy.Scope, Operations: []CleanupOperation{reviewOp(legacy, target.ID)}}); err == nil || !strings.Contains(err.Error(), "fresh evidence") {
 		t.Fatal("stale-only review became valid", err)
 	}
