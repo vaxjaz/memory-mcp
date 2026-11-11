@@ -121,6 +121,31 @@ func (s *Store) HookResolve(ctx context.Context, cwd string) (string, error) {
 
 const hookColumns = "source_id,scope,session,cwd,query_text,answer_id,attempts,status,recall,note,created_at"
 
+type HookBinding struct {
+	Path  string `json:"path"`
+	Scope string `json:"scope"`
+}
+
+func (s *Store) HookBindings(ctx context.Context) ([]HookBinding, error) {
+	if err := s.InitHooks(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT path,scope FROM hook_bindings ORDER BY path")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []HookBinding{}
+	for rows.Next() {
+		var b HookBinding
+		if err = rows.Scan(&b.Path, &b.Scope); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
 func scanTurn(row rowScanner) (HookTurn, error) {
 	var t HookTurn
 	err := row.Scan(&t.SourceID, &t.Scope, &t.Session, &t.CWD, &t.Query, &t.AnswerID, &t.Attempts, &t.Status, &t.Recall, &t.Note, &t.Created)
@@ -227,6 +252,7 @@ func (s *Store) HookSetRecall(ctx context.Context, id, fingerprint string) error
 }
 
 type ReviewInput struct {
+	ReusedCaseIDs              []string `json:"reused_case_ids,omitempty" jsonschema:"Existing current cases fully covering this turn, without changing their body or source links; read first. Does not create revisions or invalidate dependents."`
 	Scope                      string   `json:"scope"`
 	SourceID                   string   `json:"source_id" jsonschema:"Raw user entry ID delivered by a hook. Read it and its contextual links before reviewing."`
 	CaseIDs                    []string `json:"case_ids,omitempty" jsonschema:"Current case IDs in this project linked to source_id, including cases saved before Stop. Empty only when no current case links this source and no case needs creating or revising; historical coverage alone can justify skipping."`
@@ -251,13 +277,26 @@ func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, e
 	if strings.TrimSpace(in.Note) == "" {
 		return t, errors.New("review note required")
 	}
-	if len(in.CaseIDs) > 20 || len(in.Note) > 8192 {
+	if len(in.CaseIDs)+len(in.ReusedCaseIDs) > 20 || len(in.Note) > 8192 {
 		return t, errors.New("review receipt too large")
 	}
 	if in.CaseIDs == nil {
 		in.CaseIDs = []string{}
 	}
-	payload, _ := json.Marshal(map[string]any{"case_ids": in.CaseIDs, "explanation": in.Note})
+	for _, id := range in.ReusedCaseIDs {
+		r, e := s.Read(ctx, id)
+		if e != nil {
+			return t, e
+		}
+		if !r.Entry.Current || r.Entry.Scope != t.Scope || r.Entry.Kind != "case" || r.Entry.NeedsReview || r.Entry.State.State != "active" {
+			return t, errors.New("reused case must be current, active, source-reviewed and in this project")
+		}
+	}
+	receipt := map[string]any{"case_ids": in.CaseIDs, "explanation": in.Note}
+	if len(in.ReusedCaseIDs) > 0 {
+		receipt["reused_case_ids"] = in.ReusedCaseIDs
+	}
+	payload, _ := json.Marshal(receipt)
 	if t.Status == "reviewed" || t.Status == "skipped" {
 		if t.Note == string(payload) {
 			return t, nil
@@ -269,7 +308,7 @@ func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, e
 		if e != nil {
 			return t, e
 		}
-		if !r.Entry.Current || r.Entry.Scope != t.Scope || r.Entry.Kind != "case" {
+		if !r.Entry.Current || r.Entry.Scope != t.Scope || r.Entry.Kind != "case" || r.Entry.State.State != "active" {
 			return t, errors.New("receipt must reference a current case in the source project")
 		}
 		linked := false
@@ -283,7 +322,7 @@ func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, e
 		}
 	}
 	status := "reviewed"
-	if len(in.CaseIDs) == 0 {
+	if len(in.CaseIDs) == 0 && len(in.ReusedCaseIDs) == 0 {
 		status = "skipped"
 	}
 	query := `UPDATE hook_turns SET status=?,note=? WHERE source_id=? AND status IN ('pending','review_requested')`
@@ -295,14 +334,39 @@ func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, e
  WHERE l.target_id=? AND e.scope=? AND e.kind='case' AND e.current=1)`
 		args = append(args, t.SourceID, t.Scope)
 	}
-	result, err := s.db.ExecContext(ctx, query, args...)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return t, err
+	}
+	defer tx.Rollback()
+	for _, id := range append(append([]string{}, in.CaseIDs...), in.ReusedCaseIDs...) {
+		var current bool
+		var scope, kind, root string
+		var needs bool
+		if err = tx.QueryRowContext(ctx, "SELECT current,scope,kind,root_id,needs_review FROM entries WHERE id=?", id).Scan(&current, &scope, &kind, &root, &needs); err != nil {
+			return t, err
+		}
+		m, er := stateFor(ctx, tx, root)
+		if er != nil {
+			return t, er
+		}
+		if !current || scope != t.Scope || kind != "case" || m.State != "active" {
+			return t, errors.New("case changed while recording receipt; read its current version")
+		}
+		for _, reused := range in.ReusedCaseIDs {
+			if reused == id && needs {
+				return t, errors.New("reused case became stale")
+			}
+		}
+	}
+	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return t, err
 	}
 	n, _ := result.RowsAffected()
-	current, err := s.HookTurn(ctx, t.SourceID)
+	current, err := scanTurn(tx.QueryRowContext(ctx, "SELECT "+hookColumns+" FROM hook_turns WHERE source_id=?", t.SourceID))
 	if err == nil && n == 0 && len(in.CaseIDs) == 0 && (current.Status == "pending" || current.Status == "review_requested") {
-		rows, e := s.db.QueryContext(ctx, `SELECT DISTINCT e.id FROM links l JOIN entries e ON e.id=l.entry_id
+		rows, e := tx.QueryContext(ctx, `SELECT DISTINCT e.id FROM links l JOIN entries e ON e.id=l.entry_id
  WHERE l.target_id=? AND e.scope=? AND e.kind='case' AND e.current=1 ORDER BY e.id LIMIT 20`, t.SourceID, t.Scope)
 		if e != nil {
 			return current, e
@@ -328,7 +392,17 @@ func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, e
 	if err == nil && n == 0 && current.Note != string(payload) {
 		return current, errors.New("review receipt conflict")
 	}
-	return current, err
+	if err == nil && n > 0 {
+		for _, id := range in.ReusedCaseIDs {
+			if _, e := tx.ExecContext(ctx, "INSERT OR IGNORE INTO turn_case_reuse(source_id,case_id,note)VALUES(?,?,?)", t.SourceID, id, in.Note); e != nil {
+				return current, e
+			}
+		}
+	}
+	if err != nil {
+		return current, err
+	}
+	return current, tx.Commit()
 }
 func (s *Store) HookLog(ctx context.Context, event, scope, session, result, detail string) error {
 	if err := s.InitHooks(ctx); err != nil {

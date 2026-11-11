@@ -9,6 +9,7 @@ import queue
 import subprocess
 import tempfile
 import threading
+from smoke import fixture_profile
 
 
 class Wire:
@@ -81,6 +82,10 @@ def main():
                 return
             scope = 'project:encoding-test'
             draft = {'kind': 'case', 'scope': scope, 'title': '完整中文', 'body': ('关键信息、助手、同级——、须追到、用户未表态😀\n' * 300) + '末尾两个空格  ', 'origin': 'model_inference', 'request_id': 'unicode-fragmented'}
+            if 'quality_admission' in boot.get('features', []):
+                source = wire.tool('memory_record', {'kind': 'record', 'scope': scope, 'title': '编码测试原材料', 'body': draft['body'], 'origin': 'imported'})
+                draft['profile'] = fixture_profile()
+                draft['links'] = [{'target_id': source['id'], 'relation': 'supports'}]
             good = wire.tool('memory_record', draft, fragmented=True)
             assert good['body'] == draft['body']
             assert good['body_bytes'] == len(draft['body'].encode('utf-8'))

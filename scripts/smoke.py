@@ -10,6 +10,13 @@ import tempfile
 import threading
 
 
+def fixture_profile():
+    """Explicit synthetic fixture metadata, never installed into a user's library."""
+    return {"class": "temporary", "future_use": "Exercise repeated fixture decisions in the isolated regression workspace",
+            "counter_check": "Synthetic regression material, not a real user preference or production rule",
+            "applicability": "This disposable test workspace only", "boundary": "Must never be generalized to a real project"}
+
+
 class Host:
     def __init__(self, binary, data_dir):
         self.p = subprocess.Popen([binary, "serve", "--data-dir", data_dir],
@@ -85,7 +92,7 @@ def main():
             discovered = {t["name"] for t in host.request("tools/list", {})["tools"]}
             assert {"memory_bootstrap", "memory_search", "memory_read", "memory_record", "memory_revise"} <= discovered
             bootstrap = host.tool("memory_bootstrap", {})
-            assert bootstrap["integration_protocol"] == "1"
+            assert bootstrap["integration_protocol"] in ("1", "2")
             if args.expected_version:
                 assert bootstrap["version"] == args.expected_version
 
@@ -103,6 +110,8 @@ def main():
             hypothesis = {"kind": "hypothesis", "scope": draft["scope"], "title": "局部假设",
                           "body": "当前表单可能偏好明确保存反馈，其他场景未知。", "origin": "model_inference",
                           "links": [{"target_id": original["id"], "relation": "supports"}]}
+            if "quality_admission" in bootstrap.get("features", []):
+                hypothesis["profile"] = fixture_profile()
             inferred = host.tool("memory_revise", {"draft": hypothesis})
             assert len(host.tool("memory_search", {"scope": draft["scope"], "query": "保存"})["results"]) == 2
             if reliable_storage:

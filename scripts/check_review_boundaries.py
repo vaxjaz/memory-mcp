@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 
 from check_text_integrity import Wire
+from smoke import fixture_profile
 
 
 def main():
@@ -27,6 +28,7 @@ def main():
         wire = Wire(binary, data, env)
         try:
             boot = wire.tool('memory_bootstrap', {})
+            admitted = {'profile': fixture_profile()} if 'quality_admission' in boot.get('features', []) else {}
             if args.if_supported and 'linked_case_receipts' not in boot.get('features', []):
                 print('SKIP: historical release predates linked-case receipt protection')
                 return
@@ -62,7 +64,7 @@ def main():
 
             def case_draft(title, body, *sources):
                 return {'kind': 'case', 'scope': scope, 'title': title, 'body': body,
-                        'origin': 'model_inference', 'links': [{'target_id': i, 'relation': 'context'} for i in sources]}
+                        'origin': 'model_inference', 'links': [{'target_id': i, 'relation': 'context'} for i in sources], **admitted}
 
             # Only a record exists: kinds cannot be converted, but a first case
             # can cite that material and the newly captured original.
@@ -72,7 +74,7 @@ def main():
             stop = hook('Stop', 'record-only', last_assistant_message='测试客户端准备整理反馈。')
             assert '同项目且 current=true 的已有 case' in stop['reason']
             assert '首个案例' in stop['reason']
-            rejected = wire.tool('memory_revise', {'previous_id': old['id'], 'draft': case_draft('测试转换', '不可直接改类型')}, error=True)
+            rejected = wire.tool('memory_revise', {'previous_id': old['id'], 'draft': case_draft('测试转换', '不可直接改类型', source['id'])}, error=True)
             assert 'revision cannot change scope or kind' in rejected['content'][0]['text']
             assert wire.tool('memory_read', {'id': old['id']})['entry']['kind'] == 'record'
             revised_record = wire.tool('memory_revise', {'previous_id': old['id'], 'draft': {
@@ -124,14 +126,16 @@ def main():
         plain_data = root / 'plain-stdio-data'
         wire = Wire(binary, plain_data, env)
         try:
+            historic_source = wire.tool('memory_record', {'kind': 'record', 'scope': scope, 'title': '历史测试材料', 'body': '独立测试材料，仅用于验证普通stdio不会自动捕获对话', 'origin': 'imported'}) if admitted else None
             historical = wire.tool('memory_record', {'kind': 'case', 'scope': scope, 'title': '测试历史约定',
-                                                    'body': '[测试案例]此前已保存的交付约定。', 'origin': 'imported'})
+                                                    'body': '[测试案例]此前已保存的交付约定。', 'origin': 'imported', **admitted, **({'links': [{'target_id': historic_source['id'], 'relation': 'context'}]} if historic_source else {})})
             wire.tool('memory_read', {'id': historical['id']})
         finally:
             wire.close()
         wire = Wire(binary, plain_data, env)
         try:
-            assert wire.tool('memory_search', {'scope': scope, 'kind': 'record', 'include_events': True})['results'] == []
+            records = wire.tool('memory_search', {'scope': scope, 'kind': 'record', 'include_events': True})['results']
+            assert [r['id'] for r in records] == ([historic_source['id']] if historic_source else [])
             original = '[独立测试原话]重复反馈无需新建案例，但我需要保留这次原始表达。  '
             raw = wire.tool('memory_record', {'kind': 'record', 'scope': scope, 'title': '测试显式原话留存',
                                              'body': original, 'origin': 'host_quote'})

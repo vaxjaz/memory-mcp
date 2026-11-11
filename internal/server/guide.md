@@ -1,4 +1,48 @@
-# Local decision memory: host integration protocol v1
+# Local decision memory: host integration protocol v2
+
+## v0.2.0 workflow (takes precedence over legacy hook descriptions below)
+
+Installation/upgrades MUST follow docs/AGENT_INSTALL.md: identify actual host and execution OS,
+reuse the verified original data directory, back up BEFORE any command opening the database,
+run setup for EACH intended actual business project, inspect binding_verified with doctor
+--project/--scope, restart and verify REAL bound/input_saved events. Registering MCP is NOT
+binding a project; having historical cases is NOT a binding. Setup does not bind all old projects.
+Never report runtime verification from a successful config write or a fabricated hook event.
+
+With contextual_retrieval, use memory_context: prepare with the active project's task reconstructed
+from visible conversation, current user input and previously read relevant memory; return grounded
+keywords and questions. The directory is PAGINATED, not semantic ranking; follow next_cursor.
+Choose using host semantic judgment, read full selected entries with memory_read(context_source_id),
+and follow evidence/exception/replacement links with a specific purpose, usually two rounds.
+Complete with current selected IDs and concrete intended constraints, or explain non-applicability.
+Memory-independent ordinary questions may skip. Re-prepare if the task changes. Read receipts and
+tool gates do not prove understanding, authorization, actual compliance or prevented errors.
+
+With quality_admission, new/revised cases AND hypotheses need profile: class long_term/temporary,
+future_use (concrete future situation and changed action), counter_check (challenge one-off,
+redundant, unverified or ordinary recoverable information), applicability and boundary. Grounded
+search_hints retain symptoms and real names; do not fabricate negative examples or expiry dates.
+Keep original evidence. Unknown scope/conditions remain unknown; missing is not universal.
+Do not make status updates, ordinary Q&A, memory-use logs or cleanup logs into business cases.
+
+For a repeated SAME issue with no material addition, use memory_review_done(reused_case_ids),
+not another case or same-body revision. For actual changed conditions/evidence/conclusion revise;
+independent issues stay separate. Reuse never implies the source was newly verified.
+Only set memory_context.save_candidate=true for material new knowledge passing admission.
+Managed context-check hooks then request ONE Stop continuation only for such a candidate.
+Without it, capture/diagnostics may continue but there is no automatic extra model review.
+An omitted host admission decision is logged as unknown coverage, not proof no useful knowledge existed.
+
+With user_approved_cleanup, maintenance counts only case/hypothesis writes (not raw events,
+retries, reuse or summaries), default every 100, independently per project. Translate user wording
+such as every N/after N more/disable into memory_cleanup.configure with actual source_id; echo
+scope, count, threshold and recurrence. inspect then read sources and preview exact changes.
+Show keep/merge/archive/distill reasons, content differences and unknowns. Offer confirm/adjust/later.
+Apply/undo ONLY after explicit NEW user approval of that plan. Do not interpret installation
+permission as cleanup permission; provenance checks cannot certify approval meaning. Backups,
+version checks and an independent reversible management ledger preserve original bodies and IDs.
+No automatic permanent deletion. Do not use forget for cleanup. Review flags need actual source
+rechecks; source recheck is not merely clearing a badge. See docs/QUALITY_AND_CLEANUP.md.
 
 ## Evidence, applicability, and text integrity
 

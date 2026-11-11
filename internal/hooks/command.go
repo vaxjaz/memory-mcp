@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/vaxjaz/memory-mcp/internal/memory"
@@ -30,6 +32,8 @@ func Run(ctx context.Context, args []string) error {
 	serverName := fs.String("server-name", "", "explicit MCP server name (use a distinct name and data directory for isolated acceptance)")
 	capture := fs.Bool("capture-user-text", false, "enable raw prompt and supplied answer capture in bound projects")
 	review := fs.Bool("review-on-stop", false, "request one host-model business-memory review at turn end; adds a model continuation")
+	contextCheck := fs.Bool("context-check", false, "context-aware retrieval and before-action check; setup enables this in managed hooks")
+	reviews := fs.Bool("reviews", false, "doctor: include paginated current needs_review entries for --scope")
 	dry := fs.Bool("dry-run", false, "show setup targets without writing config or opening the database")
 	checkText := fs.Bool("check-text", false, "doctor: scan stored text for invalid UTF-8/U+FFFD without changing it")
 	_ = fs.String("managed-id", "", "installer ownership marker")
@@ -92,6 +96,83 @@ func Run(ctx context.Context, args []string) error {
 			return er
 		}
 		r["config_exists"] = len(c) > 0
+		services := []map[string]any{}
+		if mc, ok := c["mcp"].(map[string]any); ok {
+			if servers, ok := mc["servers"].(map[string]any); ok {
+				for name, v := range servers {
+					if ent, ok := v.(map[string]any); ok {
+						command, _ := ent["command"].(string)
+						if strings.TrimSuffix(strings.ToLower(filepath.Base(command)), ".exe") == "memory-mcp" {
+							data := configData(ent)
+							a, _ := canonicalForDoctor(data)
+							b, _ := canonicalForDoctor(store.Dir)
+							services = append(services, map[string]any{"server": name, "command": command, "data_dir": data, "matches_opened_data_dir": a != "" && a == b})
+						}
+					}
+				}
+			}
+		}
+		r["memory_services"] = services
+		contextHandlers := 0
+		if h, ok := c["hooks"].(map[string]any); ok {
+			if events, ok := h["events"].(map[string]any); ok {
+				for _, v := range events {
+					if groups, ok := v.([]any); ok {
+						for _, v := range groups {
+							if group, ok := v.(map[string]any); ok {
+								if handlers, ok := group["hooks"].([]any); ok {
+									for _, v := range handlers {
+										if handler, ok := v.(map[string]any); ok {
+											for _, arg := range stringArgs(handler["args"]) {
+												if arg == "--context-check" {
+													contextHandlers++
+												}
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		r["context_check_handlers"] = contextHandlers
+		bindings, er := store.HookBindings(ctx)
+		if er != nil {
+			return er
+		}
+		r["bindings"] = bindings
+		if *project != "" {
+			resolved, er := store.HookResolve(ctx, *project)
+			r["project"] = *project
+			r["resolved_scope"] = resolved
+			r["binding_verified"] = er == nil && (*scope == "" || resolved == *scope)
+			if er != nil {
+				r["binding_error"] = er.Error()
+			}
+			if *scope != "" && resolved != *scope {
+				r["binding_error"] = "resolved scope does not match expected scope"
+			}
+		}
+		if *reviews {
+			if *scope == "" {
+				return errors.New("doctor --reviews requires --scope")
+			}
+			yes := true
+			p, er := store.SearchPage(ctx, memory.SearchInput{Scope: *scope, NeedsReview: &yes, Limit: 30})
+			if er != nil {
+				return er
+			}
+			r["review_queue"] = p
+		}
+		if *scope != "" {
+			m, er := store.Maintenance(ctx, *scope)
+			if er != nil {
+				return er
+			}
+			r["maintenance"] = m
+		}
 		if *checkText {
 			audit, er := store.AuditText(ctx)
 			if er != nil {
@@ -117,10 +198,24 @@ func Run(ctx context.Context, args []string) error {
 	}
 	deadline, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	r, er := (Runtime{Store: store, Capture: *capture, Review: *review, ServerName: *serverName}).Handle(deadline, e)
+	r, er := (Runtime{Store: store, Capture: *capture, Review: *review, ServerName: *serverName, ContextCheck: *contextCheck}).Handle(deadline, e)
 	if er != nil {
 		_ = store.HookLog(ctx, e.Name, "", e.Session, "failed", er.Error())
 		return fail(er)
 	}
 	return json.NewEncoder(os.Stdout).Encode(r)
+}
+
+func canonicalForDoctor(p string) (string, error) {
+	if p == "" {
+		return "", nil
+	}
+	a, err := filepath.Abs(p)
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS == "windows" {
+		a = strings.ToLower(a)
+	}
+	return filepath.Clean(a), nil
 }

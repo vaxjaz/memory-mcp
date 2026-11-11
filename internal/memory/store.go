@@ -20,7 +20,7 @@ import (
 	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
 
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // Entry bodies are free text. These fields track provenance, not semantic truth.
 type Entry struct {
@@ -42,6 +42,8 @@ type Entry struct {
 	Current     bool              `json:"current"`
 	NeedsReview bool              `json:"needs_review"`
 	Links       []Link            `json:"links"`
+	Profile     *Profile          `json:"profile,omitempty"`
+	State       ManagedState      `json:"management"`
 	TextIssues  []textguard.Issue `json:"text_issues,omitempty"`
 }
 
@@ -51,18 +53,19 @@ type Link struct {
 }
 
 type Draft struct {
-	Kind                       string `json:"kind" jsonschema:"record for supplied material; case for a contextual decision; hypothesis is only created through memory_revise"`
-	Scope                      string `json:"scope" jsonschema:"Explicit scope: project:<stable project identifier> or global; never infer global applicability"`
-	Title                      string `json:"title" jsonschema:"Short descriptive title, not a mandatory preference conclusion"`
-	Body                       string `json:"body" jsonschema:"Free text preserving context, alternatives, exact feedback when available, and unknowns; distinguish quotes from inference"`
-	Origin                     string `json:"origin" jsonschema:"host_quote (host-relayed quotation, not verified transcript), user_supplied, imported, or model_inference"`
-	SourceRef                  string `json:"source_ref,omitempty" jsonschema:"Optional source locator; use only a real supplied reference, never invent one"`
-	Host                       string `json:"host,omitempty" jsonschema:"Host name if known; omit rather than guess"`
-	Model                      string `json:"model,omitempty" jsonschema:"Model identifier if actually known; omit rather than guess"`
-	Session                    string `json:"session,omitempty" jsonschema:"Optional originating session identifier"`
-	Links                      []Link `json:"links,omitempty" jsonschema:"Optional links to existing supporting, contradicting, or contextual entries"`
-	RequestID                  string `json:"request_id,omitempty" jsonschema:"Optional stable ID for one logical write. Reuse it with the same payload when retrying an uncertain response; use a new ID for a different write. Scoped to this project or global scope."`
-	AllowReplacementCharacters bool   `json:"allow_replacement_characters,omitempty" jsonschema:"Default false: reject U+FFFD which can indicate already damaged input. Set true only to preserve that character intentionally present in the original, never to bypass a corruption error."`
+	Profile                    *Profile `json:"profile,omitempty" jsonschema:"For cases and hypotheses: concrete future use, counter-check against saving, applicability and boundaries. No fabricated counterexamples."`
+	Kind                       string   `json:"kind" jsonschema:"record for supplied material; case for a contextual decision; hypothesis is only created through memory_revise"`
+	Scope                      string   `json:"scope" jsonschema:"Explicit scope: project:<stable project identifier> or global; never infer global applicability"`
+	Title                      string   `json:"title" jsonschema:"Short descriptive title, not a mandatory preference conclusion"`
+	Body                       string   `json:"body" jsonschema:"Free text preserving context, alternatives, exact feedback when available, and unknowns; distinguish quotes from inference"`
+	Origin                     string   `json:"origin" jsonschema:"host_quote (host-relayed quotation, not verified transcript), user_supplied, imported, or model_inference"`
+	SourceRef                  string   `json:"source_ref,omitempty" jsonschema:"Optional source locator; use only a real supplied reference, never invent one"`
+	Host                       string   `json:"host,omitempty" jsonschema:"Host name if known; omit rather than guess"`
+	Model                      string   `json:"model,omitempty" jsonschema:"Model identifier if actually known; omit rather than guess"`
+	Session                    string   `json:"session,omitempty" jsonschema:"Optional originating session identifier"`
+	Links                      []Link   `json:"links,omitempty" jsonschema:"Optional links to existing supporting, contradicting, or contextual entries"`
+	RequestID                  string   `json:"request_id,omitempty" jsonschema:"Optional stable ID for one logical write. Reuse it with the same payload when retrying an uncertain response; use a new ID for a different write. Scoped to this project or global scope."`
+	AllowReplacementCharacters bool     `json:"allow_replacement_characters,omitempty" jsonschema:"Default false: reject U+FFFD which can indicate already damaged input. Set true only to preserve that character intentionally present in the original, never to bypass a corruption error."`
 }
 
 type Store struct {
@@ -189,6 +192,9 @@ PRAGMA user_version=2;`)
 	if err != nil {
 		return err
 	}
+	if err = migrateGovernance(tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -294,6 +300,9 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 			if err != nil {
 				return Entry{}, err
 			}
+			if err = loadGovernance(ctx, tx, &entry); err != nil {
+				return Entry{}, err
+			}
 			return entry, tx.Commit()
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -352,6 +361,7 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 		// Invalidate all dependent interpretations, not just direct children.
 		_, err = tx.ExecContext(ctx, `WITH RECURSIVE affected(id) AS (
  SELECT ? UNION SELECT l.entry_id FROM links l JOIN affected a ON l.target_id=a.id
+ UNION SELECT r.entry_id FROM reviewed_sources r JOIN affected a ON r.source_id=a.id
 ) UPDATE entries SET needs_review=1 WHERE id IN (SELECT id FROM affected) AND id<>?`, previousID, previousID)
 		if err != nil {
 			return Entry{}, err
@@ -379,6 +389,22 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 			return Entry{}, err
 		}
 	}
+	if d.Profile != nil {
+		if err = validateProfile(d.Profile); err != nil {
+			return Entry{}, err
+		}
+		profile, _ := json.Marshal(d.Profile)
+		if _, err = tx.ExecContext(ctx, "INSERT INTO entry_profiles(entry_id,profile_json) VALUES(?,?)", e.ID, string(profile)); err != nil {
+			return Entry{}, err
+		}
+		e.Profile = d.Profile
+	}
+	if d.Kind == "case" || d.Kind == "hypothesis" {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO maintenance_policy(scope,changes,next_at) VALUES(?,1,100)
+ ON CONFLICT(scope) DO UPDATE SET changes=changes+1`, d.Scope); err != nil {
+			return Entry{}, err
+		}
+	}
 	if d.RequestID != "" {
 		if _, err = tx.ExecContext(ctx, "INSERT INTO write_requests(scope,request_id,fingerprint,entry_id) VALUES (?,?,?,?)", d.Scope, d.RequestID, fingerprint, e.ID); err != nil {
 			return Entry{}, err
@@ -391,6 +417,7 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 }
 
 type ReadResult struct {
+	EffectiveCurrentID   string      `json:"effective_current_id"`
 	Entry                Entry       `json:"entry"`
 	CurrentID            string      `json:"current_id"`
 	ReferencedBy         []Reference `json:"referenced_by"`
@@ -436,6 +463,14 @@ func (s *Store) ReadPage(ctx context.Context, id, referenceCursor string) (ReadR
 	if err != nil {
 		return r, err
 	}
+	if err = loadGovernance(ctx, tx, &r.Entry); err != nil {
+		return r, err
+	}
+	effective, er := resolveCurrent(ctx, tx, id)
+	if er != nil {
+		return r, er
+	}
+	r.EffectiveCurrentID = effective.ID
 	query := `SELECT l.entry_id,l.relation,e.kind,e.needs_review FROM links l JOIN entries e ON e.id=l.entry_id WHERE l.target_id=? AND e.current=1`
 	args := []any{id}
 	if referenceCursor != "" {
@@ -470,13 +505,15 @@ func (s *Store) ReadPage(ctx context.Context, id, referenceCursor string) (ReadR
 }
 
 type SearchInput struct {
-	Scope         string `json:"scope" jsonschema:"Required explicit scope: project:<identifier> or global"`
-	Query         string `json:"query,omitempty" jsonschema:"Literal keywords separated by spaces; empty returns recent entries; no semantic model is used"`
-	IncludeGlobal bool   `json:"include_global,omitempty" jsonschema:"Also include global entries when searching a project; opt in explicitly"`
-	Kind          string `json:"kind,omitempty" jsonschema:"Optional record, case, or hypothesis filter"`
-	Limit         int    `json:"limit,omitempty" jsonschema:"Result limit, default 10, maximum 30"`
-	Cursor        string `json:"cursor,omitempty" jsonschema:"Opaque next_cursor from a prior result; keep scope, query, include_global and kind unchanged"`
-	IncludeEvents bool   `json:"include_events,omitempty" jsonschema:"Opt in to raw hook input/output events. Normally hidden so captured chat is not mistaken for a business decision."`
+	NeedsReview     *bool  `json:"needs_review,omitempty" jsonschema:"Filter source-change review queue; false selects entries without that flag"`
+	IncludeInactive bool   `json:"include_inactive,omitempty" jsonschema:"Include archived or replaced material for audit; normally hidden"`
+	Scope           string `json:"scope" jsonschema:"Required explicit scope: project:<identifier> or global"`
+	Query           string `json:"query,omitempty" jsonschema:"Literal keywords separated by spaces; empty returns recent entries; no semantic model is used"`
+	IncludeGlobal   bool   `json:"include_global,omitempty" jsonschema:"Also include global entries when searching a project; opt in explicitly"`
+	Kind            string `json:"kind,omitempty" jsonschema:"Optional record, case, or hypothesis filter"`
+	Limit           int    `json:"limit,omitempty" jsonschema:"Result limit, default 10, maximum 30"`
+	Cursor          string `json:"cursor,omitempty" jsonschema:"Opaque next_cursor from a prior result; keep scope, query, include_global and kind unchanged"`
+	IncludeEvents   bool   `json:"include_events,omitempty" jsonschema:"Opt in to raw hook input/output events. Normally hidden so captured chat is not mistaken for a business decision."`
 }
 type Hit struct {
 	ID          string `json:"id"`
@@ -534,6 +571,13 @@ func (s *Store) SearchPage(ctx context.Context, in SearchInput) (SearchPage, err
 		q += " OR scope='global'"
 	}
 	q += ")"
+	if !in.IncludeInactive {
+		q += " AND NOT EXISTS (SELECT 1 FROM managed_entries m WHERE m.root_id=entries.root_id AND m.state<>'active')"
+	}
+	if in.NeedsReview != nil {
+		q += " AND needs_review=?"
+		args = append(args, *in.NeedsReview)
+	}
 	if !in.IncludeEvents {
 		q += " AND source_ref NOT LIKE 'hook-event:%'"
 	}
@@ -551,7 +595,7 @@ func (s *Store) SearchPage(ctx context.Context, in SearchInput) (SearchPage, err
 			if i > 0 {
 				q += " OR "
 			}
-			q += "instr(lower(title || char(10) || body),lower(?))>0"
+			q += "instr(lower(title || char(10) || body || char(10) || coalesce((SELECT profile_json FROM entry_profiles p WHERE p.entry_id=entries.id),'')),lower(?))>0"
 			args = append(args, w)
 		}
 		q += ")"
@@ -650,6 +694,11 @@ func (s *Store) Export(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return out, err
 	}
+	for i := range out.Entries {
+		if err = loadGovernance(ctx, tx, &out.Entries[i]); err != nil {
+			return out, err
+		}
+	}
 	rows, err = tx.QueryContext(ctx, "SELECT entry_id,target_id,relation FROM links ORDER BY entry_id,target_id,relation")
 	if err != nil {
 		return out, err
@@ -711,6 +760,23 @@ func (s *Store) Forget(ctx context.Context, id string) (int64, error) {
 		return 0, err
 	}
 	for _, v := range ids {
+		// Management must not leave live replacement pointers into forgotten data,
+		// nor retain derived summaries/plan excerpts for the forgotten lineages.
+		if _, err = tx.ExecContext(ctx, `UPDATE managed_entries SET state='archived',replacement_root_id='',reason='Replacement was explicitly forgotten',version=version+1 WHERE replacement_root_id=(SELECT root_id FROM entries WHERE id=?)`, v); err != nil {
+			return 0, err
+		}
+		if _, err = tx.ExecContext(ctx, "DELETE FROM managed_entries WHERE root_id=(SELECT root_id FROM entries WHERE id=?)", v); err != nil {
+			return 0, err
+		}
+		if _, err = tx.ExecContext(ctx, "DELETE FROM cleanup_plans WHERE instr(operations_json,?)>0 OR instr(snapshots_json,?)>0 OR approval_source_id=?", v, v, v); err != nil {
+			return 0, err
+		}
+		if _, err = tx.ExecContext(ctx, "DELETE FROM source_review_receipts WHERE instr(sources_json,?)>0", v); err != nil {
+			return 0, err
+		}
+		if _, err = tx.ExecContext(ctx, "DELETE FROM context_checks WHERE instr(selected_json,?)>0", v); err != nil {
+			return 0, err
+		}
 		if _, err = tx.ExecContext(ctx, "DELETE FROM entries WHERE id=?", v); err != nil {
 			return 0, err
 		}

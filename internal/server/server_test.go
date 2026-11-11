@@ -33,8 +33,8 @@ func TestMCPDiscoveryAndLearningRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.Tools) != 6 {
-		t.Fatalf("expected 6 tools, got %d", len(tools.Tools))
+	if len(tools.Tools) != 8 {
+		t.Fatalf("expected 8 tools, got %d", len(tools.Tools))
 	}
 	call := func(name string, args any, output any) {
 		t.Helper()
@@ -63,7 +63,7 @@ func TestMCPDiscoveryAndLearningRoundTrip(t *testing.T) {
 	if boot.Guide == "" || boot.DataDir != store.Dir {
 		t.Fatal("bootstrap incomplete")
 	}
-	if boot.SchemaVersion != 2 {
+	if boot.SchemaVersion != memory.SchemaVersion {
 		t.Fatal("missing storage capability version")
 	}
 	var e memory.Entry
@@ -75,7 +75,7 @@ func TestMCPDiscoveryAndLearningRoundTrip(t *testing.T) {
 		t.Fatal("MCP retry receipt or integrity metadata lost")
 	}
 	var h memory.Entry
-	call("memory_revise", ReviseInput{Draft: memory.Draft{Kind: "hypothesis", Scope: e.Scope, Title: "局部偏好假设", Body: "可能更重视明确状态反馈，其他场景未知。", Origin: "model_inference", Links: []memory.Link{{TargetID: e.ID, Relation: "supports"}}}}, &h)
+	call("memory_revise", ReviseInput{Draft: memory.Draft{Kind: "hypothesis", Scope: e.Scope, Title: "局部偏好假设", Body: "可能更重视明确状态反馈，其他场景未知。", Origin: "model_inference", Links: []memory.Link{{TargetID: e.ID, Relation: "supports"}}, Profile: &memory.Profile{Class: "long_term", FutureUse: "同类表单状态反馈比较时考虑方案B", CounterCheck: "只是局部假设，不能视为用户通用偏好", Applicability: "当前表单", Boundary: "布局及其他表单未知"}}}, &h)
 	var search SearchOutput
 	call("memory_search", memory.SearchInput{Scope: e.Scope, Query: "状态"}, &search)
 	if len(search.Results) != 2 {
