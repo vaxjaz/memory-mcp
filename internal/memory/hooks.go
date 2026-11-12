@@ -23,17 +23,20 @@ func hookRequestID(session, event string) string {
 }
 
 type HookTurn struct {
+	CaseIDs          []string          `json:"case_ids,omitempty"`
+	ReusedCaseIDs    []string          `json:"reused_case_ids,omitempty"`
+	ResponseMode     string            `json:"response_mode,omitempty"`
 	SourceID         string            `json:"source_id"`
 	Scope            string            `json:"scope"`
-	Session          string            `json:"session"`
-	CWD              string            `json:"cwd"`
-	Query            string            `json:"query"`
+	Session          string            `json:"session,omitempty"`
+	CWD              string            `json:"cwd,omitempty"`
+	Query            string            `json:"query,omitempty"`
 	AnswerID         string            `json:"answer_id,omitempty"`
 	Attempts         int               `json:"review_attempts"`
 	Status           string            `json:"status"`
 	Recall           string            `json:"-"`
 	Note             string            `json:"note,omitempty"`
-	Created          string            `json:"created_at"`
+	Created          string            `json:"created_at,omitempty"`
 	ReviewNote       string            `json:"review_note,omitempty"`
 	ReviewNoteBytes  int               `json:"review_note_bytes,omitempty"`
 	ReviewNoteSHA256 string            `json:"review_note_sha256,omitempty"`
@@ -263,6 +266,7 @@ func (s *Store) HookSetRecall(ctx context.Context, id, fingerprint string) error
 }
 
 type ReviewInput struct {
+	ResponseMode               string   `json:"response_mode,omitempty" jsonschema:"compact: short review receipt with note integrity metadata; full or omitted: legacy response"`
 	ReusedCaseIDs              []string `json:"reused_case_ids,omitempty" jsonschema:"Existing current cases fully covering this turn, without changing their body or source links; read first. Does not create revisions or invalidate dependents."`
 	Scope                      string   `json:"scope"`
 	SourceID                   string   `json:"source_id" jsonschema:"Raw user entry ID delivered by a hook. Read it and its contextual links before reviewing."`
@@ -272,6 +276,9 @@ type ReviewInput struct {
 }
 
 func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, error) {
+	if err := ValidateResponseMode(in.ResponseMode); err != nil {
+		return HookTurn{}, err
+	}
 	if err := textguard.Check("note", in.Note, in.AllowReplacementCharacters); err != nil {
 		return HookTurn{}, err
 	}

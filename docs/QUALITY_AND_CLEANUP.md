@@ -25,7 +25,7 @@
 
 UserPromptSubmit 的轻量 hook 交付本轮 source_id。宿主结合项目、可见会话前文、已读记忆和当前输入组织任务，不只截取最新一句。
 
-1. memory_context prepare：task、questions、最多八个有依据的关键词。
+1. memory_context prepare：task、questions、有依据的关键词数组（不设八词上限，完整查询仍有字节预算）。默认轻量候选按两种 cursor 分页，完整字段按需读，见 COMPACT_OUTPUT.md。
 2. 返回同项目当前有效目录（30 条/页）和关键词候选。目录/摘要不是全文，也不是语义排名。
    按 next_cursor 继续目录，关键词结果的分页用 memory_search；不能把首屏当完整结果。
 3. 宿主进行语义选择，memory_read 时传 context_source_id，读取来源、例外和替代关系。

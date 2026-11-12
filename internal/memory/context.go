@@ -13,6 +13,7 @@ import (
 )
 
 type ContextInput struct {
+	ResponseMode  string   `json:"response_mode,omitempty" jsonschema:"compact (MCP default): bounded previews or short completion receipt; full: legacy output. Full-read checks are unchanged."`
 	Action        string   `json:"action" jsonschema:"prepare using conversation/project context, complete after reading sources, skip for a genuinely memory-independent task, or status"`
 	Scope         string   `json:"scope"`
 	SourceID      string   `json:"source_id" jsonschema:"Current actual user source ID; never an assistant answer"`
@@ -25,16 +26,18 @@ type ContextInput struct {
 	SaveCandidate bool     `json:"save_candidate,omitempty" jsonschema:"Only true if this turn contains a material decision, correction or reusable finding passing the forward/reverse admission challenge"`
 }
 type ContextResult struct {
-	Questions       string             `json:"questions"`
+	ResponseMode    string             `json:"response_mode,omitempty"`
+	NextAction      string             `json:"next_action,omitempty"`
+	Questions       string             `json:"questions,omitempty"`
 	SourceID        string             `json:"source_id"`
 	Status          string             `json:"status"`
-	Task            string             `json:"task"`
-	Directory       []InventoryItem    `json:"directory,omitempty"`
-	NextCursor      string             `json:"next_cursor,omitempty"`
+	Task            string             `json:"task,omitempty"`
 	Matches         []Hit              `json:"matches,omitempty"`
 	MatchNextCursor string             `json:"match_next_cursor,omitempty"`
+	Directory       []InventoryItem    `json:"directory,omitempty"`
+	NextCursor      string             `json:"next_cursor,omitempty"`
 	SelectedIDs     []string           `json:"selected_ids"`
-	Decision        string             `json:"decision"`
+	Decision        string             `json:"decision,omitempty"`
 	SaveCandidate   bool               `json:"save_candidate"`
 	Notice          string             `json:"notice"`
 	KeywordSearch   *KeywordSearchInfo `json:"keyword_search,omitempty"`
@@ -66,6 +69,14 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextRes
 	defer func() {
 		if err != nil {
 			err = fmt.Errorf("memory_context.%s (data_dir=%q): %w", in.Action, s.Dir, err)
+		}
+	}()
+	if err = ValidateResponseMode(in.ResponseMode); err != nil {
+		return result, err
+	}
+	defer func() {
+		if err == nil && in.ResponseMode == "compact" {
+			err = compactContext(&result, in)
 		}
 	}()
 	if err := validScope(in.Scope); err != nil {
@@ -139,15 +150,25 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextRes
 		if er != nil {
 			return r, er
 		}
-		r.Directory, r.NextCursor, er = s.Inventory(ctx, in.Scope, in.Cursor, 30)
+		pageLimit := 30
+		if in.ResponseMode == "compact" {
+			pageLimit = 8
+		}
+		r.Directory, r.NextCursor, er = s.Inventory(ctx, in.Scope, in.Cursor, pageLimit)
 		if er != nil {
 			return r, er
 		}
 		r.KeywordSearch = &KeywordSearchInfo{Status: "not_requested", Notice: "No literal search terms supplied; use the paginated directory and context to choose material."}
 		if queryErr != nil {
 			r.KeywordSearch = &KeywordSearchInfo{Status: "directory_only", Notice: queryErr.Error() + ". Directory preparation succeeded; keyword search was NOT executed. This is not evidence that no relevant memory exists. Refine the terms or inspect directory pages."}
+		} else if in.ResponseMode == "compact" && in.Cursor != "" {
+			r.KeywordSearch = &KeywordSearchInfo{Status: "not_repeated", Notice: "Directory continuation only; the initial keyword search was NOT repeated. Continue keyword results with memory_search using match_next_cursor from the initial prepare, or start a new prepare without cursor when the task/query changes."}
 		} else if len(terms) > 0 {
-			p, er := s.SearchPage(ctx, SearchInput{Scope: in.Scope, Query: query, Limit: 15})
+			matchLimit := 15
+			if in.ResponseMode == "compact" {
+				matchLimit = 8
+			}
+			p, er := s.SearchPage(ctx, SearchInput{Scope: in.Scope, Query: query, Limit: matchLimit})
 			if er != nil {
 				return r, er
 			}

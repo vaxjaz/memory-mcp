@@ -67,7 +67,7 @@ def main():
             prepared = host.tool('memory_context', {'action': 'prepare', 'scope': scope, 'source_id': sid,
                                   'task': 'Current project test-environment login; inspect prior configuration-dependent hangs',
                                   'questions': 'Verify environment and exceptions, not all login clients', 'keywords': ['token request hangs']})
-            assert case['id'] in [item['id'] for item in prepared['directory']]
+            assert case['id'] in [item['id'] for item in prepared.get('directory', []) + prepared.get('matches', [])]
             complete = {'action': 'complete', 'scope': scope, 'source_id': sid, 'selected_ids': [case['id']],
                         'decision': 'Supply explicit arguments only after checking this is the tested environment', 'save_candidate': False}
             host.tool('memory_context', complete, expect_error=True)

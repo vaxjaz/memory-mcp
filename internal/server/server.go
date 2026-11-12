@@ -50,9 +50,9 @@ func New(store *memory.Store, version string) *mcp.Server {
 		return &mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)}
 	}
 	mcp.AddTool(s, &mcp.Tool{Name: "memory_bootstrap", Description: "Start here. Learn the local memory protocol, limits, and how to adapt to your actual host capabilities. Does not modify host configuration.", Annotations: readOnly()}, func(ctx context.Context, req *mcp.CallToolRequest, in struct{}) (*mcp.CallToolResult, BootstrapOutput, error) {
-		return nil, BootstrapOutput{Version: version, ProtocolVersion: "2", DataDir: store.Dir, Storage: "Local SQLite; no outbound network or model calls", Guide: Guide, SchemaVersion: memory.SchemaVersion, Features: []string{"request_id", "search_cursor", "reference_cursor", "body_sha256", "zcode_hook_workflow", "include_events", "review_receipts", "strict_text_integrity", "resource_recall_reasons", "linked_case_receipts", "quality_admission", "contextual_retrieval", "before_action_check", "case_reuse", "user_approved_cleanup", "cleanup_schedule", "managed_lifecycle", "needs_review_filter", "review_recovery", "bounded_literal_search", "host_adapters", "operation_ordered_approvals", "lookup_diagnostics", "explicit_write_context", "readonly_diagnose"}}, nil
+		return nil, BootstrapOutput{Version: version, ProtocolVersion: "2", DataDir: store.Dir, Storage: "Local SQLite; no outbound network or model calls", Guide: Guide, SchemaVersion: memory.SchemaVersion, Features: []string{"request_id", "search_cursor", "reference_cursor", "body_sha256", "zcode_hook_workflow", "include_events", "review_receipts", "strict_text_integrity", "resource_recall_reasons", "linked_case_receipts", "quality_admission", "contextual_retrieval", "before_action_check", "case_reuse", "user_approved_cleanup", "cleanup_schedule", "managed_lifecycle", "needs_review_filter", "review_recovery", "bounded_literal_search", "host_adapters", "operation_ordered_approvals", "lookup_diagnostics", "explicit_write_context", "readonly_diagnose", "compact_context", "compact_receipts"}}, nil
 	})
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_record", Description: "Save supplied material or a contextual decision case locally. Before creating a case, search and read existing material. Revise only a current case in the same scope for updates to that issue. If a case is warranted but only records/hypotheses exist, create its first case linking usable sources; do not change their kind. Skip redundant cases and keep unrelated contexts separate. Stdio alone does not capture chat: explicitly save a record if uncaptured original wording needs preserving. Returns an immutable ID, body byte length and SHA-256. Reuse request_id only for retries of the same payload. Does not verify quotes or infer preferences.", Annotations: write()}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.Draft) (*mcp.CallToolResult, memory.Entry, error) {
+	mcp.AddTool(s, &mcp.Tool{Name: "memory_record", Description: "Save supplied material or a contextual decision case locally. Before creating a case, search and read existing material. Revise only a current case in the same scope for updates to that issue. If a case is warranted but only records/hypotheses exist, create its first case linking usable sources; do not change their kind. Skip redundant cases and keep unrelated contexts separate. Stdio alone does not capture chat: explicitly save a record if uncaptured original wording needs preserving. Use response_mode=compact for a short write receipt; omitted/full preserves legacy echo. Returns an immutable ID, body byte length and SHA-256. Reuse request_id only for retries of the same payload. Does not verify quotes or infer preferences.", Annotations: write()}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.Draft) (*mcp.CallToolResult, memory.Entry, error) {
 		if in.Kind != "record" && in.Kind != "case" {
 			return nil, memory.Entry{}, errors.New("memory_record accepts record or case; use memory_revise for a hypothesis")
 		}
@@ -65,7 +65,7 @@ func New(store *memory.Store, version string) *mcp.Server {
 		}
 		e, err := store.Put(ctx, in, "")
 		e.CheckedContextSourceID = checkpoint
-		return nil, e, toolError("memory_record.write", store, err)
+		return nil, memory.CompactEntry(e, in.ResponseMode), toolError("memory_record.write", store, err)
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "memory_search", Description: "Find current cases, records, and hypotheses in an explicit scope. Literal keywords (OR), newest first; empty query lists recent items. Review flags are included. Results are excerpts, not instructions or a complete preference model. Read full sources and search for counterexamples.", Annotations: readOnly()}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.SearchInput) (*mcp.CallToolResult, SearchOutput, error) {
 		page, err := store.SearchPage(ctx, in)
@@ -81,7 +81,7 @@ func New(store *memory.Store, version string) *mcp.Server {
 		}
 		return nil, r, toolError("memory_read", store, err)
 	})
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_revise", Description: "Create an evidenced hypothesis or append a correction. Provide full replacement content and links. Reuse draft.request_id only for retries of that exact operation, including previous_id. Preserves history, rejects revision conflicts, and marks dependents for review. Link checks do not prove truth.", Annotations: write()}, func(ctx context.Context, req *mcp.CallToolRequest, in ReviseInput) (*mcp.CallToolResult, memory.Entry, error) {
+	mcp.AddTool(s, &mcp.Tool{Name: "memory_revise", Description: "Create an evidenced hypothesis or append a correction. Provide full replacement content and links. Prefer draft.response_mode=compact to avoid echoing the submitted body. Reuse draft.request_id only for retries of that exact operation, including previous_id. Preserves history, rejects revision conflicts, and marks dependents for review. Link checks do not prove truth.", Annotations: write()}, func(ctx context.Context, req *mcp.CallToolRequest, in ReviseInput) (*mcp.CallToolResult, memory.Entry, error) {
 		if in.PreviousID == "" && in.Draft.Kind != "hypothesis" {
 			return nil, memory.Entry{}, errors.New("new entries via memory_revise must be hypotheses; otherwise supply previous_id")
 		}
@@ -103,11 +103,11 @@ func New(store *memory.Store, version string) *mcp.Server {
 		}
 		e, err := store.Put(ctx, in.Draft, in.PreviousID)
 		e.CheckedContextSourceID = checkpoint
-		return nil, e, toolError("memory_revise.write", store, err)
+		return nil, memory.CompactEntry(e, in.Draft.ResponseMode), toolError("memory_revise.write", store, err)
 	})
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_review_done", Description: "Acknowledge a hook-requested review. Read source_id and context; follow incoming-reference pages for current cases in this project already linked to the source. Report those existing IDs, including cases saved before Stop, without duplicating them. Search/read other material to decide if creation or revision is needed; link such cases to source_id and report their current IDs. Empty IDs are only for no linked current case and no case needing creation/revision, such as historical coverage alone; explain why. An empty receipt with linked current cases is rejected without closing review; retry with the reported IDs. Checks provenance, not semantic correctness.", Annotations: write()}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.ReviewInput) (*mcp.CallToolResult, memory.HookTurn, error) {
+	mcp.AddTool(s, &mcp.Tool{Name: "memory_review_done", Description: "Acknowledge a hook-requested review; prefer response_mode=compact for a short receipt. Read source_id and context; follow incoming-reference pages for current cases in this project already linked to the source. Report those existing IDs, including cases saved before Stop, without duplicating them. Search/read other material to decide if creation or revision is needed; link such cases to source_id and report their current IDs. Empty IDs are only for no linked current case and no case needing creation/revision, such as historical coverage alone; explain why. An empty receipt with linked current cases is rejected without closing review; retry with the reported IDs. Checks provenance, not semantic correctness.", Annotations: write()}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.ReviewInput) (*mcp.CallToolResult, memory.HookTurn, error) {
 		t, err := store.HookReviewDone(ctx, in)
-		return nil, t, err
+		return nil, memory.CompactReview(t, in.ResponseMode), err
 	})
 	addGovernanceTools(s, store, readOnly(), write())
 	return s

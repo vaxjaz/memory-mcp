@@ -305,14 +305,17 @@ func (s *Store) MarkMaintenanceNotified(ctx context.Context, scope string) error
 }
 
 type InventoryItem struct {
-	ID          string       `json:"id"`
-	RootID      string       `json:"root_id"`
-	Kind        string       `json:"kind"`
-	Title       string       `json:"title"`
-	Summary     string       `json:"summary"`
-	NeedsReview bool         `json:"needs_review"`
-	Profile     *Profile     `json:"profile,omitempty"`
-	State       ManagedState `json:"management"`
+	CreatedAt     string       `json:"-"`
+	Applicability string       `json:"applicability,omitempty"`
+	Boundary      string       `json:"boundary,omitempty"`
+	ID            string       `json:"id"`
+	RootID        string       `json:"root_id"`
+	Kind          string       `json:"kind"`
+	Title         string       `json:"title"`
+	Summary       string       `json:"summary"`
+	NeedsReview   bool         `json:"needs_review"`
+	Profile       *Profile     `json:"profile,omitempty"`
+	State         ManagedState `json:"management"`
 }
 
 // Inventory is bounded and paginated. It is a navigation directory, not semantic
@@ -346,7 +349,7 @@ func (s *Store) Inventory(ctx context.Context, scope, cursor string, limit int) 
 			}
 			summary = string(rs)
 		}
-		out = append(out, InventoryItem{ID: e.ID, RootID: e.RootID, Kind: e.Kind, Title: e.Title, Summary: summary, NeedsReview: e.NeedsReview, Profile: e.Profile, State: e.State})
+		out = append(out, InventoryItem{CreatedAt: e.CreatedAt, ID: e.ID, RootID: e.RootID, Kind: e.Kind, Title: e.Title, Summary: summary, NeedsReview: e.NeedsReview, Profile: e.Profile, State: e.State})
 	}
 	return out, p.NextCursor, nil
 }

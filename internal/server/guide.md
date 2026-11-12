@@ -1,5 +1,36 @@
 # Local decision memory: host integration protocol v2
 
+## Compact output workflow (when advertised by features)
+
+With compact_context, memory_context defaults to compact previews (one JSON
+payload <=8192 bytes). Matches precede the directory; each stream paginates.
+next_cursor continues the directory via prepare; match_next_cursor continues
+literal matches via memory_search with the original scope/query. Directory
+continuations do not repeat keyword search (not_repeated is NOT no matches).
+Cards omit full admission metadata. Read chosen full entries; previews never
+count as reads. Full-read tracking and current-turn checks are unchanged.
+keywords is an ARRAY of strings. skip still needs BOTH task and decision.
+complete/skip return short receipts; the full decision remains stored. Request
+status with response_mode=full only when the stored detail is actually needed.
+
+With compact_receipts, use response_mode=compact for memory_record and
+memory_review_done, and draft.response_mode=compact for memory_revise. IDs,
+effective state and text integrity receipts remain; submitted bodies/notes are
+not echoed. This is not empty stored evidence; memory_read still returns it all.
+Omitted write/review response_mode preserves legacy full output. response_mode
+does not change request_id identity. Use full only when a full write echo is needed.
+For hook-backed cases MUST pass current context_source_id (inside draft for
+revise); do not deliberately use legacy inference. It is a checkpoint, separate
+from actual evidence links. Never invent IDs when no actual source is available.
+
+After a meaningful save, send review_done with the existing linked case IDs as
+soon as coverage is checked. For reuse with no material addition, use
+reused_case_ids instead of adding links/revisions merely to attach this turn.
+Do not repeat the same retrieval during Stop without a concrete unresolved issue.
+The SDK's text fallback plus structured payload remain for compatibility; bytes
+on the wire do not certify the host's actual model-token cost. This version does
+not add cross-turn read reuse or relax the requirement to check applicability.
+
 ## v0.2.1 recovery and search fixes
 
 needs_review means an interpretation needs reassessment, not that it cannot be
