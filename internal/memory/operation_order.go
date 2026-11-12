@@ -58,6 +58,9 @@ func (s *Store) initOperationOrder() error {
 func nextOperationOrder(ctx context.Context, tx *sql.Tx) (int64, error) {
 	var value int64
 	err := tx.QueryRowContext(ctx, "UPDATE operation_clock SET value=value+1 WHERE id=1 RETURNING value").Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, missingLookup("internal_write_clock_missing", "operation_clock.id", "1", "", "The durable write-order singleton is missing from this open library. The attempted write was not committed; back up and inspect the opened data_dir and running version before any repair. Do not reset ordering or create duplicate cases.")
+	}
 	return value, err
 }
 func validateCleanupApproval(ctx context.Context, q queryer, p CleanupPlan, in CleanupDecision, undo bool) error {

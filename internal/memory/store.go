@@ -24,27 +24,28 @@ const SchemaVersion = 3
 
 // Entry bodies are free text. These fields track provenance, not semantic truth.
 type Entry struct {
-	ID          string            `json:"id"`
-	RootID      string            `json:"root_id"`
-	PreviousID  string            `json:"previous_id,omitempty"`
-	Kind        string            `json:"kind"`
-	Scope       string            `json:"scope"`
-	Title       string            `json:"title"`
-	Body        string            `json:"body"`
-	BodyBytes   int               `json:"body_bytes"`
-	BodySHA256  string            `json:"body_sha256"`
-	Origin      string            `json:"origin"`
-	SourceRef   string            `json:"source_ref,omitempty"`
-	Host        string            `json:"host,omitempty"`
-	Model       string            `json:"model,omitempty"`
-	Session     string            `json:"session,omitempty"`
-	CreatedAt   string            `json:"created_at"`
-	Current     bool              `json:"current"`
-	NeedsReview bool              `json:"needs_review"`
-	Links       []Link            `json:"links"`
-	Profile     *Profile          `json:"profile,omitempty"`
-	State       ManagedState      `json:"management"`
-	TextIssues  []textguard.Issue `json:"text_issues,omitempty"`
+	CheckedContextSourceID string            `json:"checked_context_source_id,omitempty" jsonschema:"Transient write response: current checkpoint validated for this operation, not a stored evidence link"`
+	ID                     string            `json:"id"`
+	RootID                 string            `json:"root_id"`
+	PreviousID             string            `json:"previous_id,omitempty"`
+	Kind                   string            `json:"kind"`
+	Scope                  string            `json:"scope"`
+	Title                  string            `json:"title"`
+	Body                   string            `json:"body"`
+	BodyBytes              int               `json:"body_bytes"`
+	BodySHA256             string            `json:"body_sha256"`
+	Origin                 string            `json:"origin"`
+	SourceRef              string            `json:"source_ref,omitempty"`
+	Host                   string            `json:"host,omitempty"`
+	Model                  string            `json:"model,omitempty"`
+	Session                string            `json:"session,omitempty"`
+	CreatedAt              string            `json:"created_at"`
+	Current                bool              `json:"current"`
+	NeedsReview            bool              `json:"needs_review"`
+	Links                  []Link            `json:"links"`
+	Profile                *Profile          `json:"profile,omitempty"`
+	State                  ManagedState      `json:"management"`
+	TextIssues             []textguard.Issue `json:"text_issues,omitempty"`
 }
 
 type Link struct {
@@ -53,6 +54,7 @@ type Link struct {
 }
 
 type Draft struct {
+	ContextSourceID            string   `json:"context_source_id,omitempty" jsonschema:"Actual CURRENT user-source checkpoint for this write, separate from historical evidence links. Use the source from the current hook/prepare/complete. Historical linked turns need not be completed again."`
 	Profile                    *Profile `json:"profile,omitempty" jsonschema:"For cases and hypotheses: concrete future use, counter-check against saving, applicability and boundaries. No fabricated counterexamples."`
 	Kind                       string   `json:"kind" jsonschema:"record for supplied material; case for a contextual decision; hypothesis is only created through memory_revise"`
 	Scope                      string   `json:"scope" jsonschema:"Explicit scope: project:<stable project identifier> or global; never infer global applicability"`
@@ -203,7 +205,7 @@ PRAGMA user_version=2;`)
 }
 
 func Validate(d Draft) error {
-	for _, field := range []struct{ name, value string }{{"scope", d.Scope}, {"title", d.Title}, {"body", d.Body}, {"source_ref", d.SourceRef}, {"host", d.Host}, {"model", d.Model}, {"session", d.Session}, {"request_id", d.RequestID}} {
+	for _, field := range []struct{ name, value string }{{"scope", d.Scope}, {"title", d.Title}, {"body", d.Body}, {"source_ref", d.SourceRef}, {"host", d.Host}, {"model", d.Model}, {"session", d.Session}, {"request_id", d.RequestID}, {"context_source_id", d.ContextSourceID}} {
 		if err := textguard.Check(field.name, field.value, d.AllowReplacementCharacters); err != nil {
 			return err
 		}
@@ -316,7 +318,7 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 	if previousID != "" {
 		old, err := scanEntry(tx.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", previousID))
 		if errors.Is(err, sql.ErrNoRows) {
-			return Entry{}, errors.New("revision target not found")
+			return Entry{}, missingLookup("revision_target_not_found", "previous_id", previousID, d.Scope, "Use the full current revision ID returned by memory_read in this library. Do not create a new case to bypass an unavailable revision target.")
 		}
 		if err != nil {
 			return Entry{}, err
@@ -329,10 +331,13 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 		}
 		e.RootID = old.RootID
 	}
-	for _, l := range d.Links {
+	for index, l := range d.Links {
 		source, err := scanEntry(tx.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", l.TargetID))
 		if err != nil {
-			return Entry{}, fmt.Errorf("source %s not found or unavailable", l.TargetID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return Entry{}, missingLookup("write_source_not_found", fmt.Sprintf("draft.links[%d].target_id", index), l.TargetID, d.Scope, "Verify the full source ID and MCP/hook data directories; preserve the current case and its history instead of creating a duplicate case.")
+			}
+			return Entry{}, fmt.Errorf("load draft.links[%d].target_id=%q: %w", index, l.TargetID, err)
 		}
 		if source.Scope != d.Scope && source.Scope != "global" {
 			return Entry{}, errors.New("source outside scope: global hypotheses cannot depend on project data; projects may use their own or global sources")
@@ -439,6 +444,11 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 			return Entry{}, err
 		}
 	}
+	// The immediate write response must report the same effective management
+	// state/profile as a subsequent read, including unchanged lineage state.
+	if err = loadGovernance(ctx, tx, &e); err != nil {
+		return Entry{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return Entry{}, err
 	}
@@ -481,6 +491,9 @@ func (s *Store) ReadPage(ctx context.Context, id, referenceCursor string) (ReadR
 	}
 	defer tx.Rollback()
 	e, err := scanEntry(tx.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ReadResult{}, missingLookup("memory_entry_not_found", "id", id, "", "Use the full ID and verify the same service/data_dir; absence of one ID is not proof that all reads or writes are broken.")
+	}
 	if err != nil {
 		return ReadResult{}, err
 	}

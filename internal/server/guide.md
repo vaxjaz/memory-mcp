@@ -46,6 +46,13 @@ keywords and questions. The directory is PAGINATED, not semantic ranking; follow
 Choose using host semantic judgment, read full selected entries with memory_read(context_source_id),
 and follow evidence/exception/replacement links with a specific purpose, usually two rounds.
 Complete with current selected IDs and concrete intended constraints, or explain non-applicability.
+With explicit_write_context, pass the actual current source as context_source_id to
+memory_record, or draft.context_source_id to memory_revise. This selects the current
+task checkpoint; links remain actual evidence and may cite historical user turns.
+Never complete an obsolete turn to make historical evidence usable. Legacy writes
+resolve linked hook sources to the latest input in that same host/project/session.
+The write response checked_context_source_id reports the checkpoint actually checked;
+it is not an evidence link or proof that the host understood the material.
 Memory-independent ordinary questions may skip. Re-prepare if the task changes. Read receipts and
 tool gates do not prove understanding, authorization, actual compliance or prevented errors.
 
