@@ -35,6 +35,7 @@ func withIntegrity(e Entry) Entry {
 
 func writeFingerprint(d Draft, previousID string) string {
 	d.RequestID = ""
+	d.ResponseMode = ""
 	d.Links = append([]Link(nil), d.Links...)
 	sort.Slice(d.Links, func(i, j int) bool {
 		if d.Links[i].TargetID == d.Links[j].TargetID {

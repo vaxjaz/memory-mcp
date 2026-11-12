@@ -24,22 +24,24 @@ const SchemaVersion = 3
 
 // Entry bodies are free text. These fields track provenance, not semantic truth.
 type Entry struct {
+	ResponseMode           string            `json:"response_mode,omitempty"`
+	LinkCount              *int              `json:"link_count,omitempty"`
 	CheckedContextSourceID string            `json:"checked_context_source_id,omitempty" jsonschema:"Transient write response: current checkpoint validated for this operation, not a stored evidence link"`
 	ID                     string            `json:"id"`
 	RootID                 string            `json:"root_id"`
 	PreviousID             string            `json:"previous_id,omitempty"`
 	Kind                   string            `json:"kind"`
 	Scope                  string            `json:"scope"`
-	Title                  string            `json:"title"`
-	Body                   string            `json:"body"`
+	Title                  string            `json:"title,omitempty"`
+	Body                   string            `json:"body,omitempty"`
 	BodyBytes              int               `json:"body_bytes"`
 	BodySHA256             string            `json:"body_sha256"`
-	Origin                 string            `json:"origin"`
+	Origin                 string            `json:"origin,omitempty"`
 	SourceRef              string            `json:"source_ref,omitempty"`
 	Host                   string            `json:"host,omitempty"`
 	Model                  string            `json:"model,omitempty"`
 	Session                string            `json:"session,omitempty"`
-	CreatedAt              string            `json:"created_at"`
+	CreatedAt              string            `json:"created_at,omitempty"`
 	Current                bool              `json:"current"`
 	NeedsReview            bool              `json:"needs_review"`
 	Links                  []Link            `json:"links"`
@@ -54,6 +56,7 @@ type Link struct {
 }
 
 type Draft struct {
+	ResponseMode               string   `json:"response_mode,omitempty" jsonschema:"compact: short IDs/state/integrity receipt without body echo; full or omitted: legacy response. Not part of write identity."`
 	ContextSourceID            string   `json:"context_source_id,omitempty" jsonschema:"Actual CURRENT user-source checkpoint for this write, separate from historical evidence links. Use the source from the current hook/prepare/complete. Historical linked turns need not be completed again."`
 	Profile                    *Profile `json:"profile,omitempty" jsonschema:"For cases and hypotheses: concrete future use, counter-check against saving, applicability and boundaries. No fabricated counterexamples."`
 	Kind                       string   `json:"kind" jsonschema:"record for supplied material; case for a contextual decision; hypothesis is only created through memory_revise"`
@@ -205,6 +208,9 @@ PRAGMA user_version=2;`)
 }
 
 func Validate(d Draft) error {
+	if err := ValidateResponseMode(d.ResponseMode); err != nil {
+		return err
+	}
 	for _, field := range []struct{ name, value string }{{"scope", d.Scope}, {"title", d.Title}, {"body", d.Body}, {"source_ref", d.SourceRef}, {"host", d.Host}, {"model", d.Model}, {"session", d.Session}, {"request_id", d.RequestID}, {"context_source_id", d.ContextSourceID}} {
 		if err := textguard.Check(field.name, field.value, d.AllowReplacementCharacters); err != nil {
 			return err

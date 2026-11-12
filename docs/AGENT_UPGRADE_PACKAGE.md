@@ -1,6 +1,6 @@
 # 请宿主 Agent 执行：memory-mcp adapter 包升级
 
-这是 `0.2.2-adapters.2` 试用升级包，未发布 GitHub Release。包含 ZCode、Codex、Qoder CLI/IDE adapter，以及之前的复查与检索修复。根目录 `MANIFEST.json` 记录源码提交与系统包，`SHA256SUMS` 记录压缩包校验值。先运行程序的 `adapters`，再按实际宿主选协议；不能按模型名称猜测。
+这是 `0.2.3-compact.1` 试用升级包，未发布 GitHub Release。包含 ZCode、Codex、Qoder CLI/IDE adapter，以及之前的复查与检索修复。根目录 `MANIFEST.json` 记录源码提交与系统包，`SHA256SUMS` 记录压缩包校验值。先运行程序的 `adapters`，再按实际宿主选协议；不能按模型名称猜测。
 
 用户把本包交给你并要求升级后，请自主完成以下工作；不要只把一串命令交还用户。保留宿主原生权限与信任要求，不修改项目规则，也不要未经核对新建空库。
 
@@ -24,9 +24,11 @@
 
 ## 验证与交付
 
-11. 按宿主要求重启服务或新建会话。实际调用 `memory_bootstrap`，核对版本、原 data_dir、features 中的 `review_recovery`、`bounded_literal_search`、`host_adapters` 、`operation_ordered_approvals`、`lookup_diagnostics`、`explicit_write_context` 和 `readonly_diagnose`。命令行自测只能证明程序可运行，不能代替宿主已经调用新程序。
+11. 按宿主要求重启服务或新建会话。实际调用 `memory_bootstrap`，核对版本、原 data_dir、features 中的 `review_recovery`、`bounded_literal_search`、`host_adapters` 、`operation_ordered_approvals`、`lookup_diagnostics`、`explicit_write_context` 、`readonly_diagnose`、`compact_context` 和 `compact_receipts`。命令行自测只能证明程序可运行，不能代替宿主已经调用新程序。
 12. 使用只读搜索和完整读取核对原项目资料、历史和绑定仍在。doctor 必须带真实 `--host`、实际 `--project/--scope` 验证路由，不能只看 setup 退出码。核对 `context_check_handlers`、服务与 hook 的 data-dir、原生信任和实际新事件。手工回放也会生成 adapter_receipts，需与真实宿主会话交叉核对；native_event_verified 不会因配置存在自动变成 true。
 13. 实际问题按 `docs/REVIEW_RECOVERY.md` 恢复：更正结论直接 revise 并引用新依据；原结论不变则先 recheck 预览，展示后等用户对该方案的新确认，再 apply。升级授权不是批量清标记或清洗授权。不在正式库写虚构验证案例。
 14. 简短报告：升级前后版本、源码提交、程序路径、原数据目录、备份位置、服务名和当前 scope；分别说明配置更新、宿主实际工具版本、项目绑定及尚未实测的部分。失败时保留原库和旧程序，按备份回退配置，不直接修改数据库解除拦截。
 
 程序不访问网络，不附带数据库或用户记忆。包中没有“自动合并、自动清洗、全部恢复有效”的操作。超过 8 个检索词可直接 prepare；如果响应 keyword_search.status 为 directory_only，表示只返回目录，不能解释为无相关记忆。
+
+本版必须让宿主读取 docs/COMPACT_OUTPUT.md，采用短回执：context 默认 compact；record/review_done 显式 response_mode=compact，revise 放 draft.response_mode。案例显式使用本轮 context_source_id，修订放 draft 内。完整回包可选 full；不要将回执缺正文误判为原库正文丢失。先核对新 schema；不要求宿主为验证而新建业务案例。

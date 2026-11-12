@@ -3,7 +3,7 @@
 一个通用的 stdio MCP。保存真实协作材料、决策案例和可修正的偏好假设。
 不内置模型、不提供云端服务、不进行网络请求，由宿主 AI 完成理解和学习。
 
-**当前分支：v0.2.2-adapters.2 试用升级包，未发布 GitHub Release。包含 ZCode、Codex、Qoder CLI/IDE adapter，以及此前的复查恢复和检索修复。**
+**当前分支：v0.2.3-compact.1 离线试用包，未发布 GitHub Release。新增轻量候选、短回执和 Stop 流程收敛，包含此前 adapter 与错误修复。详见 [本版说明](docs/COMPACT_OUTPUT.md)。**
 由宿主 Agent 识别客户端能力并完成用户级接入，目标是记录用户业务决策与纠偏，在后续相关开发中检索使用。
 运行 `memory-mcp adapters` 查看已实现协议与验证边界；接入方式见 [宿主适配说明](docs/adapters/README.md)。其他宿主仍可使用通用 MCP。
 修复范围及实际恢复步骤见 [复查与检索修复](docs/REVIEW_RECOVERY.md)。

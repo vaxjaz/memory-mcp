@@ -30,8 +30,10 @@ func normalizeSearchQuery(raw string) (string, []string, error) {
 }
 
 type KeywordSearchInfo struct {
-	Status    string   `json:"status"`
-	UsedTerms []string `json:"used_terms,omitempty"`
-	Query     string   `json:"query,omitempty"`
-	Notice    string   `json:"notice"`
+	TermCount    int      `json:"term_count,omitempty"`
+	TermsOmitted bool     `json:"terms_omitted,omitempty"`
+	Status       string   `json:"status"`
+	UsedTerms    []string `json:"used_terms,omitempty"`
+	Query        string   `json:"query,omitempty"`
+	Notice       string   `json:"notice"`
 }

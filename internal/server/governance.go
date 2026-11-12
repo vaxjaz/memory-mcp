@@ -31,7 +31,10 @@ type CleanupOutput struct {
 }
 
 func addGovernanceTools(s *mcp.Server, store *memory.Store, read, write *mcp.ToolAnnotations) {
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_context", Description: "Before a relevant decision/action, reconstruct the task from the active project AND visible conversation. prepare returns a paginated directory plus optional grounded keyword candidates; host performs semantic selection and bounded follow-up through evidence/exception/replacement links. Read selected full entries with memory_read(context_source_id), then complete with concrete intended constraints. skip is allowed for memory-independent tasks; save_candidate gates Stop continuation. Receipts do not prove understanding or prevention. Does not create cases.", Annotations: write}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.ContextInput) (*mcp.CallToolResult, memory.ContextResult, error) {
+	mcp.AddTool(s, &mcp.Tool{Name: "memory_context", Description: "Before a relevant decision/action, reconstruct the task from the active project AND visible conversation. prepare defaults to compact previews (<=8192 JSON bytes) with matches first; response_mode=full restores legacy output. Both streams paginate; host performs semantic selection and bounded follow-up through evidence/exception/replacement links. Read selected full entries with memory_read(context_source_id), then complete with concrete intended constraints. skip is allowed for memory-independent tasks; save_candidate gates Stop continuation. Receipts do not prove understanding or prevention. Does not create cases.", Annotations: write}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.ContextInput) (*mcp.CallToolResult, memory.ContextResult, error) {
+		if in.ResponseMode == "" {
+			in.ResponseMode = "compact"
+		}
 		r, err := store.Context(ctx, in)
 		return nil, r, err
 	})
