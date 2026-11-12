@@ -53,6 +53,8 @@ Usage:
   memory-mcp hook --host HOST [--data-dir DIR]    User-level event handler (not an MCP server)
   memory-mcp doctor [--data-dir DIR]             Event/recall/review receipts, no chat bodies
   memory-mcp adapters                           List implemented host protocols and validation limits
+  memory-mcp diagnose --data-dir DIR [--entry-id ID] [--probe-ids ID,ID] [--out FILE]
+                                             Read-only metadata/link diagnostics; no migration or repair
   memory-mcp guide                          Print host integration guide
   memory-mcp config                         Print generic MCP JSON configuration
   memory-mcp version                        Print version
@@ -91,6 +93,9 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 		return encoder.Encode(map[string]any{"mcpServers": map[string]any{"decision-memory": map[string]any{"command": path, "args": []string{"serve"}}}})
 	}
 	cmd := args[0]
+	if cmd == "diagnose" {
+		return diagnose(args[1:], buildVersion, buildCommit)
+	}
 	if cmd == "setup" || cmd == "hook" || cmd == "doctor" || cmd == "adapters" {
 		return hooks.Run(context.Background(), args)
 	}

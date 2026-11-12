@@ -2,8 +2,10 @@ package memory
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -45,21 +47,27 @@ func (s *Store) RequireContext(ctx context.Context, t HookTurn) error {
 func (s *Store) ContextStatus(ctx context.Context, source string) (ContextResult, error) {
 	r := ContextResult{SourceID: source, SelectedIDs: []string{}, Notice: "Read/selection receipts verify sequence and versions, not semantic correctness or actual prevention. Relevant full content remains authoritative over navigation summaries."}
 	var selected string
-	err := s.db.QueryRowContext(ctx, "SELECT task,status,selected_json,decision,questions FROM context_checks WHERE source_id=?", source).Scan(&r.Task, &r.Status, &selected, &r.Decision, &r.Questions)
+	err := s.db.QueryRowContext(ctx, "SELECT task,status,selected_json,decision,questions,save_candidate FROM context_checks WHERE source_id=?", source).Scan(&r.Task, &r.Status, &selected, &r.Decision, &r.Questions, &r.SaveCandidate)
+	if errors.Is(err, sql.ErrNoRows) {
+		r.Status = "not_prepared"
+		r.Notice = "No context check has been prepared for this source. Call memory_context(action=prepare) with the actual current user source before full-read tracking or complete; status inspection does not create or approve a check."
+		return r, nil
+	}
 	if err != nil {
 		return r, err
 	}
 	if err = json.Unmarshal([]byte(selected), &r.SelectedIDs); err != nil {
 		return r, err
 	}
-	// save candidate is explicit per-turn workflow state, not a permanent case.
-	var candidate bool
-	err = s.db.QueryRowContext(ctx, "SELECT save_candidate FROM context_checks WHERE source_id=?", source).Scan(&candidate)
-	r.SaveCandidate = candidate
 	r.Notice = "Navigation and receipts are not semantic proof. Follow relevant evidence/exception/replacement links. Do not turn repeated memory citations into independent evidence."
 	return r, err
 }
-func (s *Store) Context(ctx context.Context, in ContextInput) (ContextResult, error) {
+func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextResult, err error) {
+	defer func() {
+		if err != nil {
+			err = fmt.Errorf("memory_context.%s (data_dir=%q): %w", in.Action, s.Dir, err)
+		}
+	}()
 	if err := validScope(in.Scope); err != nil {
 		return ContextResult{}, err
 	}
@@ -69,10 +77,16 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (ContextResult, er
 	}
 	if strings.HasPrefix(source.SourceRef, HookSourcePrefix) {
 		t, er := s.HookTurn(ctx, in.SourceID)
+		if errors.Is(er, sql.ErrNoRows) {
+			return ContextResult{}, missingLookup("hook_turn_not_found", "source_id", in.SourceID, in.Scope, "The raw entry exists, but its hook-turn metadata is missing. Verify actual hook/MCP data directories and the running versions, then use an actually captured current turn. Do not fabricate a turn or silently approve context.")
+		}
 		if er != nil {
 			return ContextResult{}, er
 		}
 		latest, er := s.HookLatestForHost(ctx, source.Host, in.Scope, t.Session)
+		if errors.Is(er, sql.ErrNoRows) {
+			return ContextResult{}, missingLookup("hook_session_not_found", "source_id", in.SourceID, in.Scope, "No matching host/scope/session turn is registered in this library. Verify hook routing and data_dir before proceeding.")
+		}
 		if er != nil {
 			return ContextResult{}, er
 		}
@@ -100,6 +114,9 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (ContextResult, er
 		// Re-preparing means the task changed: earlier full-read receipts cannot
 		// silently authorize a different action. Paging the SAME task preserves them.
 		old, er := s.ContextStatus(ctx, in.SourceID)
+		if er != nil {
+			return ContextResult{}, fmt.Errorf("prepare.load_context_state: %w", er)
+		}
 		same := er == nil && old.Task == in.Task && old.Questions == in.Questions
 		tx, er := s.db.BeginTx(ctx, nil)
 		if er != nil {
@@ -159,20 +176,23 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (ContextResult, er
 		defer tx.Rollback()
 		var status string
 		if er = tx.QueryRowContext(ctx, "SELECT status FROM context_checks WHERE source_id=?", in.SourceID).Scan(&status); er != nil {
+			if errors.Is(er, sql.ErrNoRows) {
+				return ContextResult{}, missingLookup("context_not_prepared", "source_id", in.SourceID, in.Scope, "Call prepare using this current user source, read the selected full memories with context_source_id, then complete. Missing state is not automatically treated as a completed check.")
+			}
 			return ContextResult{}, er
 		}
 		if status != "prepared" && status != "complete" {
 			return ContextResult{}, errors.New("prepare using current conversation before completing")
 		}
 		seen := map[string]bool{}
-		for _, id := range in.SelectedIDs {
+		for index, id := range in.SelectedIDs {
 			if seen[id] {
 				return ContextResult{}, errors.New("duplicate selected entry")
 			}
 			seen[id] = true
 			e, er := resolveCurrent(ctx, tx, id)
 			if er != nil {
-				return ContextResult{}, er
+				return ContextResult{}, fmt.Errorf("complete.selected_ids[%d]=%q: %w", index, id, er)
 			}
 			if e.ID != id || e.State.State != "active" || e.NeedsReview || (e.Scope != in.Scope && e.Scope != "global") {
 				return ContextResult{}, errors.New("selected memory is outdated, inactive, outside scope or needs review")
@@ -215,6 +235,9 @@ func (s *Store) TrackContextRead(ctx context.Context, source, id string) error {
 	defer tx.Rollback()
 	var scope, status string
 	if err = tx.QueryRowContext(ctx, "SELECT scope,status FROM context_checks WHERE source_id=?", source).Scan(&scope, &status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return missingLookup("context_not_prepared", "context_source_id", source, "", "Verify this source in the same library and call memory_context(action=prepare) before tracking full reads. No read receipt was recorded.")
+		}
 		return err
 	}
 	if status != "prepared" && status != "complete" {
@@ -239,7 +262,7 @@ func (s *Store) ContextReady(ctx context.Context, source string) error {
 		return err
 	}
 	if r.Status != "complete" {
-		return errors.New("current task memory check has not completed")
+		return fmt.Errorf("context_not_complete: source_id=%q, status=%q; prepare the current task, read applicable full entries, then complete the memory check", source, r.Status)
 	}
 	for _, id := range r.SelectedIDs {
 		e, er := s.ResolveCurrent(ctx, id)
@@ -259,37 +282,8 @@ func (s *Store) ContextReady(ctx context.Context, source string) error {
 	return nil
 }
 func (s *Store) CheckWriteContext(ctx context.Context, d Draft) error {
-	if d.Kind == "record" {
-		return nil
-	}
-	for _, l := range d.Links {
-		if l.Relation == "contradicts" {
-			continue
-		}
-		if l.Relation == "context" {
-			source, err := scanEntry(s.db.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", l.TargetID))
-			if err != nil {
-				return err
-			}
-			valid, err := validGround(ctx, s.db, source)
-			if err != nil {
-				return err
-			}
-			if !valid {
-				continue
-			}
-		}
-		var n int
-		if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM context_checks WHERE source_id=?", l.TargetID).Scan(&n); err != nil {
-			return err
-		}
-		if n > 0 {
-			if err := s.ContextReady(ctx, l.TargetID); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	_, err := s.ValidateWriteContext(ctx, d)
+	return err
 }
 
 func (s *Store) CurrentCasesForSource(ctx context.Context, source, scope string) ([]string, error) {

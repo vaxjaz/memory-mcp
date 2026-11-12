@@ -145,6 +145,9 @@ func (s *Store) ResolveCurrent(ctx context.Context, id string) (Entry, error) {
 }
 func resolveCurrent(ctx context.Context, q queryer, id string) (Entry, error) {
 	e, err := scanEntry(q.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return e, missingLookup("memory_entry_not_found", "id", id, "", "Verify the full entry ID in this same library; search/read results for another entry do not establish this dependency exists.")
+	}
 	if err != nil {
 		return e, err
 	}
@@ -154,7 +157,11 @@ func resolveCurrent(ctx context.Context, q queryer, id string) (Entry, error) {
 			return e, errors.New("replacement cycle")
 		}
 		seen[e.RootID] = true
-		e, err = scanEntry(q.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE root_id=? AND current=1", e.RootID))
+		root, scope := e.RootID, e.Scope
+		e, err = scanEntry(q.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE root_id=? AND current=1", root))
+		if errors.Is(err, sql.ErrNoRows) {
+			return e, missingLookup("current_revision_not_found", "root_id", root, scope, "No current revision exists for this lineage. Inspect the library/backup before revising; do not invent a replacement entry.")
+		}
 		if err != nil {
 			return e, err
 		}
@@ -164,7 +171,11 @@ func resolveCurrent(ctx context.Context, q queryer, id string) (Entry, error) {
 		if e.State.State != "superseded" {
 			return e, nil
 		}
-		e, err = scanEntry(q.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE root_id=? AND current=1", e.State.ReplacementRootID))
+		replacement := e.State.ReplacementRootID
+		e, err = scanEntry(q.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE root_id=? AND current=1", replacement))
+		if errors.Is(err, sql.ErrNoRows) {
+			return e, missingLookup("replacement_revision_not_found", "replacement_root_id", replacement, scope, "The replacement pointer has no current entry. Inspect the library/backup; do not silently bypass the missing replacement.")
+		}
 		if err != nil {
 			return e, err
 		}
@@ -221,6 +232,9 @@ type MaintenanceConfig struct {
 
 func userSource(ctx context.Context, q queryer, id, scope string) (Entry, error) {
 	e, err := scanEntry(q.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return e, missingLookup("user_source_not_found", "source_id", id, scope, "This user-source ID is absent from the opened library. Verify the full ID and that MCP and hooks use the same data_dir; a readable target case does not establish that its new source exists. Do not create a duplicate case or invent a hook source ID.")
+	}
 	if err != nil {
 		return e, err
 	}

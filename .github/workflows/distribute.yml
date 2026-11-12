@@ -90,6 +90,7 @@ jobs:
           python3 tooling/scripts/check_governance_flow.py "$binary" --if-supported
           python3 tooling/scripts/check_adapters.py "$binary" --if-supported
           python3 tooling/scripts/check_review_recovery.py "$binary" --if-supported
+          python3 tooling/scripts/check_context_diagnostics.py "$binary" --if-supported
 
       - name: Save downloadable build artifacts
         uses: actions/upload-artifact@v4

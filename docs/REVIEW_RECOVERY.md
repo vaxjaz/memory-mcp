@@ -1,6 +1,6 @@
 # v0.2.1：纠错通道与检索修复
 
-这些修复首先以 v0.2.1-reviewfix.1 单独提供，现已包含在 v0.2.2-adapters.1 中。数据库仍为 v3，不批量清标记、不改写历史正文。安装升级继续遵循 [AGENT_INSTALL.md](AGENT_INSTALL.md)，复用原库和项目绑定。
+这些修复首先以 v0.2.1-reviewfix.1 单独提供，现已包含在 v0.2.2-adapters.2 中。数据库仍为 v3，不批量清标记、不改写历史正文。安装升级继续遵循 [AGENT_INSTALL.md](AGENT_INSTALL.md)，复用原库和项目绑定。
 
 ## 待复查不等于禁止纠错
 

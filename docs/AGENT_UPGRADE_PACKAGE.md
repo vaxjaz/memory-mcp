@@ -1,6 +1,6 @@
 # 请宿主 Agent 执行：memory-mcp adapter 包升级
 
-这是 `0.2.2-adapters.1` 试用升级包，未发布 GitHub Release。包含 ZCode、Codex、Qoder CLI/IDE adapter，以及之前的复查与检索修复。根目录 `MANIFEST.json` 记录源码提交与系统包，`SHA256SUMS` 记录压缩包校验值。先运行程序的 `adapters`，再按实际宿主选协议；不能按模型名称猜测。
+这是 `0.2.2-adapters.2` 试用升级包，未发布 GitHub Release。包含 ZCode、Codex、Qoder CLI/IDE adapter，以及之前的复查与检索修复。根目录 `MANIFEST.json` 记录源码提交与系统包，`SHA256SUMS` 记录压缩包校验值。先运行程序的 `adapters`，再按实际宿主选协议；不能按模型名称猜测。
 
 用户把本包交给你并要求升级后，请自主完成以下工作；不要只把一串命令交还用户。保留宿主原生权限与信任要求，不修改项目规则，也不要未经核对新建空库。
 
@@ -9,6 +9,8 @@
 1. 先识别**当前服务实际运行的机器、系统与架构**，而非按模型名字推断。Windows 宿主程序与 WSL/Linux 程序分别核对。包内含 Windows amd64、Linux amd64/arm64、macOS amd64/arm64，位于 `packages/`；不需要本机安装 Go、Python、Node 或编译源码。
 2. 读取 MANIFEST.json，校验所选压缩包的 SHA-256，解压到稳定用户目录。不要用临时目录作为长期 executable 路径。
 3. 用新程序 `version`、`build-info`、`help`、`guide` 核对版本和源码提交。此时不要打开原数据库。
+
+遇到缺 ID、complete 后仍拦写或双注入时，完成下述停用和备份后，先按根目录 DIAGNOSE_FIRST.md 用只读命令保存原始诊断，再升级。不要先清洗、补造来源或猜测修复 links。
 
 ## 复用原安装
 
@@ -22,7 +24,7 @@
 
 ## 验证与交付
 
-11. 按宿主要求重启服务或新建会话。实际调用 `memory_bootstrap`，核对版本、原 data_dir、features 中的 `review_recovery`、`bounded_literal_search`、`host_adapters` 和 `operation_ordered_approvals`。命令行自测只能证明程序可运行，不能代替宿主已经调用新程序。
+11. 按宿主要求重启服务或新建会话。实际调用 `memory_bootstrap`，核对版本、原 data_dir、features 中的 `review_recovery`、`bounded_literal_search`、`host_adapters` 、`operation_ordered_approvals`、`lookup_diagnostics`、`explicit_write_context` 和 `readonly_diagnose`。命令行自测只能证明程序可运行，不能代替宿主已经调用新程序。
 12. 使用只读搜索和完整读取核对原项目资料、历史和绑定仍在。doctor 必须带真实 `--host`、实际 `--project/--scope` 验证路由，不能只看 setup 退出码。核对 `context_check_handlers`、服务与 hook 的 data-dir、原生信任和实际新事件。手工回放也会生成 adapter_receipts，需与真实宿主会话交叉核对；native_event_verified 不会因配置存在自动变成 true。
 13. 实际问题按 `docs/REVIEW_RECOVERY.md` 恢复：更正结论直接 revise 并引用新依据；原结论不变则先 recheck 预览，展示后等用户对该方案的新确认，再 apply。升级授权不是批量清标记或清洗授权。不在正式库写虚构验证案例。
 14. 简短报告：升级前后版本、源码提交、程序路径、原数据目录、备份位置、服务名和当前 scope；分别说明配置更新、宿主实际工具版本、项目绑定及尚未实测的部分。失败时保留原库和旧程序，按备份回退配置，不直接修改数据库解除拦截。
