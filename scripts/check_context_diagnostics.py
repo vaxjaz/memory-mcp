@@ -10,7 +10,7 @@ import sqlite3
 import subprocess
 import tempfile
 
-from smoke import Host, fixture_profile
+from smoke import Host, fixture_profile, mode_args
 
 
 def main():
@@ -25,14 +25,14 @@ def main():
         project = root / 'project'; project.mkdir()
         config = root / 'user' / 'config.toml'
         scope = 'project:isolated-context-regression'
-        host = Host(binary, str(data))
+        host = Host(binary, str(data), mode="strict")
         try:
             bootstrap = host.tool('memory_bootstrap', {})
             if 'explicit_write_context' not in bootstrap['features'] and args.if_supported:
                 print('SKIP: historical executable has no explicit write checkpoint')
                 return
             def cli(*cmd, success=True):
-                p = subprocess.run([binary, *cmd], capture_output=True, text=True, encoding='utf-8', timeout=30)
+                p = subprocess.run([binary, cmd[0], *(mode_args(binary) if cmd[0] in ('setup','hook') else []), *cmd[1:]], capture_output=True, text=True, encoding='utf-8', timeout=30)
                 assert (p.returncode == 0) == success, (cmd, p.stdout, p.stderr)
                 return p
             cli('setup', '--host', 'codex', '--config', str(config), '--data-dir', str(data),

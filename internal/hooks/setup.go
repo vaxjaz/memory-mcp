@@ -18,7 +18,14 @@ import (
 const ManagedID = "decision-memory-hooks-v1"
 
 func managedHookArgs(o SetupOptions, name string) []any {
-	args := []any{"hook", "--host", o.Host, "--data-dir", o.DataDir, "--managed-id", ManagedID + "|" + name, "--server-name", name, "--capture-user-text", "--context-check"}
+	mode, _ := memory.IntegrationMode(o.Mode)
+	args := []any{"hook", "--mode", mode, "--host", o.Host, "--data-dir", o.DataDir, "--managed-id", ManagedID + "|" + name, "--server-name", name}
+	if o.Capture {
+		args = append(args, "--capture-user-text")
+	}
+	if mode == memory.ModeStrict {
+		args = append(args, "--context-check")
+	}
 	if o.Review {
 		args = append(args, "--review-on-stop")
 	}
@@ -26,6 +33,7 @@ func managedHookArgs(o SetupOptions, name string) []any {
 }
 
 type SetupOptions struct {
+	Mode                                    string
 	Host                                    string
 	Config, DataDir, Project, Scope, Binary string
 	ServerName                              string
@@ -163,6 +171,14 @@ func backupFile(p string, raw []byte) (string, error) {
 	return dest, err
 }
 func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
+	mode, modeErr := memory.IntegrationMode(o.Mode)
+	if modeErr != nil {
+		return nil, modeErr
+	}
+	o.Mode = mode
+	if mode == memory.ModeAssist && o.Review {
+		return nil, errors.New("assist mode has no Stop model review; choose --mode strict explicitly for legacy review")
+	}
 	if o.Host == "" {
 		o.Host = "zcode"
 	}
@@ -170,7 +186,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !o.Capture {
+	if mode == memory.ModeStrict && !o.Capture {
 		return nil, errors.New("setup requires --capture-user-text to explicitly enable raw input/answer collection for bound projects; read docs/HOOK_SETUP.md first")
 	}
 	if o.Project == "" || o.Scope == "" {
@@ -358,7 +374,13 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		events[event] = kept
 	}
 	args := managedHookArgs(o, name)
-	for _, event := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "Stop"} {
+	installedEvents := []string{"SessionStart", "UserPromptSubmit"}
+	if mode == memory.ModeStrict {
+		installedEvents = append(installedEvents, "PreToolUse", "Stop")
+	} else if o.Capture {
+		installedEvents = append(installedEvents, "Stop")
+	}
+	for _, event := range installedEvents {
 		group := map[string]any{"hooks": []any{map[string]any{"type": "process", "command": o.Binary, "args": args, "enabled": true, "timeoutMs": 10000}}}
 		if o.Host != "zcode" {
 			group["hooks"] = []any{map[string]any{"type": "command", "command": nativeCommand(o, name), "timeout": 10}}
@@ -375,15 +397,17 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	}
 	h["enabled"] = true
 	entry["command"] = o.Binary
-	entry["args"] = []string{"serve", "--data-dir", o.DataDir}
+	entry["args"] = []string{"serve", "--mode", mode, "--data-dir", o.DataDir}
 	if o.Host == "zcode" {
 		entry["enable"] = true
 	} else if o.Host == "codex" {
 		entry["enabled"] = true
 	}
 	servers[name] = entry
-	report := map[string]any{"config": o.Config, "data_dir": o.DataDir, "project": o.Project, "scope": o.Scope, "mcp_server": name, "review_on_stop": o.Review, "raw_capture": true, "host_event_verified": false, "restart_required": true, "dry_run": o.DryRun}
-	report["context_check"] = true
+	report := map[string]any{"config": o.Config, "mode": mode, "data_dir": o.DataDir, "project": o.Project, "scope": o.Scope, "mcp_server": name, "review_on_stop": o.Review, "raw_capture": o.Capture, "host_event_verified": false, "restart_required": true, "dry_run": o.DryRun}
+	report["context_check"] = mode == memory.ModeStrict
+	report["mode_scope"] = "this MCP service and all its bound projects; persists until explicitly reconfigured"
+	report["mode_prompt_required"] = false
 	report["host"] = o.Host
 	report["hook_trust_required"] = adapter.RequiresTrust
 	report["hooks_config"] = adapter.DefaultHooks(o.Config)

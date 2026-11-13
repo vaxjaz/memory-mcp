@@ -216,7 +216,7 @@ func TestSetupPreservesConfigAndReusesDataWithoutProjectWrites(t *testing.T) {
 	before := map[string]any{"unrelated": "keep", "mcp": map[string]any{"servers": map[string]any{"other": map[string]any{"command": "other-tool"}, "decision-memory": map[string]any{"command": "/old/memory-mcp", "args": []string{"serve", "--data-dir", data}, "env": map[string]string{"KEEP": "value"}}}}, "hooks": map[string]any{"enabled": true, "events": map[string]any{"UserPromptSubmit": []any{map[string]any{"hooks": []any{map[string]any{"type": "process", "command": "other-hook", "args": []any{}}}}}}}}
 	raw, _ := json.Marshal(before)
 	os.WriteFile(config, raw, 0600)
-	o := SetupOptions{Config: config, DataDir: data, Project: project, Scope: "project:demo", Binary: filepath.Join(home, "memory-mcp"), Capture: true, Review: true}
+	o := SetupOptions{Mode: "strict", Config: config, DataDir: data, Project: project, Scope: "project:demo", Binary: filepath.Join(home, "memory-mcp"), Capture: true, Review: true}
 	report, err := Setup(testCtx, o)
 	if err != nil {
 		t.Fatal(err)
@@ -269,7 +269,7 @@ func TestSetupRefusesUnsafeTargetsAndPreservesFallback(t *testing.T) {
 	fallback := filepath.Join(home, ".agents", "mcp.json")
 	os.MkdirAll(filepath.Dir(fallback), 0700)
 	os.WriteFile(fallback, []byte(`{"mcpServers":{"existing":{"command":"existing-tool"}}}`), 0600)
-	o := SetupOptions{Config: filepath.Join(home, ".zcode", "cli", "config.json"), DataDir: filepath.Join(home, "data"), Project: project, Scope: "project:demo", Binary: filepath.Join(home, "memory-mcp"), Capture: true, Review: true}
+	o := SetupOptions{Mode: "strict", Config: filepath.Join(home, ".zcode", "cli", "config.json"), DataDir: filepath.Join(home, "data"), Project: project, Scope: "project:demo", Binary: filepath.Join(home, "memory-mcp"), Capture: true, Review: true}
 	if _, err := Setup(testCtx, o); err != nil {
 		t.Fatal(err)
 	}
@@ -299,7 +299,7 @@ func TestNamedAcceptanceServerDoesNotReplaceFormalMemory(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	config := filepath.Join(home, ".zcode", "cli", "config.json")
-	formal := SetupOptions{Config: config, DataDir: filepath.Join(home, "formal-data"), Project: p, Scope: "project:formal", Binary: filepath.Join(home, "memory-mcp"), Capture: true, Review: true}
+	formal := SetupOptions{Mode: "strict", Config: config, DataDir: filepath.Join(home, "formal-data"), Project: p, Scope: "project:formal", Binary: filepath.Join(home, "memory-mcp"), Capture: true, Review: true}
 	if _, err := Setup(testCtx, formal); err != nil {
 		t.Fatal(err)
 	}

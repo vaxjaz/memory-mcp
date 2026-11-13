@@ -7,7 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from smoke import Host, fixture_profile
+from smoke import Host, fixture_profile, mode_args
 
 
 def main():
@@ -23,7 +23,7 @@ def main():
         data = user / 'memory'
         config = user / 'zcode.json'
         scope = 'project:governance-fixture'
-        host = Host(binary, str(data))
+        host = Host(binary, str(data), mode="strict")
         try:
             boot = host.tool('memory_bootstrap', {})
             if 'contextual_retrieval' not in boot.get('features', []):
@@ -31,7 +31,7 @@ def main():
                 print('SKIP: historical release predates governance workflow')
                 return
             def command(*args, payload=None):
-                result = subprocess.run([binary, *args], input=None if payload is None else json.dumps(payload, ensure_ascii=False),
+                result = subprocess.run([binary, args[0], *(mode_args(binary) if args[0] in ('setup','hook') else []), *args[1:]], input=None if payload is None else json.dumps(payload, ensure_ascii=False),
                                         text=True, encoding='utf-8', capture_output=True, timeout=30)
                 assert result.returncode == 0, (args, result.stdout, result.stderr)
                 return json.loads(result.stdout)

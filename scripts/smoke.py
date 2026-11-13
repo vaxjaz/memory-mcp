@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Exercise an actual packaged stdio executable without a model or MCP client app."""
 import argparse
+import functools
 import hashlib
 import json
 from pathlib import Path
@@ -8,6 +9,15 @@ import queue
 import subprocess
 import tempfile
 import threading
+
+
+@functools.lru_cache(maxsize=None)
+def supports_modes(binary):
+    return '--mode' in subprocess.check_output([binary, 'help'], text=True, encoding='utf-8')
+
+
+def mode_args(binary, mode='strict'):
+    return ['--mode', mode] if supports_modes(binary) else []
 
 
 def fixture_profile():
@@ -18,8 +28,8 @@ def fixture_profile():
 
 
 class Host:
-    def __init__(self, binary, data_dir):
-        self.p = subprocess.Popen([binary, "serve", "--data-dir", data_dir],
+    def __init__(self, binary, data_dir, mode=None):
+        self.p = subprocess.Popen([binary, "serve", "--data-dir", data_dir, *(mode_args(binary, mode) if mode else [])],
                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE, text=True)
         self.lines = queue.Queue()
@@ -87,7 +97,7 @@ def main():
         assert actual == args.expected_version, (actual, args.expected_version)
     with tempfile.TemporaryDirectory(prefix="memory-mcp-smoke-") as temp:
         data = str(Path(temp) / "local-data")
-        host = Host(binary, data)
+        host = Host(binary, data, mode="strict")
         try:
             discovered = {t["name"] for t in host.request("tools/list", {})["tools"]}
             assert {"memory_bootstrap", "memory_search", "memory_read", "memory_record", "memory_revise"} <= discovered
@@ -136,7 +146,7 @@ def main():
             host.close()
 
         # Reopen from a different host process to verify persistence.
-        host = Host(binary, data)
+        host = Host(binary, data, mode="strict")
         try:
             old = host.tool("memory_read", {"id": original["id"]})
             assert old["entry"]["body"] == draft["body"]
@@ -155,7 +165,7 @@ def main():
             restore_dir = Path(temp) / "restored"
             restore_dir.mkdir()
             (restore_dir / "memory.db").write_bytes(Path(backup).read_bytes())
-            restored = Host(binary, str(restore_dir))
+            restored = Host(binary, str(restore_dir), mode="strict")
             try:
                 assert restored.tool("memory_record", draft)["id"] == original["id"]
             finally:

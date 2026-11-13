@@ -53,6 +53,7 @@ func (e *Event) normalize() {
 }
 
 type Runtime struct {
+	Mode            string
 	Host            string
 	Store           *memory.Store
 	Capture, Review bool
@@ -62,6 +63,9 @@ type Runtime struct {
 
 func (r Runtime) Handle(ctx context.Context, e Event) (map[string]any, error) {
 	e.normalize()
+	if r.Mode == memory.ModeAssist {
+		return r.assist(ctx, e)
+	}
 	empty := map[string]any{}
 	scope, err := r.Store.HookResolve(ctx, e.CWD)
 	if err != nil {

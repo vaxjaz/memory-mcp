@@ -44,18 +44,18 @@ func run(args []string) error {
 		fmt.Print(`memory-mcp: local decision memory, powered by your host AI.
 
 Usage:
-  memory-mcp serve [--data-dir DIR]           MCP over stdin/stdout
+  memory-mcp serve [--mode assist|strict] [--data-dir DIR]           MCP over stdin/stdout
   memory-mcp status [--data-dir DIR]          Show path and record count
   memory-mcp export --out FILE [--data-dir DIR]
   memory-mcp backup --out FILE [--data-dir DIR]  Consistent standalone SQLite snapshot
   memory-mcp forget --id ID --yes [--data-dir DIR]
-  memory-mcp setup --host HOST --project DIR --scope project:ID --capture-user-text
+  memory-mcp setup --host HOST --mode assist --project DIR --scope project:ID
   memory-mcp hook --host HOST [--data-dir DIR]    User-level event handler (not an MCP server)
   memory-mcp doctor [--data-dir DIR]             Event/recall/review receipts, no chat bodies
   memory-mcp adapters                           List implemented host protocols and validation limits
   memory-mcp diagnose --data-dir DIR [--entry-id ID] [--probe-ids ID,ID] [--out FILE]
                                              Read-only metadata/link diagnostics; no migration or repair
-  memory-mcp guide                          Print host integration guide
+  memory-mcp guide [--mode assist|strict]     Print the selected integration guide
   memory-mcp config                         Print generic MCP JSON configuration
   memory-mcp version                        Print version
   memory-mcp build-info                     Print version and exact packaged source commit
@@ -80,7 +80,19 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 		return json.NewEncoder(os.Stdout).Encode(map[string]any{"version": buildVersion, "source_commit": commit, "schema_version": memory.SchemaVersion})
 	}
 	if args[0] == "guide" {
-		fmt.Print(server.Guide)
+		fs := flag.NewFlagSet("guide", flag.ContinueOnError)
+		m := fs.String("mode", "assist", "assist or strict")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 0 {
+			return errors.New("unexpected positional arguments")
+		}
+		mode, err := memory.IntegrationMode(*m)
+		if err != nil {
+			return err
+		}
+		fmt.Print(server.GuideFor(mode))
 		return nil
 	}
 	if args[0] == "config" {
@@ -90,7 +102,7 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 		}
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
-		return encoder.Encode(map[string]any{"mcpServers": map[string]any{"decision-memory": map[string]any{"command": path, "args": []string{"serve"}}}})
+		return encoder.Encode(map[string]any{"mcpServers": map[string]any{"decision-memory": map[string]any{"command": path, "args": []string{"serve", "--mode", "assist"}}}})
 	}
 	cmd := args[0]
 	if cmd == "diagnose" {
@@ -106,6 +118,7 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 	}
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	dir := fs.String("data-dir", "", "local data directory")
+	modeArg := fs.String("mode", "assist", "persistent service mode: assist or explicit strict compatibility")
 	var out, id string
 	var yes bool
 	if cmd == "export" || cmd == "backup" {
@@ -130,6 +143,10 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 	if cmd == "forget" && (id == "" || !yes) {
 		return errors.New("forget requires --id ID --yes; removes all revisions and dependent interpretations")
 	}
+	mode, modeErr := memory.IntegrationMode(*modeArg)
+	if modeErr != nil {
+		return modeErr
+	}
 	if *dir == "" {
 		p, err := memory.DefaultDir()
 		if err != nil {
@@ -147,7 +164,7 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 	switch cmd {
 	case "serve":
 		// stdout belongs exclusively to the MCP transport; diagnostics use stderr.
-		return server.New(store, buildVersion).Run(ctx, &mcp.StdioTransport{})
+		return server.New(store, buildVersion, mode).Run(ctx, &mcp.StdioTransport{})
 	case "status":
 		stats, err := store.Stats(ctx)
 		if err != nil {

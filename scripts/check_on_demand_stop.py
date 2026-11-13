@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import time
 
-from smoke import Host, fixture_profile
+from smoke import Host, fixture_profile, mode_args
 
 
 def main():
@@ -20,12 +20,12 @@ def main():
     with tempfile.TemporaryDirectory(prefix='memory demand 中文 ') as tmp:
         root=Path(tmp); data=root/'data'; project=root/'project'; project.mkdir()
         config=root/'zcode.json'; scope='project:demand-fixture'
-        host=Host(binary,str(data))
+        host=Host(binary,str(data), mode="strict")
         try:
             if 'on_demand_stop' not in host.tool('memory_bootstrap',{})['features'] and args.if_supported:
                 print('SKIP: historical executable has no on-demand Stop')
                 return
-            p=subprocess.run([binary,'setup','--host','zcode','--config',str(config),'--data-dir',str(data),
+            p=subprocess.run([binary,'setup',*mode_args(binary),'--host','zcode','--config',str(config),'--data-dir',str(data),
                 '--project',str(project),'--scope',scope,'--capture-user-text'],capture_output=True,text=True,encoding='utf-8',timeout=30)
             assert p.returncode==0,p.stderr
             assert json.loads(p.stdout)['review_on_stop'] is False
@@ -57,7 +57,7 @@ def main():
             host.tool('memory_record',draft,True)
             out,pending_ms=hook('Stop',last_assistant_message='Deliver despite unfinished memory candidate')
             assert out=={} and [x['source_id'] for x in pending()]==[sid]
-            host.close(); host=Host(binary,str(data))
+            host.close(); host=Host(binary,str(data), mode="strict")
             state=host.tool('memory_context',dict(action='status',scope=scope,source_id=sid))
             assert state['memory_review']['state']=='pending'
             current=start('meaningful-save')

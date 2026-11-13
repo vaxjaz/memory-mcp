@@ -16,9 +16,9 @@ type ContextInput struct {
 	CandidateSourceID string   `json:"candidate_source_id,omitempty" jsonschema:"candidate action only: historical candidate to update/withdraw. source_id still identifies the actual current user source in the same scope."`
 	ReviewAtStop      bool     `json:"review_at_stop,omitempty" jsonschema:"Only for an explicit meaningful pending candidate: ask for one extra model review at Stop. Default false; saved or dismissed candidates never trigger it."`
 	ResponseMode      string   `json:"response_mode,omitempty" jsonschema:"compact (MCP default): bounded previews or short completion receipt; full: legacy output. Full-read checks are unchanged."`
-	Action            string   `json:"action" jsonschema:"prepare, complete, skip, read-only status, candidate to declare/withdraw a concrete pending finding without resetting reads, or pending to list outstanding candidates in this scope"`
+	Action            string   `json:"action" jsonschema:"lookup (stateless candidates, no source required), prepare, complete, skip, read-only status, candidate to declare/withdraw a concrete pending finding without resetting reads, or pending to list outstanding candidates in this scope"`
 	Scope             string   `json:"scope"`
-	SourceID          string   `json:"source_id,omitempty" jsonschema:"Actual user source ID; required except pending. Status may inspect historical sources; changes require the current actual source."`
+	SourceID          string   `json:"source_id,omitempty" jsonschema:"Actual user source ID; required except lookup and pending. Status may inspect historical sources; changes require the current actual source."`
 	Task              string   `json:"task,omitempty" jsonschema:"Concrete current task reconstructed from project and visible conversation, not just the last user sentence; no private chain of thought"`
 	Questions         string   `json:"questions,omitempty" jsonschema:"Decision, conditions, unresolved references and counterevidence to look for"`
 	Keywords          []string `json:"keywords,omitempty" jsonschema:"Grounded literal retrieval terms chosen from project/conversation and relevant memories; duplicates/whitespace normalized, no eight-term cap. Overlong queries return a directory with explicit keyword-search status"`
@@ -52,7 +52,7 @@ func (s *Store) RequireContext(ctx context.Context, t HookTurn) error {
 	return err
 }
 func (s *Store) ContextStatus(ctx context.Context, source string) (ContextResult, error) {
-	r := ContextResult{SourceID: source, SelectedIDs: []string{}, Notice: "Read/selection receipts verify sequence and versions, not semantic correctness or actual prevention. Relevant full content remains authoritative over navigation summaries."}
+	r := ContextResult{SourceID: source, SelectedIDs: []string{}, Notice: "Read/selection receipts verify sequence and versions, not semantic correctness or actual prevention. Full content is historical evidence, subject to current instructions and applicable project rules."}
 	candidate, candidateErr := s.CandidateStatus(ctx, source)
 	if candidateErr != nil {
 		return r, candidateErr
@@ -95,6 +95,23 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextRes
 	if err := validScope(in.Scope); err != nil {
 		return ContextResult{}, err
 	}
+	for name, v := range map[string]string{"task": in.Task, "questions": in.Questions, "decision": in.Decision} {
+		if len(v) > 8192 {
+			return ContextResult{}, errors.New("context field too large")
+		}
+		if err = textguard.Check(name, v, false); err != nil {
+			return ContextResult{}, err
+		}
+	}
+	if in.Action == "lookup" {
+		if strings.TrimSpace(in.Task) == "" {
+			return ContextResult{}, errors.New("reconstruct the current task from project and conversation first")
+		}
+		if in.SaveCandidate || in.ReviewAtStop || len(in.SelectedIDs) > 0 || in.CandidateSourceID != "" || in.SourceID != "" {
+			return ContextResult{}, errors.New("lookup is read-only: omit source_id and candidate/checkpoint fields")
+		}
+		return s.contextCandidates(ctx, in, ContextResult{Status: "candidates", SelectedIDs: []string{}, Notice: "Historical evidence only; applicability is judged against current user/project instructions."})
+	}
 	if in.Action == "pending" {
 		limit := 20
 		if in.ResponseMode == "compact" {
@@ -132,14 +149,7 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextRes
 			return ContextResult{}, errors.New("context must use the latest user input in this session")
 		}
 	}
-	for name, v := range map[string]string{"task": in.Task, "questions": in.Questions, "decision": in.Decision} {
-		if len(v) > 8192 {
-			return ContextResult{}, errors.New("context field too large")
-		}
-		if err = textguard.Check(name, v, false); err != nil {
-			return ContextResult{}, err
-		}
-	}
+
 	switch in.Action {
 	case "candidate":
 		if err = candidateReason(in); err != nil {
@@ -171,7 +181,6 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextRes
 		if strings.TrimSpace(in.Task) == "" {
 			return ContextResult{}, errors.New("reconstruct the current task from project and conversation first")
 		}
-		query, terms, queryErr := normalizeSearchQuery(strings.Join(in.Keywords, " "))
 		// Re-preparing means the task changed: earlier full-read receipts cannot
 		// silently authorize a different action. Paging the SAME task preserves them.
 		old, er := s.ContextStatus(ctx, in.SourceID)
@@ -200,33 +209,7 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextRes
 		if er != nil {
 			return r, er
 		}
-		pageLimit := 30
-		if in.ResponseMode == "compact" {
-			pageLimit = 8
-		}
-		r.Directory, r.NextCursor, er = s.Inventory(ctx, in.Scope, in.Cursor, pageLimit)
-		if er != nil {
-			return r, er
-		}
-		r.KeywordSearch = &KeywordSearchInfo{Status: "not_requested", Notice: "No literal search terms supplied; use the paginated directory and context to choose material."}
-		if queryErr != nil {
-			r.KeywordSearch = &KeywordSearchInfo{Status: "directory_only", Notice: queryErr.Error() + ". Directory preparation succeeded; keyword search was NOT executed. This is not evidence that no relevant memory exists. Refine the terms or inspect directory pages."}
-		} else if in.ResponseMode == "compact" && in.Cursor != "" {
-			r.KeywordSearch = &KeywordSearchInfo{Status: "not_repeated", Notice: "Directory continuation only; the initial keyword search was NOT repeated. Continue keyword results with memory_search using match_next_cursor from the initial prepare, or start a new prepare without cursor when the task/query changes."}
-		} else if len(terms) > 0 {
-			matchLimit := 15
-			if in.ResponseMode == "compact" {
-				matchLimit = 8
-			}
-			p, er := s.SearchPage(ctx, SearchInput{Scope: in.Scope, Query: query, Limit: matchLimit})
-			if er != nil {
-				return r, er
-			}
-			r.Matches = p.Results
-			r.MatchNextCursor = p.NextCursor
-			r.KeywordSearch = &KeywordSearchInfo{Status: "searched", UsedTerms: terms, Query: query, Notice: "All distinct supplied terms were searched with literal OR semantics. No terms were silently truncated; matching is not applicability."}
-		}
-		return r, nil
+		return s.contextCandidates(ctx, in, r)
 	case "skip":
 		if in.SaveCandidate || len(in.SelectedIDs) > 0 || strings.TrimSpace(in.Task) == "" || strings.TrimSpace(in.Decision) == "" {
 			return ContextResult{}, errors.New("skip needs task and concrete non-applicability reason; no selected IDs or save candidate")
@@ -312,7 +295,7 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextRes
 		}
 		return s.ContextStatus(ctx, in.SourceID)
 	default:
-		return ContextResult{}, errors.New("context action must be prepare, complete, skip, status, candidate or pending")
+		return ContextResult{}, errors.New("context action must be lookup, prepare, complete, skip, status, candidate or pending")
 	}
 }
 func (s *Store) TrackContextRead(ctx context.Context, source, id string) error {
@@ -389,4 +372,36 @@ func (s *Store) CurrentCasesForSource(ctx context.Context, source, scope string)
 		out = append(out, id)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) contextCandidates(ctx context.Context, in ContextInput, r ContextResult) (ContextResult, error) {
+	query, terms, queryErr := normalizeSearchQuery(strings.Join(in.Keywords, " "))
+	var er error
+	pageLimit := 30
+	if in.ResponseMode == "compact" {
+		pageLimit = 8
+	}
+	r.Directory, r.NextCursor, er = s.Inventory(ctx, in.Scope, in.Cursor, pageLimit)
+	if er != nil {
+		return r, er
+	}
+	r.KeywordSearch = &KeywordSearchInfo{Status: "not_requested", Notice: "No literal search terms supplied; use the paginated directory and context to choose material."}
+	if queryErr != nil {
+		r.KeywordSearch = &KeywordSearchInfo{Status: "directory_only", Notice: queryErr.Error() + ". Directory preparation succeeded; keyword search was NOT executed. This is not evidence that no relevant memory exists. Refine the terms or inspect directory pages."}
+	} else if in.ResponseMode == "compact" && in.Cursor != "" {
+		r.KeywordSearch = &KeywordSearchInfo{Status: "not_repeated", Notice: "Directory continuation only; the initial keyword search was NOT repeated. Continue keyword results with memory_search using match_next_cursor from the initial prepare, or start a new prepare without cursor when the task/query changes."}
+	} else if len(terms) > 0 {
+		matchLimit := 15
+		if in.ResponseMode == "compact" {
+			matchLimit = 8
+		}
+		p, er := s.SearchPage(ctx, SearchInput{Scope: in.Scope, Query: query, Limit: matchLimit})
+		if er != nil {
+			return r, er
+		}
+		r.Matches = p.Results
+		r.MatchNextCursor = p.NextCursor
+		r.KeywordSearch = &KeywordSearchInfo{Status: "searched", UsedTerms: terms, Query: query, Notice: "All distinct supplied terms were searched with literal OR semantics. No terms were silently truncated; matching is not applicability."}
+	}
+	return r, nil
 }

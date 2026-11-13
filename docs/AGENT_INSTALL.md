@@ -1,66 +1,41 @@
-# 给安装 Agent：安装、升级和项目绑定验收
+# 给安装 Agent：0.3 安装、升级与验收
 
-本说明用于用户已授权的 memory-mcp 安装/升级。不得修改项目 AGENTS.md、CLAUDE.md 等规则文件。
+用户已授权的安装/升级按本说明执行。默认辅助模式，持久作用于该服务的全部已绑定项目。不逐轮询问是否切换；只显示当前模式。不得修改项目 AGENTS.md、CLAUDE.md 或把项目路由搬进插件。
 
-## 最常见的失败：服务装好了，项目没有绑定
+## 先核实与备份
 
-注册 stdio MCP、写入 hooks、项目目录绑定、宿主收到真实事件，是四个独立状态。
-**不能仅凭 setup 退出码为零，就报告当前项目已经在使用记忆。**
-一个项目的 setup 不会默认绑定全部历史项目。数据库里有该项目案例，也不代表活动工作目录已绑定。
-安装包解压目录不是业务项目目录；当前终端目录也不一定是用户实际工作的目录。
+1. 识别真实客户端、版本、程序执行系统；运行 adapters，参考 adapters/README.md。模型名不是宿主名。Windows 程序使用 Windows 绝对路径，WSL 程序使用 Linux 路径，不混用配置和数据目录。
+2. 从实际用户级配置确认服务名、可执行文件及原 data_dir。多个库有歧义才请用户澄清，禁止因为默认目录不同创建空库。读取真实业务项目路径与既有稳定 scope，不能把安装包目录当业务项目。
+3. 运行新程序 version、build-info、help、guide --mode assist，核对包内提交与版本；这些命令不开库。
+4. 停止所有使用原库的旧进程，复制整个数据目录（含 WAL）到新的完整备份目录，然后才运行任何开库命令。status、doctor、setup、serve 均会开库。schema 仍是 3；从旧版首次打开可能补齐内部元数据，旧程序回退应恢复升级前备份。
 
-## 安装顺序
-
-1. 识别实际宿主、版本、操作系统与程序执行位置。运行 `adapters`，按 [适配说明](adapters/README.md) 选择 zcode、codex、qoder 或 qoder-ide；清单列的是协议实现，不是本机原生验收证明。
-   Windows 程序使用 Windows 绝对路径，WSL 程序使用 Linux 路径。不要混用两套配置与数据目录。
-2. 从现有用户级 MCP 配置读取该服务的 executable、args 和 data-dir；再用 doctor 核对。
-   复用原库，不因默认路径不同而新建空库。多个安装/数据目录有歧义时，先说明候选并确认。
-3. 运行新包 `version`、`build-info`、`help`、`guide`。这些命令不打开数据库。
-4. 升级前关闭所有使用原库的旧 MCP 实例，复制整个数据目录（含 WAL）到新备份目录。
-   v0.2.0 首次打开会将数据库升级为 v3；v0.1.x 不能打开 v3，回退必须恢复升级前完整备份。
-   **status、doctor、setup、serve 都会打开并可能升级数据库，必须放在备份之后。**
-5. 确定当前业务项目的实际路径与稳定 scope。先复用既有明确绑定，不按目录重名猜项目身份。
-6. 对当前项目执行以下命令，所有占位符必须替换为已核实的绝对路径：
+## 一次设置，持续生效
 
 ```text
-<新程序> setup --host <实际适配器> --config <实际用户配置> --data-dir <原数据目录> --project <实际业务项目目录> --scope project:<稳定标识> --capture-user-text
+<新程序> setup --host <实际适配器> --mode assist --config <实际用户配置> --data-dir <原数据目录> --project <实际业务项目目录> --scope project:<既有稳定标识>
 ```
 
-setup 会复用已有服务名；多服务时显式传 `--server-name <已核实服务名>`。
-默认不要加 --review-on-stop；该参数仅保留旧式候选续轮。按需收尾见 ON_DEMAND_STOP.md。
+多服务时加 --server-name <已核实名称>。默认不加 capture-user-text、context-check、review-on-stop。程序更新后必须重新 setup：同时更新服务 --mode 与该服务拥有的 hooks；移除旧 PreToolUse/Stop 配置，保留其他插件。只替换 exe 不代表迁移完成。
 
-setup 同时安装 `--context-check`，升级旧包后也必须重新 setup 更新 managed hooks。
-Codex 优先取当前进程的 CODEX_HOME，否则取用户目录下 `.codex/config.toml`；与实际宿主环境不同时必须传实际 `--config`。hooks.json 位于同目录。
-Codex 仍须通过原生 Hooks 管理入口信任新配置，再重启/新建会话。本程序不会修改信任或审批设置。
-它只调整本服务的配置，保留其他服务和用户 hooks。每个需启用的历史项目分别 setup；不得未经确认批量推定绑定。
+检查旧安装遗留的用户级记忆专用引导：本插件明确拥有的说明片段应替换为本版 guide --mode assist，不在旧指引后追加一层“新版优先”。用户自写的其他规范、项目 AGENTS 和 CLAUDE 文件不改；若仍有要求每轮强制闭环的外部规则，报告具体来源及冲突，不能把配置迁移冒充流程已生效。普通文件记忆里的旧版本/操作描述属于历史资料，不应继续当安装指令。
 
-7. 检查 setup 输出：`binding_verified=true`、正确的 project/scope/data_dir，以及 config/database backup。
-   `restart_required=true` 表示需要重新启动宿主或新会话，`host_event_verified=false` 仍不等于失败，但不能声称真实事件已验证。
-8. 运行：
+模式存于用户级服务及其 managed hook 配置，适用于全部既有绑定；不是每条输入重新选择。一个项目 setup 不会猜测其他历史项目身份，新增需要绑定的实际项目分别 setup。已有数据/绑定/待判断事项保留，不清洗、不补链、不自动标完成。
 
-```text
-<新程序> doctor --host <实际适配器> --config <实际用户配置> --data-dir <原数据目录> --project <实际业务项目目录> --scope project:<稳定标识> --reviews
-```
+默认安装 SessionStart + UserPromptSubmit 短提醒。提醒不写聊天、不查询案例、不生成回执、不阻断任务。显式需要原文采集时可在已授权范围内加 --capture-user-text；这会额外安装 Stop 采集实际答复，但仍不启动模型整理。严格兼容模式见 STRICT_MODE.md，不能因普通任务主动询问切换。
 
-核对 `binding_verified`、`resolved_scope`、`memory_services[].matches_opened_data_dir` 和 `context_check_handlers`。
-使用 setup 输出的 `verification_argv` 执行核对，包含自定义配置与实际服务名，不要丢掉 `--config` 再查错默认文件。Codex/Qoder 还要核对 `managed_launchers`：脚本缺失、被改动或 data-dir 不符时，不能把四条配置引用当成四个有效 handler。它仍只检查文件定义，不证明原生已触发。
-查看按宿主区分的 `adapter_receipts`：只有事件名、项目、会话、原生轮次和时间，不含聊天正文。手工回放也会生成回执，必须与真实客户端会话交叉核对；`native_event_verified=false` 不由配置自动改成 true。
-只有 bindings 中存在记录还不够：传入当前实际工作目录，验证最长路径匹配后的 scope。
+Codex 使用当前 CODEX_HOME，否则用户 .codex/config.toml；hooks.json 同目录。若实际配置不同需传 --config。按宿主原生管理入口完成 hook 信任并重启，程序不会替用户改信任/审批设置。Qoder CLI/IDE 共用配置时不能重复安装两套采集，先核对真正执行端。
 
-## 重启后的真实验收
+## 配置和真实运行分开验收
 
-- 在真实项目新会话确认 MCP 工具已加载，调用 `memory_bootstrap` 核对版本、实际 data_dir 和 features。
-- 查看 doctor 的真实 `bound` / `input_saved` 事件，确认 scope 和当前会话正确。
-- 相关任务应出现 `memory_context`，读取全文时带本轮 `context_source_id`，然后 complete。
-- 普通结束语可 skip，Stop 不应额外启动整理，也不应增加案例。
-- 有通过正反筛选的候选才设置 `save_candidate=true`；Stop 最多继续整理一次。
-- 清洗只生成预览，未经用户对该预览的新确认，不得 apply。
+- setup 应报告 mode=assist、raw_capture=false、context_check=false、binding_verified=true 和备份路径。
+- 按输出 verification_argv 运行 doctor，不丢 config/server-name。核对 resolved_scope、memory_services[].matches_opened_data_dir、mode=assist、mode_configuration_consistent=true、context_check_handlers=0、assist_handlers=2。原生 launcher 缺失或被改动要先修复。
+- 重启/新会话后实际调用 memory_bootstrap，核对 0.3.0-rc.2、mode=assist、原 data_dir、integration_protocol=3。若模式不一致，检查残留进程或不同配置。
+- 在真实业务项目观察 SessionStart 与新输入短提醒；核对 doctor adapter_receipts 与当前真实会话。手工回放也能生成回执，不能当原生验收。无 input_saved 是默认不采集的预期，不能据此判失败。
+- 普通任务不应因记忆出现 gate、prepare/complete/skip 义务、Stop 续轮或自动案例。历史 pending 仍可用 context pending 查询，不能悄悄清零。
+- 按 HOST_TRIAL.md 记录实际效果。协议测试不证明模型理解或遵守 AGENTS；真实事件未验证要明确报告待验。
 
-没有真实事件时，先检查是否重启、项目是否绑定、实际 cwd 是否属于绑定路径、宿主是否加载了这份用户配置、服务与 hook 是否使用同一 data_dir。不得用手工伪造 hook 的成功代替真实验收。
-未绑定项目会给宿主上下文提示并写入诊断，不回退 global、不自动写到其他项目。
+仅 MCP stdio 而无已验证原生 hook 时，核心工具仍可用，但每轮自动提醒不保证。不要伪称装了某客户端 adapter，就有另一客户端能力。不要为绕过安装限制写项目规则。
 
-## 最终向用户报告
+## 给用户的交付
 
-简短列出版本/源码提交、程序与配置路径、实际数据目录、项目与 scope、备份路径，分别报告：
-配置完成、目录绑定验证、真实工具连接、真实事件、事前使用与回合末筛选。
-尚需重启或实测的项目要明确标为待验证，不要笼统说“安装成功，全部生效”。
+简要报告版本/提交、程序/配置、原库、绑定与 scope、备份、mode 和需重启事项。分别说清配置、绑定、实际工具连接、真实事件和业务行为的验证状态，不笼统说全部生效。清洗需要另行展示具体预览并取得新确认；安装授权不等于清洗授权。

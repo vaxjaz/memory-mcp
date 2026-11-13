@@ -172,7 +172,7 @@ func TestAdapterSetupPreservationAndIdempotency(t *testing.T) {
 				os.WriteFile(a.DefaultHooks(config), []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`), 0600)
 			}
 			os.WriteFile(config, initial, 0600)
-			o := SetupOptions{Host: host, Config: config, DataDir: filepath.Join(root, "data with spaces"), Project: project, Scope: "project:demo", Binary: filepath.Join(root, "bin with ' quote", "memory-mcp.exe"), Capture: true, Review: true}
+			o := SetupOptions{Mode: "strict", Host: host, Config: config, DataDir: filepath.Join(root, "data with spaces"), Project: project, Scope: "project:demo", Binary: filepath.Join(root, "bin with ' quote", "memory-mcp.exe"), Capture: true, Review: true}
 			report, e := Setup(testCtx, o)
 			if e != nil {
 				t.Fatal(e)

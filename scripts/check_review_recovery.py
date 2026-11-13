@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 import tempfile
 
-from smoke import Host, fixture_profile
+from smoke import Host, fixture_profile, mode_args
 
 
 def main():
@@ -13,7 +13,7 @@ def main():
     parser.add_argument('--if-supported', action='store_true')
     opt = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix='memory review recovery ') as temp:
-        host = Host(str(Path(opt.binary).resolve()), temp)
+        host = Host(str(Path(opt.binary).resolve()), temp, mode="strict")
         try:
             boot = host.tool('memory_bootstrap', {})
             if 'review_recovery' not in boot.get('features', []):

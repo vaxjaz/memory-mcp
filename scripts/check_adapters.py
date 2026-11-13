@@ -8,7 +8,7 @@ import re
 import subprocess
 import tempfile
 
-from smoke import Host
+from smoke import Host, mode_args
 
 
 def main():
@@ -32,7 +32,7 @@ def main():
             data = user / 'original data'
             scope = 'project:adapter-test'
             def cli(*cmd):
-                p = subprocess.run([binary, *cmd], capture_output=True, text=True, encoding='utf-8', timeout=30)
+                p = subprocess.run([binary, cmd[0], *(mode_args(binary) if cmd[0] in ('setup','hook') else []), *cmd[1:]], capture_output=True, text=True, encoding='utf-8', timeout=30)
                 assert p.returncode == 0, (cmd, p.stderr, p.stdout)
                 return json.loads(p.stdout)
             options = ['--host', adapter, '--config', str(config), '--data-dir', str(data),
@@ -41,7 +41,7 @@ def main():
             assert installed['binding_verified'] and not installed['host_event_verified']
             hooks = json.loads((user / 'hooks.json' if adapter == 'codex' else config).read_text(encoding='utf-8'))['hooks']
             command = hooks['UserPromptSubmit'][0]['hooks'][0]['command']
-            mcp = Host(binary, str(data))
+            mcp = Host(binary, str(data), mode="strict")
             try:
                 def hook(event, turn='t1', prompt='', code=0, **extra):
                     payload = dict(hook_event_name=event, cwd=str(project), session_id='s',

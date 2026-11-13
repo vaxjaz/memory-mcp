@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 
-from smoke import Host, fixture_profile
+from smoke import Host, fixture_profile, mode_args
 
 
 def main():
@@ -32,7 +32,7 @@ def main():
         scope = 'project:business-acceptance'
 
         def command(*command_args, payload=None):
-            result = subprocess.run([binary, *command_args], input=None if payload is None else json.dumps(payload, ensure_ascii=False),
+            result = subprocess.run([binary, command_args[0], *(mode_args(binary) if command_args[0] in ('setup','hook') else []), *command_args[1:]], input=None if payload is None else json.dumps(payload, ensure_ascii=False),
                                     text=True, capture_output=True, env=env, timeout=30)
             assert result.returncode == 0, (command_args, result.stderr, result.stdout)
             return json.loads(result.stdout)
@@ -50,7 +50,7 @@ def main():
             return command('hook', '--host', 'zcode', '--data-dir', str(data), '--capture-user-text', '--review-on-stop',
                            payload={'hook_event_name': event, 'cwd': str(project), 'session_id': session, **fields})
 
-        host = Host(binary, str(data))
+        host = Host(binary, str(data), mode="strict")
         try:
             features = host.tool('memory_bootstrap', {})['features']
             assert 'review_receipts' in features
