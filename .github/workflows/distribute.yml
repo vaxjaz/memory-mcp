@@ -92,6 +92,7 @@ jobs:
           python3 tooling/scripts/check_review_recovery.py "$binary" --if-supported
           python3 tooling/scripts/check_context_diagnostics.py "$binary" --if-supported
           python3 tooling/scripts/check_compact_output.py "$binary" --if-supported
+          python3 tooling/scripts/check_on_demand_stop.py "$binary" --if-supported
 
       - name: Save downloadable build artifacts
         uses: actions/upload-artifact@v4

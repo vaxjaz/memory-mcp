@@ -270,7 +270,7 @@ type ReviewInput struct {
 	ReusedCaseIDs              []string `json:"reused_case_ids,omitempty" jsonschema:"Existing current cases fully covering this turn, without changing their body or source links; read first. Does not create revisions or invalidate dependents."`
 	Scope                      string   `json:"scope"`
 	SourceID                   string   `json:"source_id" jsonschema:"Raw user entry ID delivered by a hook. Read it and its contextual links before reviewing."`
-	CaseIDs                    []string `json:"case_ids,omitempty" jsonschema:"Current case IDs in this project linked to source_id, including cases saved before Stop. Empty only when no current case links this source and no case needs creating or revising; historical coverage alone can justify skipping."`
+	CaseIDs                    []string `json:"case_ids,omitempty" jsonschema:"Current cases in this project linked OR transactionally associated to source_id. Do not revise to add a bookkeeping link. Empty only when none are associated and no case needs writing."`
 	Note                       string   `json:"note" jsonschema:"Explain cases saved, reused or revised, or why no case needs creating or revising. This is host reasoning, not independent verification."`
 	AllowReplacementCharacters bool     `json:"allow_replacement_characters,omitempty" jsonschema:"Only true for U+FFFD intentionally present in the original note, not for forcing through already damaged text."`
 }
@@ -319,7 +319,7 @@ func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, e
 		if t.Note == string(payload) {
 			return t, nil
 		}
-		return t, errors.New("review already completed; correct the case with memory_revise instead of overwriting its receipt")
+		return t, errors.New("review already completed; this receipt is closed and unchanged. Stop memory housekeeping for this turn; do not revise a case merely to change the receipt")
 	}
 	for _, id := range in.CaseIDs {
 		r, e := s.Read(ctx, id)
@@ -329,7 +329,7 @@ func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, e
 		if !r.Entry.Current || r.Entry.Scope != t.Scope || r.Entry.Kind != "case" || r.Entry.State.State != "active" {
 			return t, errors.New("receipt must reference a current case in the source project")
 		}
-		linked := false
+		linked := r.Entry.RecordedSourceID == t.SourceID
 		for _, l := range r.Entry.Links {
 			if l.TargetID == t.SourceID {
 				linked = true
@@ -348,9 +348,8 @@ func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, e
 	if len(in.CaseIDs) == 0 {
 		// Check in the UPDATE itself so another process cannot attach a current
 		// case between a preflight check and committing an irreversible skip.
-		query += ` AND NOT EXISTS (SELECT 1 FROM links l JOIN entries e ON e.id=l.entry_id
- WHERE l.target_id=? AND e.scope=? AND e.kind='case' AND e.current=1)`
-		args = append(args, t.SourceID, t.Scope)
+		query += ` AND NOT EXISTS (` + casesForSourceSQL + `)`
+		args = append(args, t.Scope, t.SourceID, t.SourceID)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -384,8 +383,7 @@ func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, e
 	n, _ := result.RowsAffected()
 	current, err := scanTurn(tx.QueryRowContext(ctx, "SELECT "+hookColumns+" FROM hook_turns WHERE source_id=?", t.SourceID))
 	if err == nil && n == 0 && len(in.CaseIDs) == 0 && (current.Status == "pending" || current.Status == "review_requested") {
-		rows, e := tx.QueryContext(ctx, `SELECT DISTINCT e.id FROM links l JOIN entries e ON e.id=l.entry_id
- WHERE l.target_id=? AND e.scope=? AND e.kind='case' AND e.current=1 ORDER BY e.id LIMIT 20`, t.SourceID, t.Scope)
+		rows, e := tx.QueryContext(ctx, casesForSourceSQL+` ORDER BY e.id LIMIT 20`, t.Scope, t.SourceID, t.SourceID)
 		if e != nil {
 			return current, e
 		}
@@ -411,6 +409,13 @@ func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, e
 		return current, errors.New("review receipt conflict")
 	}
 	if err == nil && n > 0 {
+		candidateState := "dismissed"
+		if len(in.CaseIDs) > 0 {
+			candidateState = "saved"
+		}
+		if _, e := tx.ExecContext(ctx, `UPDATE memory_candidates SET state=?,reason=?,review_at_stop=0,updated_at=? WHERE source_id=? AND state='pending'`, candidateState, in.Note, time.Now().UTC().Format(time.RFC3339Nano), t.SourceID); e != nil {
+			return current, e
+		}
 		for _, id := range in.ReusedCaseIDs {
 			if _, e := tx.ExecContext(ctx, "INSERT OR IGNORE INTO turn_case_reuse(source_id,case_id,note)VALUES(?,?,?)", t.SourceID, id, in.Note); e != nil {
 				return current, e
@@ -434,7 +439,7 @@ func (s *Store) HookDiagnostics(ctx context.Context) (map[string]any, error) {
 		return nil, err
 	}
 	var pending int
-	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM hook_turns WHERE status IN ('pending','review_requested')`).Scan(&pending); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM memory_candidates WHERE state='pending'`).Scan(&pending); err != nil {
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT event,scope,session,result,detail,created_at FROM hook_runs ORDER BY id DESC LIMIT 20`)

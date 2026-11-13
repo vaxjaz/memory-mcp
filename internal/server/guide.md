@@ -1,5 +1,38 @@
 # Local decision memory: host integration protocol v2
 
+## On-demand Stop workflow (takes precedence when advertised)
+
+With on_demand_stop, normal setup omits --review-on-stop. The host owns semantic
+value judgment: skip, reuse, create or revise. Ordinary tasks need no additional
+"no value" report. Stop captures the actual delivered answer and finishes without
+an extra model turn when no explicit pending candidate remains. This is bookkeeping,
+not a claim of full semantic coverage. An unfinished declared candidate stays pending.
+
+Declare a concrete new/changed finding using memory_context(action=candidate,
+source_id=current actual source, save_candidate=true, decision=what changed and
+which future action changes). This does not reset reads or complete the action gate.
+Existing complete(save_candidate=true) also declares one. Only add review_at_stop=true
+when you explicitly want one extra model turn for that candidate; it costs model time.
+Saving it marks saved, withdrawing it marks dismissed. Declare a later candidate
+explicitly if there is another unresolved issue; do not treat one flag as proof all
+possible knowledge has been audited. Legacy --review-on-stop permits pending-candidate
+continuations but should not be installed by default.
+
+With turn_write_associations, a case written with explicit context_source_id is
+transactionally associated to that source outside evidence links. The response/read
+recorded_source_id reports it. This association cannot ground a case, assert support,
+or invalidate evidence dependents. review_done(case_ids) accepts it, so never create
+a revision merely to attach the current user source. Actual evidence links remain
+complete and meaningful. Reuse remains in reused_case_ids, not a case version.
+
+With pending_memory_candidates, memory_context(action=pending,scope) lists only
+explicit unfinished candidates; follow next_cursor. status may inspect a historical
+source without relaxing the current-source guard on changes. To withdraw an older
+candidate use action=candidate, source_id=actual CURRENT source,
+candidate_source_id=old pending source, save_candidate=false, decision=reason.
+No fabricated hook IDs. No automatic background model, replay, cleanup or new case.
+Read this live bootstrap first; cached installation/version notes can be stale.
+
 ## Compact output workflow (when advertised by features)
 
 With compact_context, memory_context defaults to compact previews (one JSON

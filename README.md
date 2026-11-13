@@ -3,7 +3,7 @@
 一个通用的 stdio MCP。保存真实协作材料、决策案例和可修正的偏好假设。
 不内置模型、不提供云端服务、不进行网络请求，由宿主 AI 完成理解和学习。
 
-**当前分支：v0.2.3-compact.1 离线试用包，未发布 GitHub Release。新增轻量候选、短回执和 Stop 流程收敛，包含此前 adapter 与错误修复。详见 [本版说明](docs/COMPACT_OUTPUT.md)。**
+**当前分支：v0.2.4-demand.1 离线试用包，未发布 GitHub Release。Stop 默认快速结束，明确未保存的候选可查；本轮记账关联与业务证据分开。包含此前全部修复，见 [本版说明](docs/ON_DEMAND_STOP.md)。**
 由宿主 Agent 识别客户端能力并完成用户级接入，目标是记录用户业务决策与纠偏，在后续相关开发中检索使用。
 运行 `memory-mcp adapters` 查看已实现协议与验证边界；接入方式见 [宿主适配说明](docs/adapters/README.md)。其他宿主仍可使用通用 MCP。
 修复范围及实际恢复步骤见 [复查与检索修复](docs/REVIEW_RECOVERY.md)。
