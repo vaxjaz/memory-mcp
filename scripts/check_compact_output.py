@@ -8,7 +8,7 @@ import re
 import subprocess
 import tempfile
 
-from smoke import Host, fixture_profile
+from smoke import Host, fixture_profile, mode_args
 
 
 def size(value):
@@ -23,7 +23,7 @@ def main():
     binary = str(Path(args.binary).resolve())
     with tempfile.TemporaryDirectory(prefix='memory compact 中文 ') as tmp:
         root = Path(tmp); data = root / 'library'
-        host = Host(binary, str(data))
+        host = Host(binary, str(data), mode="strict")
         try:
             boot = host.tool('memory_bootstrap', {})
             if 'compact_context' not in boot['features'] and args.if_supported:
@@ -90,7 +90,7 @@ def main():
             # Actual managed-command replay: reuse closes the turn without another revision/Stop continuation.
             project = root / 'project'; project.mkdir()
             config = root / 'user' / 'config.toml'
-            p = subprocess.run([binary, 'setup', '--host', 'codex', '--config', str(config),
+            p = subprocess.run([binary, 'setup', *mode_args(binary), '--host', 'codex', '--config', str(config),
                 '--data-dir', str(data), '--project', str(project), '--scope', scope,
                 '--capture-user-text', '--review-on-stop'], capture_output=True, text=True, encoding='utf-8', timeout=30)
             assert p.returncode == 0, p.stderr

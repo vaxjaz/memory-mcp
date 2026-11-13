@@ -87,10 +87,13 @@ func compactContext(r *ContextResult, in ContextInput) error {
 	r.Task, r.Questions, r.Decision = "", "", ""
 	r.Notice = "Navigation previews only. Read selected FULL entries with this source, then complete before acting. Follow both cursors; no literal hit is not proof of no applicable memory."
 	switch r.Status {
+	case "candidates":
+		r.NextAction = "read_relevant_evidence_if_needed"
+		r.Notice = "Historical evidence previews only, subject to current user/project instructions. Read relevant full entries as needed; reuse already-read material when still applicable. Both streams paginate; no literal hit is not proof of absence. No completion or receipt required."
 	case "prepared":
 		r.NextAction = "read_selected_full_entries_then_complete"
 	case "complete":
-		r.NextAction = "ready_subject_to_current_versions"
+		r.NextAction = "memory_check_complete_not_authorization"
 	default:
 		r.NextAction = "prepare_current_task"
 	}

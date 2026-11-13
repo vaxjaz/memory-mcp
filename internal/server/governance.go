@@ -30,8 +30,15 @@ type CleanupOutput struct {
 	Notice      string                    `json:"notice"`
 }
 
-func addGovernanceTools(s *mcp.Server, store *memory.Store, read, write *mcp.ToolAnnotations) {
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_context", Description: "Before a relevant decision/action, reconstruct the task from the active project AND visible conversation. prepare defaults to compact previews (<=8192 JSON bytes) with matches first; response_mode=full restores legacy output. Both streams paginate; host performs semantic selection and bounded follow-up through evidence/exception/replacement links. Read selected full entries with memory_read(context_source_id), then complete with concrete intended constraints. skip is allowed for memory-independent tasks; save_candidate gates Stop continuation. Receipts do not prove understanding or prevention. candidate declares/withdraws a specific outstanding finding; pending lists them without source_id; neither bypasses the action check. Default Stop is inline; review_at_stop=true explicitly requests one extra model turn. Does not create cases.", Annotations: write}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.ContextInput) (*mcp.CallToolResult, memory.ContextResult, error) {
+func addGovernanceTools(s *mcp.Server, store *memory.Store, mode string, read, write *mcp.ToolAnnotations) {
+	contextDescription := "Optional context-aware lookup: reconstruct the task from current project, visible conversation and already read relevant memory; call action=lookup with grounded keywords. No source_id, prepare/complete, skip or receipt is required for lookup. Compact candidates are <=8192 JSON bytes; both result streams paginate. Read full relevant evidence only as needed; reuse already-read material for an unchanged task, verify again when conditions or versions may have changed. candidate/pending expose explicit outstanding findings without automatically reviewing them. Memory never replaces current user instructions, AGENTS or existing domain routing. Legacy prepare/complete are compatibility tools, not an assist-mode obligation."
+	if mode == memory.ModeStrict {
+		contextDescription = "Strict compatibility: prepare using current project/conversation and actual source_id; read selected full entries with context_source_id, then complete before the configured action check. skip needs a concrete non-applicability reason. Optional lookup is stateless. Explicit review_at_stop may request one legacy model continuation for a meaningful candidate. Receipts verify bookkeeping, not judgment or AGENTS compliance."
+	}
+	mcp.AddTool(s, &mcp.Tool{Name: "memory_context", Description: contextDescription, Annotations: write}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.ContextInput) (*mcp.CallToolResult, memory.ContextResult, error) {
+		if mode == memory.ModeAssist && in.ReviewAtStop {
+			return nil, memory.ContextResult{}, errors.New("assist has no Stop model review; save inline or keep an explicit pending candidate, without switching modes during the task")
+		}
 		if in.ResponseMode == "" {
 			in.ResponseMode = "compact"
 		}

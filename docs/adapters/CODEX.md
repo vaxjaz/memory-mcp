@@ -1,16 +1,17 @@
-# Codex adapter
+# Codex 适配器
 
-先按 [安装说明](../AGENT_INSTALL.md) 备份原库与配置，确认实际 Codex 用户目录和业务项目。`--host codex` 使用 `[mcp_servers.<服务名>]` 注册 stdio，在 config.toml 同目录 hooks.json 安装 SessionStart、UserPromptSubmit、PreToolUse、Stop。
+先读 [安装说明](../AGENT_INSTALL.md)。确认真实执行端和 CODEX_HOME；默认取当前进程 CODEX_HOME，否则用户 .codex。配置在 config.toml 的 mcp_servers，hooks.json 同目录。
 
 ```text
-<程序> setup --host codex --config <实际CODEX_HOME/config.toml> --data-dir <原库> --project <实际工作目录> --scope project:<原scope> --capture-user-text --review-on-stop
-<程序> doctor --host codex --config <同上> --data-dir <同上> --project <同上> --scope project:<同上>
+<程序> setup --host codex --mode assist --config <实际CODEX_HOME/config.toml> --data-dir <原库> --project <真实工作目录> --scope project:<原scope>
 ```
 
-程序不打开或修改原生 hook 信任状态。通过 Codex 的 Hooks 管理入口信任这次具体变更，再按客户端要求重启/新建会话。旧 SessionStart 软引导不等于这套完整适配；若此前手工安装过软引导，核对其来源后移除对应旧项，保留其他用户 hook，避免双重提示。
+辅助模式仅注册 SessionStart/UserPromptSubmit。服务与 owned launcher 都显式 assist，持久适用于全部绑定，不询问逐轮切换。TOML 只改本服务表，保留其他字节/注释；不支持的内联/点式布局拒绝覆盖。
 
-原生轮次事件必须包含实际 `turn_id`。UserPromptSubmit 用它做幂等键；PreToolUse/Stop 用它定位输入，不回退到另一个轮次。Stop block 的 reason 可能成为新一轮提示；adapter 只匹配当前已请求的完整整理提示，并把续跑轮次映射回原输入，避免生成虚假用户证据。
+程序不更改原生 hook 信任状态。按实际客户端 Hooks 管理入口信任具体变更，再重启/新会话；旧 SessionStart 软引导不能当成本套适配已加载的证明，核对来源后协调旧项，保留其他用户 hooks，避免双提示。
 
-未知/旧版协议会在 stderr 报错，hook 仍遵循 fail-open 原则，不把记忆故障变成所有操作无法进行。原生工具前检查仅覆盖能识别的工具名和参数，不是完整 shell 解析器，也不证明语义理解正确。
+当前适配档案要求原生轮次事件提供真实 turn_id。缺必要字段时 stderr 报协议不符，hook 失败开路，不猜另一个轮次。可选采集使用实际 turn_id 幂等与定位，默认不采集。strict 的 block/续跑轮次保护仍仅用于明确兼容模式，不能推断为辅助模式会拦操作。
 
-依据：[Codex Hooks](https://learn.chatgpt.com/docs/hooks)。版本升级后须重新核对事件及信任机制。发布时验证了协议与实际生成命令；本机已有 MCP 注册可验证，完整原生事件须用户完成信任并在真实会话验收。
+doctor 核对 launcher 是否完整、data_dir/模式一致与绑定；本机生成命令测试和手工回放不能证明真实 Codex 已信任/触发。以真实 bootstrap 和新会话回执验证。仅注册 MCP、仅有开发者 SessionStart 软引导的环境，不宣称有完整原生 hook 能力。
+
+该档案的协议参考为 https://learn.chatgpt.com/docs/hooks，客户端升级需现场重新核对支持与信任机制；这里描述本项目的实现和验证边界，不承诺任意客户端版本兼容。

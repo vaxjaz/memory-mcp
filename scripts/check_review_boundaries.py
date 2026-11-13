@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 
 from check_text_integrity import Wire
-from smoke import fixture_profile
+from smoke import fixture_profile, mode_args
 
 
 def main():
@@ -39,12 +39,12 @@ def main():
             assert 'saved before Stop' in tools['memory_review_done']['description']
             note_description = tools['memory_review_done']['inputSchema']['properties']['note']['description']
             assert 'why no case needs creating or revising' in note_description
-            subprocess.run([binary, 'setup', '--host', 'zcode', '--config', str(home / '.zcode/cli/config.json'),
+            subprocess.run([binary, 'setup', *mode_args(binary), '--host', 'zcode', '--config', str(home / '.zcode/cli/config.json'),
                             '--data-dir', str(data), '--project', str(project), '--scope', scope,
                             '--capture-user-text', '--review-on-stop'], env=env, check=True, capture_output=True)
 
             def hook(event, session, **fields):
-                result = subprocess.run([binary, 'hook', '--host', 'zcode', '--data-dir', str(data),
+                result = subprocess.run([binary, 'hook', *mode_args(binary), '--host', 'zcode', '--data-dir', str(data),
                                          '--capture-user-text', '--review-on-stop'], env=env, check=True, capture_output=True,
                                         input=json.dumps({'hook_event_name': event, 'session_id': session,
                                                           'cwd': str(project), **fields}, ensure_ascii=False).encode())

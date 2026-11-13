@@ -19,7 +19,7 @@ func TestMCPDiscoveryAndLearningRoundTrip(t *testing.T) {
 	}
 	defer store.Close()
 	st, ct := mcp.NewInMemoryTransports()
-	ss, err := New(store, "test").Connect(ctx, st, nil)
+	ss, err := New(store, "test", "strict").Connect(ctx, st, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

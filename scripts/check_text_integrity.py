@@ -9,12 +9,12 @@ import queue
 import subprocess
 import tempfile
 import threading
-from smoke import fixture_profile
+from smoke import fixture_profile, mode_args
 
 
 class Wire:
     def __init__(self, binary, data, env):
-        self.proc = subprocess.Popen([binary, 'serve', '--data-dir', str(data)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        self.proc = subprocess.Popen([binary, 'serve', '--data-dir', str(data), *mode_args(binary)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
         self.lines = queue.Queue()
         def read():
             for line in self.proc.stdout:
@@ -118,10 +118,10 @@ def main():
             assert literal['text_issues'][0]['kind'] == 'replacement_character'
             assert wire.tool('memory_record', dict(draft, body='字面反斜杠序列 \\ud800', request_id='literal-escape'))['body'].endswith('\\ud800')
 
-            subprocess.run([binary, 'setup', '--host', 'zcode', '--config', str(config), '--data-dir', str(data), '--project', str(project), '--scope', scope, '--capture-user-text', '--review-on-stop'], env=env, check=True, capture_output=True)
+            subprocess.run([binary, 'setup', *mode_args(binary), '--host', 'zcode', '--config', str(config), '--data-dir', str(data), '--project', str(project), '--scope', scope, '--capture-user-text', '--review-on-stop'], env=env, check=True, capture_output=True)
             def source(session):
                 event = {'hook_event_name': 'UserPromptSubmit', 'session_id': session, 'cwd': str(project), 'prompt': '这是中文回执校验 ' + session}
-                subprocess.run([binary, 'hook', '--host', 'zcode', '--data-dir', str(data), '--capture-user-text'], input=json.dumps(event, ensure_ascii=False).encode('utf-8'), env=env, check=True, capture_output=True)
+                subprocess.run([binary, 'hook', *mode_args(binary), '--host', 'zcode', '--data-dir', str(data), '--capture-user-text'], input=json.dumps(event, ensure_ascii=False).encode('utf-8'), env=env, check=True, capture_output=True)
                 rows = wire.tool('memory_search', {'scope': scope, 'kind': 'record', 'include_events': True})['results']
                 return next(r['id'] for r in rows if wire.tool('memory_read', {'id': r['id']})['entry']['session'] == session)
             raw_id = source('note-test')

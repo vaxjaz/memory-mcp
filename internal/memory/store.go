@@ -57,8 +57,8 @@ type Link struct {
 }
 
 type Draft struct {
-	ResponseMode               string   `json:"response_mode,omitempty" jsonschema:"compact: short IDs/state/integrity receipt without body echo; full or omitted: legacy response. Not part of write identity."`
-	ContextSourceID            string   `json:"context_source_id,omitempty" jsonschema:"Actual CURRENT user-source checkpoint for this write, separate from historical evidence links. Use the source from the current hook/prepare/complete. Historical linked turns need not be completed again."`
+	ResponseMode               string   `json:"response_mode,omitempty" jsonschema:"compact: short IDs/state/integrity receipt; full: full response. Assist defaults to compact, strict to legacy full. Not part of write identity."`
+	ContextSourceID            string   `json:"context_source_id,omitempty" jsonschema:"Optional actual CURRENT user source for turn association, separate from evidence links. Assist validates source identity without requiring prepare/complete. Strict requires its checkpoint complete. Never fabricate source IDs."`
 	Profile                    *Profile `json:"profile,omitempty" jsonschema:"For cases and hypotheses: concrete future use, counter-check against saving, applicability and boundaries. No fabricated counterexamples."`
 	Kind                       string   `json:"kind" jsonschema:"record for supplied material; case for a contextual decision; hypothesis is only created through memory_revise"`
 	Scope                      string   `json:"scope" jsonschema:"Explicit scope: project:<stable project identifier> or global; never infer global applicability"`
@@ -484,6 +484,7 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 }
 
 type ReadResult struct {
+	ContentRole          string      `json:"content_role,omitempty"`
 	EffectiveCurrentID   string      `json:"effective_current_id"`
 	Entry                Entry       `json:"entry"`
 	CurrentID            string      `json:"current_id"`

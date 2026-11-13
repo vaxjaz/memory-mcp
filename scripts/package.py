@@ -93,7 +93,7 @@ def main():
             shutil.copytree(root / "docs", bundle / "docs")
             (bundle / "THIRD_PARTY_NOTICES.txt").write_text(licenses)
             (bundle / "mcp.example.json").write_text(json.dumps({"mcpServers": {"decision-memory": {
-                "command": "REPLACE_WITH_ABSOLUTE_PATH_TO_" + exe, "args": ["serve"]}}}, indent=2) + "\n")
+                "command": "REPLACE_WITH_ABSOLUTE_PATH_TO_" + exe, "args": (["serve", "--mode", "assist"] if (root / "internal/memory/integration.go").is_file() else ["serve"])}}}, indent=2) + "\n")
             if target_os == "windows":
                 archive = dist / (name + ".zip")
                 with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:

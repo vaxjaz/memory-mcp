@@ -1,7 +1,6 @@
 package hooks
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,6 +24,7 @@ func Run(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	host := fs.String("host", "", "explicit protocol adapter; run adapters for supported hosts")
 	dir := fs.String("data-dir", "", "memory directory")
+	modeArg := fs.String("mode", "", "persistent service mode: assist (default) or explicit strict compatibility")
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -35,7 +35,7 @@ func Run(ctx context.Context, args []string) error {
 	serverName := fs.String("server-name", "", "explicit MCP server name (use a distinct name and data directory for isolated acceptance)")
 	capture := fs.Bool("capture-user-text", false, "enable raw prompt and supplied answer capture in bound projects")
 	review := fs.Bool("review-on-stop", false, "legacy opt-in: allow a declared pending candidate to request one extra model turn; normally omit and use review_at_stop per candidate")
-	contextCheck := fs.Bool("context-check", false, "context-aware retrieval and before-action check; setup enables this in managed hooks")
+	contextCheck := fs.Bool("context-check", false, "strict compatibility: require a completed current-turn memory check before actions")
 	reviews := fs.Bool("reviews", false, "doctor: include paginated current needs_review entries for --scope")
 	dry := fs.Bool("dry-run", false, "show setup targets without writing config or opening the database")
 	checkText := fs.Bool("check-text", false, "doctor: scan stored text for invalid UTF-8/U+FFFD without changing it")
@@ -48,6 +48,18 @@ func Run(ctx context.Context, args []string) error {
 	}
 	if fs.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
+	}
+	modeValue := *modeArg
+	// Old stored hook commands remain strict until setup replaces them coherently.
+	if cmd == "hook" && modeValue == "" && (*contextCheck || *capture || *review) {
+		modeValue = memory.ModeStrict
+	}
+	mode, modeErr := memory.IntegrationMode(modeValue)
+	if modeErr != nil {
+		return modeErr
+	}
+	if cmd != "doctor" && mode == memory.ModeAssist && (*review || *contextCheck) {
+		return errors.New("assist has no action gate or Stop model review; use --mode strict explicitly")
 	}
 	if *host == "" && cmd != "doctor" {
 		return errors.New("explicit --host required; identify the actual client and read docs/HOOK_SETUP.md")
@@ -78,7 +90,7 @@ func Run(ctx context.Context, args []string) error {
 		if er != nil {
 			return er
 		}
-		r, er := Setup(ctx, SetupOptions{Host: *host, Config: *config, DataDir: *dir, Project: *project, Scope: *scope, Binary: exe, ServerName: *serverName, Capture: *capture, Review: *review, DryRun: *dry})
+		r, er := Setup(ctx, SetupOptions{Mode: mode, Host: *host, Config: *config, DataDir: *dir, Project: *project, Scope: *scope, Binary: exe, ServerName: *serverName, Capture: *capture, Review: *review, DryRun: *dry})
 		if er != nil {
 			return er
 		}
@@ -143,66 +155,14 @@ func Run(ctx context.Context, args []string) error {
 							data := configData(ent)
 							a, _ := canonicalForDoctor(data)
 							b, _ := canonicalForDoctor(store.Dir)
-							services = append(services, map[string]any{"server": name, "command": command, "data_dir": data, "matches_opened_data_dir": a != "" && a == b})
+							services = append(services, map[string]any{"mode": configuredMode(stringArgs(ent["args"]), false), "server": name, "command": command, "data_dir": data, "matches_opened_data_dir": a != "" && a == b})
 						}
 					}
 				}
 			}
 		}
 		r["memory_services"] = services
-		launchers := []map[string]any{}
-		verifiedLauncher := map[string]bool{}
-		if *host != "zcode" {
-			for _, service := range services {
-				name, _ := service["server"].(string)
-				binary, _ := service["command"].(string)
-				data, _ := service["data_dir"].(string)
-				o := SetupOptions{Host: *host, Config: *config, Binary: binary, DataDir: data}
-				path := launcherPath(o, name)
-				actual, readErr := os.ReadFile(path)
-				matches := false
-				for _, review := range []bool{false, true} {
-					o.Review = review
-					matches = matches || readErr == nil && bytes.Equal(actual, launcher(o, managedHookArgs(o, name)))
-				}
-				verifiedLauncher[name] = matches && service["matches_opened_data_dir"] == true
-				launchers = append(launchers, map[string]any{"server": name, "path": path, "exists": readErr == nil, "matches_managed_definition": matches, "uses_opened_data_dir": service["matches_opened_data_dir"], "note": "file/configuration verification only; not proof of native event delivery"})
-			}
-		}
-		r["managed_launchers"] = launchers
-		contextHandlers := 0
-		if h, ok := c["hooks"].(map[string]any); ok {
-			if events, ok := h["events"].(map[string]any); ok {
-				for _, v := range events {
-					if groups, ok := v.([]any); ok {
-						for _, v := range groups {
-							if group, ok := v.(map[string]any); ok {
-								if handlers, ok := group["hooks"].([]any); ok {
-									for _, v := range handlers {
-										if handler, ok := v.(map[string]any); ok {
-											for _, arg := range stringArgs(handler["args"]) {
-												if arg == "--context-check" {
-													contextHandlers++
-												}
-											}
-											if *host != "" && *host != "zcode" {
-												for _, service := range services {
-													name, _ := service["server"].(string)
-													if verifiedLauncher[name] && (*serverName == "" || *serverName == name) && handler["command"] == nativeCommand(SetupOptions{Host: *host, Config: *config}, name) {
-														contextHandlers++
-													}
-												}
-											}
-										}
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-		r["context_check_handlers"] = contextHandlers
+		inspectManagedModes(r, c, services, *host, *config, *serverName)
 		bindings, er := store.HookBindings(ctx)
 		if er != nil {
 			return er
@@ -260,7 +220,7 @@ func Run(ctx context.Context, args []string) error {
 	}
 	deadline, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	r, er := (Runtime{Host: *host, Store: store, Capture: *capture, Review: *review, ServerName: *serverName, ContextCheck: *contextCheck}).Handle(deadline, e)
+	r, er := (Runtime{Mode: mode, Host: *host, Store: store, Capture: *capture, Review: *review, ServerName: *serverName, ContextCheck: *contextCheck}).Handle(deadline, e)
 	if er != nil {
 		_ = store.HookLog(ctx, e.Name, "", e.Session, "failed", er.Error())
 		return fail(er)
