@@ -1,41 +1,36 @@
-# 给安装 Agent：0.3 安装、升级与验收
+# 给安装 Agent：0.3.1-experience.1 安装与验收
 
-用户已授权的安装/升级按本说明执行。默认辅助模式，持久作用于该服务的全部已绑定项目。不逐轮询问是否切换；只显示当前模式。不得修改项目 AGENTS.md、CLAUDE.md 或把项目路由搬进插件。
+用户已授权安装或升级时按本说明执行。默认辅助模式；紧凑经验试验按实际项目启用。不逐轮询问模式，不修改项目 AGENTS.md、CLAUDE.md，不把领域路由搬进插件。
 
 ## 先核实与备份
 
-1. 识别真实客户端、版本、程序执行系统；运行 adapters，参考 adapters/README.md。模型名不是宿主名。Windows 程序使用 Windows 绝对路径，WSL 程序使用 Linux 路径，不混用配置和数据目录。
-2. 从实际用户级配置确认服务名、可执行文件及原 data_dir。多个库有歧义才请用户澄清，禁止因为默认目录不同创建空库。读取真实业务项目路径与既有稳定 scope，不能把安装包目录当业务项目。
-3. 运行新程序 version、build-info、help、guide --mode assist，核对包内提交与版本；这些命令不开库。
-4. 停止所有使用原库的旧进程，复制整个数据目录（含 WAL）到新的完整备份目录，然后才运行任何开库命令。status、doctor、setup、serve 均会开库。schema 仍是 3；从旧版首次打开可能补齐内部元数据，旧程序回退应恢复升级前备份。
+1. 识别真实宿主、版本、程序执行系统；运行 adapters，参考 adapters/README.md。模型名不是宿主名。Windows 程序用 Windows 绝对路径，WSL 程序用 Linux 路径。
+2. 从实际用户配置确认服务名、程序路径、原 data_dir、业务项目目录和稳定 scope。有多个库且无法判定才询问；禁止因为默认目录不同新建空库，禁止把安装包目录当业务项目。
+3. 运行新程序 version、build-info、help、guide --mode assist；核对版本与包内 SOURCE_COMMIT。这些命令不开库。
+4. 停止所有使用原库的旧进程，复制完整数据目录（含 WAL）及宿主配置到独立备份，再运行任何开库命令。status、doctor、setup、serve 都会开库。schema_version 仍为 3，但首次打开会增加内部元数据；回退旧程序应同时恢复升级前备份。
 
-## 一次设置，持续生效
+## 对实际项目启用试验
 
-```text
-<新程序> setup --host <实际适配器> --mode assist --config <实际用户配置> --data-dir <原数据目录> --project <实际业务项目目录> --scope project:<既有稳定标识>
-```
+    memory-mcp setup --host <实际宿主> --mode assist --config <实际配置> --data-dir <原库> --project <真实业务目录> --scope <原scope> --experience-trial
 
-多服务时加 --server-name <已核实名称>。默认不加 capture-user-text、context-check、review-on-stop。程序更新后必须重新 setup：同时更新服务 --mode 与该服务拥有的 hooks；移除旧 PreToolUse/Stop 配置，保留其他插件。只替换 exe 不代表迁移完成。
+保留服务名与其他绑定；有非默认服务名时按 help 传入。setup 配置 SessionStart、UserPromptSubmit、PreToolUse，不配置本试验的 Stop，不采集聊天原文。不运行旧 capture、context-check、review 整理流程，不建立 prepare/complete 仪式。需要保留普通 assist 的项目不加试验参数；已启用的策略不会因普通重装被悄悄关闭。
 
-检查旧安装遗留的用户级记忆专用引导：本插件明确拥有的说明片段应替换为本版 guide --mode assist，不在旧指引后追加一层“新版优先”。用户自写的其他规范、项目 AGENTS 和 CLAUDE 文件不改；若仍有要求每轮强制闭环的外部规则，报告具体来源及冲突，不能把配置迁移冒充流程已生效。普通文件记忆里的旧版本/操作描述属于历史资料，不应继续当安装指令。
+这版写入同步进行。用户纠正或自主发现只是候选信号，主线先用代码、运行证据和真实业务约定核实；确有被推翻的易错推断及具体影响，才调用 memory_experience_record。记录特征、反例和边界，不保存聊天全文或让历史指定本次修改位置。完整接口及限制见 EXPERIENCE_TRIAL.md。
 
-模式存于用户级服务及其 managed hook 配置，适用于全部既有绑定；不是每条输入重新选择。一个项目 setup 不会猜测其他历史项目身份，新增需要绑定的实际项目分别 setup。已有数据/绑定/待判断事项保留，不清洗、不补链、不自动标完成。
+原自由文本可通过 search/read 继续查询，但不会自动参与暂停。若已知少量真实踩坑案例，可先 read 原文、在真实项目核实，再以 previous_id 转成紧凑经验；禁止批量猜测提炼或给正式库填测试案例。没有合格案例时没有自动命中，是冷启动而非故障。
 
-默认安装 SessionStart + UserPromptSubmit 短提醒。提醒不写聊天、不查询案例、不生成回执、不阻断任务。显式需要原文采集时可在已授权范围内加 --capture-user-text；这会额外安装 Stop 采集实际答复，但仍不启动模型整理。严格兼容模式见 STRICT_MODE.md，不能因普通任务主动询问切换。
+## 分层验收
 
-Codex 使用当前 CODEX_HOME，否则用户 .codex/config.toml；hooks.json 同目录。若实际配置不同需传 --config。按宿主原生管理入口完成 hook 信任并重启，程序不会替用户改信任/审批设置。Qoder CLI/IDE 共用配置时不能重复安装两套采集，先核对真正执行端。
+1. doctor 检查绑定、辅助模式、experience_trial=true、experience_hooks_installed；bootstrap 确认两个 experience 工具可用。
+2. 在隔离库运行随包源码的 check_experience_trial.py；不得向用户库造案例。脚本重放只证明程序协议，不证明真实宿主已接受 hooks。
+3. 真实宿主重启后确认原生事件回执和 hooks 信任状态。Codex 信任要求由用户操作，不能伪造。没有回执就报告尚未验证，不能说已生效。
+4. 用真实代码任务观察：普通搜索静默；具体锚点与独立条件同时命中才暂停，宿主需用自己的当前任务/疑问调用 memory_experience_lookup，成功返回后重试原操作。bootstrap、口头声明和失败查询不能完成挑战。
+5. 当前行号只是字面定位；核查调用者、条件及必要运行证据后，才判断历史是否适用。缺失锚点不自动修订、归档或宣称经验过期。
 
-## 配置和真实运行分开验收
+记录主线总时延、实际模型输入、误暂停与返工，参照 HOST_TRIAL.md；不把模拟通过当成 GLM 消费能力已获证明。清洗沿用项目 N 次实质写入的预览与新确认，不自动应用。
 
-- setup 应报告 mode=assist、raw_capture=false、context_check=false、binding_verified=true 和备份路径。
-- 按输出 verification_argv 运行 doctor，不丢 config/server-name。核对 resolved_scope、memory_services[].matches_opened_data_dir、mode=assist、mode_configuration_consistent=true、context_check_handlers=0、assist_handlers=2。原生 launcher 缺失或被改动要先修复。
-- 重启/新会话后实际调用 memory_bootstrap，核对 0.3.0-rc.2、mode=assist、原 data_dir、integration_protocol=3。若模式不一致，检查残留进程或不同配置。
-- 在真实业务项目观察 SessionStart 与新输入短提醒；核对 doctor adapter_receipts 与当前真实会话。手工回放也能生成回执，不能当原生验收。无 input_saved 是默认不采集的预期，不能据此判失败。
-- 普通任务不应因记忆出现 gate、prepare/complete/skip 义务、Stop 续轮或自动案例。历史 pending 仍可用 context pending 查询，不能悄悄清零。
-- 按 HOST_TRIAL.md 记录实际效果。协议测试不证明模型理解或遵守 AGENTS；真实事件未验证要明确报告待验。
+## 退出与回退
 
-仅 MCP stdio 而无已验证原生 hook 时，核心工具仍可用，但每轮自动提醒不保证。不要伪称装了某客户端 adapter，就有另一客户端能力。不要为绕过安装限制写项目规则。
+    memory-mcp setup --host <实际宿主> --mode assist --config <实际配置> --data-dir <原库> --project <真实业务目录> --scope <原scope> --disable-experience-trial
 
-## 给用户的交付
-
-简要报告版本/提交、程序/配置、原库、绑定与 scope、备份、mode 和需重启事项。分别说清配置、绑定、实际工具连接、真实事件和业务行为的验证状态，不笼统说全部生效。清洗需要另行展示具体预览并取得新确认；安装授权不等于清洗授权。
+退出保留经验与其他绑定，最后一个试验项目退出时移除自身 PreToolUse，保留其他插件 handlers。整版回退时停止进程，恢复程序、配置和升级前完整库备份。不要为回退伪造完成历史 pending，也不要改用户规范。

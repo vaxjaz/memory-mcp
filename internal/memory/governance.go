@@ -17,18 +17,24 @@ import (
 
 // Profiles are navigation and admission metadata, not an ontology or proof of truth.
 type Profile struct {
-	Class         string   `json:"class" jsonschema:"long_term or temporary; task progress must not become permanent preference"`
-	FutureUse     string   `json:"future_use" jsonschema:"A concrete future situation and the decision/action this information changes"`
-	CounterCheck  string   `json:"counter_check" jsonschema:"Why save despite challenges: one-off, redundant, unverified, readily recoverable? Do not invent a negative example"`
-	Applicability string   `json:"applicability" jsonschema:"Known project/environment/conditions; explicitly retain unknowns"`
-	Boundary      string   `json:"boundary" jsonschema:"When not to reuse, real counterexamples, or what remains unknown"`
-	SearchHints   []string `json:"search_hints,omitempty" jsonschema:"Observed symptoms, real names and careful paraphrases; not keyword stuffing"`
-	ExpiresAt     string   `json:"expires_at,omitempty" jsonschema:"RFC3339 explicit expiry for temporary material; absent does not imply permanent validity"`
+	Experience    *Experience `json:"experience,omitempty" jsonschema:"Compact verified failure features. Write through memory_experience_record, not the legacy free-text record API."`
+	Class         string      `json:"class" jsonschema:"long_term or temporary; task progress must not become permanent preference"`
+	FutureUse     string      `json:"future_use" jsonschema:"A concrete future situation and the decision/action this information changes"`
+	CounterCheck  string      `json:"counter_check" jsonschema:"Why save despite challenges: one-off, redundant, unverified, readily recoverable? Do not invent a negative example"`
+	Applicability string      `json:"applicability" jsonschema:"Known project/environment/conditions; explicitly retain unknowns"`
+	Boundary      string      `json:"boundary" jsonschema:"When not to reuse, real counterexamples, or what remains unknown"`
+	SearchHints   []string    `json:"search_hints,omitempty" jsonschema:"Observed symptoms, real names and careful paraphrases; not keyword stuffing"`
+	ExpiresAt     string      `json:"expires_at,omitempty" jsonschema:"RFC3339 explicit expiry for temporary material; absent does not imply permanent validity"`
 }
 
 func validateProfile(p *Profile) error {
 	if p == nil {
 		return errors.New("case/hypothesis requires profile: future_use, counter_check, applicability, boundary and class")
+	}
+	if p.Experience != nil {
+		if err := validateExperience(p.Experience); err != nil {
+			return err
+		}
 	}
 	if p.Class != "long_term" && p.Class != "temporary" {
 		return errors.New("profile.class must be long_term or temporary")
@@ -66,6 +72,9 @@ func validateProfile(p *Profile) error {
 // Enforced at the MCP boundary. Existing historical material can still be read
 // and migrated without inventing retrospective admission reasons.
 func ValidateAdmission(d Draft) error {
+	if d.Profile != nil && d.Profile.Experience != nil && !d.experienceValidated {
+		return errors.New("compact experiences require memory_experience_record to validate scoped evidence and deduplication")
+	}
 	if d.Kind == "case" || d.Kind == "hypothesis" {
 		if err := validateProfile(d.Profile); err != nil {
 			return err

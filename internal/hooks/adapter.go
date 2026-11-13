@@ -96,6 +96,10 @@ func (a Adapter) Encode(event Event, out map[string]any) (HookResponse, error) {
 		// let a JSON-only success accidentally allow a tool on another client.
 		return HookResponse{ExitCode: 2, Stderr: reason}, nil
 	}
+	if event.Name == "PreToolUse" && out["decision"] == "block" {
+		reason, _ := out["reason"].(string)
+		out["hookSpecificOutput"] = map[string]any{"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}
+	}
 	raw, err := json.Marshal(out)
 	if err != nil {
 		return HookResponse{}, err

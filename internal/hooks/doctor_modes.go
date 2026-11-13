@@ -48,6 +48,7 @@ func inspectManagedModes(report, c map[string]any, services []map[string]any, ho
 			o := SetupOptions{Host: host, Config: config, Binary: binary, DataDir: data}
 			path := launcherPath(o, name)
 			actual, readErr := os.ReadFile(path)
+			o.ExperienceHooks = bytes.Contains(actual, []byte("--experience-hooks"))
 			matchedMode := ""
 			matchedCapture := false
 			for _, mode := range []string{memory.ModeAssist, memory.ModeStrict} {
@@ -69,11 +70,12 @@ func inspectManagedModes(report, c map[string]any, services []map[string]any, ho
 			if matchedMode != "" && service["matches_opened_data_dir"] == true {
 				launcherModes[name] = matchedMode
 			}
-			launchers = append(launchers, map[string]any{"server": name, "path": path, "exists": readErr == nil, "matches_managed_definition": matchedMode != "", "mode": matchedMode, "raw_capture": matchedCapture, "uses_opened_data_dir": service["matches_opened_data_dir"], "note": "file/configuration verification only; not proof of native event delivery"})
+			launchers = append(launchers, map[string]any{"server": name, "path": path, "exists": readErr == nil, "matches_managed_definition": matchedMode != "", "mode": matchedMode, "raw_capture": matchedCapture, "experience_hooks": o.ExperienceHooks, "uses_opened_data_dir": service["matches_opened_data_dir"], "note": "file/configuration verification only; not proof of native event delivery"})
 		}
 	}
 	handlers := 0
 	softHandlers := 0
+	experienceHandlers := 0
 	if h, ok := c["hooks"].(map[string]any); ok {
 		if events, ok := h["events"].(map[string]any); ok {
 			for event, v := range events {
@@ -102,6 +104,9 @@ func inspectManagedModes(report, c map[string]any, services []map[string]any, ho
 								handlers++
 							} else if mode == memory.ModeAssist {
 								softHandlers++
+								if event == "PreToolUse" {
+									experienceHandlers++
+								}
 							}
 							if mode != service["mode"] {
 								mismatches = append(mismatches, map[string]any{"server": name, "event": event, "service_mode": service["mode"], "hook_mode": mode})
@@ -115,6 +120,7 @@ func inspectManagedModes(report, c map[string]any, services []map[string]any, ho
 	report["managed_launchers"] = launchers
 	report["context_check_handlers"] = handlers
 	report["assist_handlers"] = softHandlers
+	report["experience_hooks_installed"] = experienceHandlers > 0
 	report["mode_mismatches"] = mismatches
 	report["mode_configuration_consistent"] = len(mismatches) == 0
 	report["mode_scope"] = "configured service and all its bound projects; no per-turn switch prompt"

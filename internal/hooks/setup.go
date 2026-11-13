@@ -23,6 +23,9 @@ func managedHookArgs(o SetupOptions, name string) []any {
 	if o.Capture {
 		args = append(args, "--capture-user-text")
 	}
+	if o.ExperienceHooks {
+		args = append(args, "--experience-hooks")
+	}
 	if mode == memory.ModeStrict {
 		args = append(args, "--context-check")
 	}
@@ -33,11 +36,12 @@ func managedHookArgs(o SetupOptions, name string) []any {
 }
 
 type SetupOptions struct {
-	Mode                                    string
-	Host                                    string
-	Config, DataDir, Project, Scope, Binary string
-	ServerName                              string
-	Capture, Review, DryRun                 bool
+	ExperienceTrial, DisableExperienceTrial, ExperienceHooks bool
+	Mode                                                     string
+	Host                                                     string
+	Config, DataDir, Project, Scope, Binary                  string
+	ServerName                                               string
+	Capture, Review, DryRun                                  bool
 }
 
 func object(m map[string]any, key string) (map[string]any, error) {
@@ -176,6 +180,15 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		return nil, modeErr
 	}
 	o.Mode = mode
+	if o.ExperienceTrial && o.DisableExperienceTrial {
+		return nil, errors.New("choose enable or disable experience trial, not both")
+	}
+	if (o.ExperienceTrial || o.DisableExperienceTrial) && mode != memory.ModeAssist {
+		return nil, errors.New("experience trial is an assist-mode opt-in, not a strict workflow")
+	}
+	if o.ExperienceTrial && o.Capture {
+		return nil, errors.New("experience trial does not capture raw user text; omit --capture-user-text")
+	}
 	if mode == memory.ModeAssist && o.Review {
 		return nil, errors.New("assist mode has no Stop model review; choose --mode strict explicitly for legacy review")
 	}
@@ -373,12 +386,51 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		}
 		events[event] = kept
 	}
+	var store *memory.Store
+	var databaseBackup string
+	desiredTrial := o.ExperienceTrial
+	if !o.DryRun {
+		store, err = memory.Open(o.DataDir)
+		if err != nil {
+			return nil, err
+		}
+		defer store.Close()
+		backups := filepath.Join(o.DataDir, "backups")
+		if err = os.MkdirAll(backups, 0700); err != nil {
+			return nil, err
+		}
+		databaseBackup = filepath.Join(backups, "before-hook-setup-"+time.Now().UTC().Format("20060102T150405.000000000Z")+".db")
+		if err = store.Backup(ctx, databaseBackup); err != nil {
+			return nil, err
+		}
+		if !o.ExperienceTrial && !o.DisableExperienceTrial {
+			desiredTrial, err = store.ExperienceTrialEnabled(ctx, o.Scope)
+			if err != nil {
+				return nil, err
+			}
+		}
+		other, er := store.OtherExperienceTrialsEnabled(ctx, o.Scope)
+		if er != nil {
+			return nil, er
+		}
+		o.ExperienceHooks = mode == memory.ModeAssist && (other || desiredTrial)
+	} else {
+		o.ExperienceHooks = o.ExperienceTrial
+	}
+	if desiredTrial && o.Capture {
+		return nil, errors.New("enabled experience trial requires raw capture off")
+	}
 	args := managedHookArgs(o, name)
 	installedEvents := []string{"SessionStart", "UserPromptSubmit"}
 	if mode == memory.ModeStrict {
 		installedEvents = append(installedEvents, "PreToolUse", "Stop")
-	} else if o.Capture {
-		installedEvents = append(installedEvents, "Stop")
+	} else {
+		if o.ExperienceHooks {
+			installedEvents = append(installedEvents, "PreToolUse")
+		}
+		if o.Capture {
+			installedEvents = append(installedEvents, "Stop")
+		}
 	}
 	for _, event := range installedEvents {
 		group := map[string]any{"hooks": []any{map[string]any{"type": "process", "command": o.Binary, "args": args, "enabled": true, "timeoutMs": 10000}}}
@@ -386,7 +438,9 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 			group["hooks"] = []any{map[string]any{"type": "command", "command": nativeCommand(o, name), "timeout": 10}}
 		}
 		if event == "PreToolUse" {
-			if o.Host == "zcode" {
+			if mode == memory.ModeAssist && o.ExperienceHooks {
+				group["matcher"] = experienceToolMatcher
+			} else if o.Host == "zcode" {
 				group["matcher"] = ".*"
 			} else {
 				group["matcher"] = "*"
@@ -406,6 +460,8 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	servers[name] = entry
 	report := map[string]any{"config": o.Config, "mode": mode, "data_dir": o.DataDir, "project": o.Project, "scope": o.Scope, "mcp_server": name, "review_on_stop": o.Review, "raw_capture": o.Capture, "host_event_verified": false, "restart_required": true, "dry_run": o.DryRun}
 	report["context_check"] = mode == memory.ModeStrict
+	report["experience_trial"] = desiredTrial
+	report["experience_hooks_installed"] = o.ExperienceHooks
 	report["mode_scope"] = "this MCP service and all its bound projects; persists until explicitly reconfigured"
 	report["mode_prompt_required"] = false
 	report["host"] = o.Host
@@ -424,20 +480,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	if err = os.MkdirAll(filepath.Dir(o.Config), 0700); err != nil {
 		return nil, err
 	}
-	store, err := memory.Open(o.DataDir)
-	if err != nil {
-		return nil, err
-	}
-	defer store.Close()
-	backups := filepath.Join(o.DataDir, "backups")
-	if err = os.MkdirAll(backups, 0700); err != nil {
-		return nil, err
-	}
-	snapshot := filepath.Join(backups, "before-hook-setup-"+time.Now().UTC().Format("20060102T150405.000000000Z")+".db")
-	if err = store.Backup(ctx, snapshot); err != nil {
-		return nil, err
-	}
-	report["database_backup"] = snapshot
+	report["database_backup"] = databaseBackup
 	if err = store.HookBind(ctx, o.Project, o.Scope); err != nil {
 		return nil, err
 	}
@@ -451,6 +494,11 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		return nil, err
 	}
 	report["config_backups"] = backupsWritten
+	if mode == memory.ModeAssist {
+		if err = store.ConfigureExperienceTrial(ctx, o.Scope, desiredTrial); err != nil {
+			return nil, err
+		}
+	}
 	for _, backup := range backupsWritten {
 		if strings.HasPrefix(backup, o.Config+".memory-mcp-backup-") {
 			report["config_backup"] = backup

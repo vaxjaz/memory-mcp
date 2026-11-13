@@ -32,6 +32,24 @@ def normalize_version(value):
     return value
 
 
+def verified_source_commit(root, supplied=None):
+    try:
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root,
+                                       text=True, stderr=subprocess.DEVNULL).strip()
+    except (OSError, subprocess.CalledProcessError):
+        head = "unknown"
+    if supplied:
+        if not re.fullmatch(r"[0-9a-f]{40}", supplied):
+            raise ValueError("source-commit must be an exact lowercase 40-character commit SHA")
+        marker = root / ".source-commit"
+        if not marker.is_file() or marker.read_text().strip() != supplied:
+            raise ValueError("archived source must contain a matching .source-commit marker")
+        if head != "unknown" and head != supplied:
+            raise ValueError("source-commit conflicts with checkout HEAD")
+        return supplied
+    return head
+
+
 # Keep old tags buildable when they predate the version file.
 VERSION = normalize_version(VERSION_FILE.read_text().strip() if VERSION_FILE.is_file() else "0.1.0")
 
@@ -67,18 +85,19 @@ def main():
                         help="Source checkout to build, independently of this packaging helper")
     parser.add_argument("--output-dir", type=Path,
                         help="Output directory (default: source-dir/dist)")
+    parser.add_argument("--source-commit", help="Verified archived source SHA; requires matching .source-commit")
     args = parser.parse_args()
     version = args.version
     root = args.source_dir.resolve()
     if not (root / "go.mod").is_file():
         parser.error("source-dir must contain go.mod")
+    try:
+        source_commit = verified_source_commit(root, args.source_commit)
+    except ValueError as error:
+        parser.error(str(error))
     dist = (args.output_dir or root / "dist").resolve()
     dist.mkdir(parents=True, exist_ok=True)
     licenses = notices(root)
-    try:
-        source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True, stderr=subprocess.DEVNULL).strip()
-    except (OSError, subprocess.CalledProcessError):
-        source_commit = "unknown"
     artifacts = []
     for target_os, arch in TARGETS:
         name = f"memory-mcp-{version}-{target_os}-{arch}"
@@ -91,6 +110,7 @@ def main():
                             "-o", str(bundle / exe), "./cmd/memory-mcp"], cwd=root, env=env, check=True)
             shutil.copy2(root / "README.md", bundle / "README.md")
             shutil.copytree(root / "docs", bundle / "docs")
+            (bundle / "SOURCE_COMMIT").write_text(source_commit + "\n")
             (bundle / "THIRD_PARTY_NOTICES.txt").write_text(licenses)
             (bundle / "mcp.example.json").write_text(json.dumps({"mcpServers": {"decision-memory": {
                 "command": "REPLACE_WITH_ABSOLUTE_PATH_TO_" + exe, "args": (["serve", "--mode", "assist"] if (root / "internal/memory/integration.go").is_file() else ["serve"])}}}, indent=2) + "\n")
@@ -108,6 +128,7 @@ def main():
             print(f"Built {archive.name}", flush=True)
     source = dist / f"memory-mcp-{version}-source.zip"
     with zipfile.ZipFile(source, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(f"memory-mcp-{version}/.source-commit", source_commit + "\n")
         for file in sorted(root.rglob("*")):
             relative = file.relative_to(root)
             if file.is_file() and relative.parts[0] in {"go.mod", "go.sum", "README.md", ".gitignore", ".github", "cmd", "internal", "docs", "scripts"} and "__pycache__" not in relative.parts:
@@ -115,6 +136,14 @@ def main():
     artifacts.append(source)
     (dist / "SHA256SUMS").write_text("".join(
         f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in artifacts))
+    upgrade = dist / f"memory-mcp-{version}-agent-upgrade.zip"
+    with zipfile.ZipFile(upgrade, "w", zipfile.ZIP_DEFLATED) as z:
+        z.write(root / "docs/AGENT_UPGRADE_PACKAGE.md", "UPGRADE_AGENT.md")
+        z.writestr("SOURCE_COMMIT", source_commit + "\n")
+        z.write(dist / "SHA256SUMS", "SHA256SUMS")
+        for artifact in artifacts:
+            z.write(artifact, "packages/" + artifact.name)
+    print(f"Built {upgrade.name}", flush=True)
 
 
 if __name__ == "__main__":
