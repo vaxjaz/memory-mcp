@@ -109,11 +109,15 @@ def main():
                 assert again[0] == 2 or again[1].get("decision") == "block"
                 host.tool("memory_experience_lookup", dict(scope=scope, task="", questions="coverage",
                           keywords=["LYN"], challenge_id=token), expect_error=True)
-                response = host.tool("memory_experience_lookup", dict(scope=scope,
+                lookup_args = dict(scope=scope,
                                      task="Current fixture multi-entry admission change",
                                      questions="Does the candidate method cover the current real entries?",
-                                     keywords=["LYN"], challenge_id=token))
-                assert len(json.dumps(response, ensure_ascii=False).encode()) <= 8192
+                                     keywords=["LYN"], challenge_id=token)
+                wire = host.request("tools/call", {"name": "memory_experience_lookup", "arguments": lookup_args})
+                assert not wire.get("isError") and "structuredContent" not in wire, wire
+                assert len(wire["content"]) == 1, wire
+                assert len(wire["content"][0]["text"].encode()) <= 8192
+                response = json.loads(wire["content"][0]["text"])
                 assert response["items"][0]["id"] == saved["id"]
                 assert response["items"][0]["locations"][0]["lines"] == [2]
                 assert response["challenge_outcome"] == "query_completed_not_applicability_verified"

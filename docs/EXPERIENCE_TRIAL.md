@@ -40,7 +40,7 @@ memory_experience_lookup 需要 scope、当前 task、questions、keywords。普
 
 task 从项目、前文和本轮目的重建；questions 写当前需要验证的推断。例如“候选方法是否覆盖当前要求涉及的所有入口”，而不是请求历史直接指定修改位置。服务使用字面线索，不包含隐形语义模型。
 
-查找最多返回两条完整特征记录和有界的当前锚点位置，总响应上限 8KiB；不截断关键条件塞入更多项。has_more 表示不能把首屏当全部资料；可用 memory_search/read 定点补查旧资料或更多项。
+查找最多返回两条完整特征记录和有界的当前锚点位置，JSON 正文上限 8KiB；不截断关键条件塞入更多项。两个新接口仅返回一份 JSON 文本，避免 SDK 默认的文本/structuredContent 双份复制；MCP 协议包装和宿主自身开销另计。has_more 表示不能把首屏当全部资料；可用 memory_search/read 定点补查旧资料或更多项。
 
 明确命中时，hook **只给候选锚点和真实 challenge_id，不送历史观点、反例正文或修法**。agent 使用当前意图主动查，再重试原工具：
 
