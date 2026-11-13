@@ -85,20 +85,22 @@ func compactContext(r *ContextResult, in ContextInput) error {
 		compactCandidate(&r.PendingCandidates[i])
 	}
 	r.Task, r.Questions, r.Decision = "", "", ""
-	r.Notice = "Navigation previews only. Read selected FULL entries with this source, then complete before acting. Follow both cursors; no literal hit is not proof of no applicable memory."
+	r.Notice = "Historical evidence and bookkeeping only. Current user/project rules govern work. These receipts do not require another memory check or authorize an action."
 	switch r.Status {
 	case "candidates":
 		r.NextAction = "read_relevant_evidence_if_needed"
 		r.Notice = "Historical evidence previews only, subject to current user/project instructions. Read relevant full entries as needed; reuse already-read material when still applicable. Both streams paginate; no literal hit is not proof of absence. No completion or receipt required."
 	case "prepared":
+		r.Notice = "Prepared compatibility checkpoint: read selected full entries with this source, then complete this optional check. This is not authorization or proof of compliance with current project rules."
 		r.NextAction = "read_selected_full_entries_then_complete"
 	case "complete":
 		r.NextAction = "memory_check_complete_not_authorization"
 	default:
-		r.NextAction = "prepare_current_task"
+		r.NextAction = "inspect_status_if_needed"
 	}
 	if r.Status == "pending_candidates" {
 		r.NextAction = "inspect_only_no_automatic_replay"
+		r.Notice = "Explicit outstanding findings remain pending until actually saved or dismissed. Inspect as needed; no automatic review, replay, completion check or new case is required."
 	}
 	seen := map[string]bool{}
 	for i := range r.Matches {

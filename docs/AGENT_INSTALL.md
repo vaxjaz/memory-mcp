@@ -29,7 +29,7 @@ Codex 使用当前 CODEX_HOME，否则用户 .codex/config.toml；hooks.json 同
 
 - setup 应报告 mode=assist、raw_capture=false、context_check=false、binding_verified=true 和备份路径。
 - 按输出 verification_argv 运行 doctor，不丢 config/server-name。核对 resolved_scope、memory_services[].matches_opened_data_dir、mode=assist、mode_configuration_consistent=true、context_check_handlers=0、assist_handlers=2。原生 launcher 缺失或被改动要先修复。
-- 重启/新会话后实际调用 memory_bootstrap，核对 0.3.0-rc.1、mode=assist、原 data_dir、integration_protocol=3。若模式不一致，检查残留进程或不同配置。
+- 重启/新会话后实际调用 memory_bootstrap，核对 0.3.0-rc.2、mode=assist、原 data_dir、integration_protocol=3。若模式不一致，检查残留进程或不同配置。
 - 在真实业务项目观察 SessionStart 与新输入短提醒；核对 doctor adapter_receipts 与当前真实会话。手工回放也能生成回执，不能当原生验收。无 input_saved 是默认不采集的预期，不能据此判失败。
 - 普通任务不应因记忆出现 gate、prepare/complete/skip 义务、Stop 续轮或自动案例。历史 pending 仍可用 context pending 查询，不能悄悄清零。
 - 按 HOST_TRIAL.md 记录实际效果。协议测试不证明模型理解或遵守 AGENTS；真实事件未验证要明确报告待验。
