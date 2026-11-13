@@ -34,7 +34,7 @@ func Run(ctx context.Context, args []string) error {
 	scope := fs.String("scope", "", "project:<stable identifier>")
 	serverName := fs.String("server-name", "", "explicit MCP server name (use a distinct name and data directory for isolated acceptance)")
 	capture := fs.Bool("capture-user-text", false, "enable raw prompt and supplied answer capture in bound projects")
-	review := fs.Bool("review-on-stop", false, "request one host-model business-memory review at turn end; adds a model continuation")
+	review := fs.Bool("review-on-stop", false, "legacy opt-in: allow a declared pending candidate to request one extra model turn; normally omit and use review_at_stop per candidate")
 	contextCheck := fs.Bool("context-check", false, "context-aware retrieval and before-action check; setup enables this in managed hooks")
 	reviews := fs.Bool("reviews", false, "doctor: include paginated current needs_review entries for --scope")
 	dry := fs.Bool("dry-run", false, "show setup targets without writing config or opening the database")

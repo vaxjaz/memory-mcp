@@ -13,34 +13,38 @@ import (
 )
 
 type ContextInput struct {
-	ResponseMode  string   `json:"response_mode,omitempty" jsonschema:"compact (MCP default): bounded previews or short completion receipt; full: legacy output. Full-read checks are unchanged."`
-	Action        string   `json:"action" jsonschema:"prepare using conversation/project context, complete after reading sources, skip for a genuinely memory-independent task, or status"`
-	Scope         string   `json:"scope"`
-	SourceID      string   `json:"source_id" jsonschema:"Current actual user source ID; never an assistant answer"`
-	Task          string   `json:"task,omitempty" jsonschema:"Concrete current task reconstructed from project and visible conversation, not just the last user sentence; no private chain of thought"`
-	Questions     string   `json:"questions,omitempty" jsonschema:"Decision, conditions, unresolved references and counterevidence to look for"`
-	Keywords      []string `json:"keywords,omitempty" jsonschema:"Grounded literal retrieval terms chosen from project/conversation and relevant memories; duplicates/whitespace normalized, no eight-term cap. Overlong queries return a directory with explicit keyword-search status"`
-	Cursor        string   `json:"cursor,omitempty"`
-	SelectedIDs   []string `json:"selected_ids,omitempty" jsonschema:"Current applicable entries ACTUALLY read with context_source_id; empty if none applicable"`
-	Decision      string   `json:"decision,omitempty" jsonschema:"Concrete constraints carried into the intended action, or why memory is not applicable; not proof an error was prevented"`
-	SaveCandidate bool     `json:"save_candidate,omitempty" jsonschema:"Only true if this turn contains a material decision, correction or reusable finding passing the forward/reverse admission challenge"`
+	CandidateSourceID string   `json:"candidate_source_id,omitempty" jsonschema:"candidate action only: historical candidate to update/withdraw. source_id still identifies the actual current user source in the same scope."`
+	ReviewAtStop      bool     `json:"review_at_stop,omitempty" jsonschema:"Only for an explicit meaningful pending candidate: ask for one extra model review at Stop. Default false; saved or dismissed candidates never trigger it."`
+	ResponseMode      string   `json:"response_mode,omitempty" jsonschema:"compact (MCP default): bounded previews or short completion receipt; full: legacy output. Full-read checks are unchanged."`
+	Action            string   `json:"action" jsonschema:"prepare, complete, skip, read-only status, candidate to declare/withdraw a concrete pending finding without resetting reads, or pending to list outstanding candidates in this scope"`
+	Scope             string   `json:"scope"`
+	SourceID          string   `json:"source_id,omitempty" jsonschema:"Actual user source ID; required except pending. Status may inspect historical sources; changes require the current actual source."`
+	Task              string   `json:"task,omitempty" jsonschema:"Concrete current task reconstructed from project and visible conversation, not just the last user sentence; no private chain of thought"`
+	Questions         string   `json:"questions,omitempty" jsonschema:"Decision, conditions, unresolved references and counterevidence to look for"`
+	Keywords          []string `json:"keywords,omitempty" jsonschema:"Grounded literal retrieval terms chosen from project/conversation and relevant memories; duplicates/whitespace normalized, no eight-term cap. Overlong queries return a directory with explicit keyword-search status"`
+	Cursor            string   `json:"cursor,omitempty"`
+	SelectedIDs       []string `json:"selected_ids,omitempty" jsonschema:"Current applicable entries ACTUALLY read with context_source_id; empty if none applicable"`
+	Decision          string   `json:"decision,omitempty" jsonschema:"Concrete constraints carried into the intended action, or why memory is not applicable; not proof an error was prevented"`
+	SaveCandidate     bool     `json:"save_candidate,omitempty" jsonschema:"Only true if this turn contains a material decision, correction or reusable finding passing the forward/reverse admission challenge"`
 }
 type ContextResult struct {
-	ResponseMode    string             `json:"response_mode,omitempty"`
-	NextAction      string             `json:"next_action,omitempty"`
-	Questions       string             `json:"questions,omitempty"`
-	SourceID        string             `json:"source_id"`
-	Status          string             `json:"status"`
-	Task            string             `json:"task,omitempty"`
-	Matches         []Hit              `json:"matches,omitempty"`
-	MatchNextCursor string             `json:"match_next_cursor,omitempty"`
-	Directory       []InventoryItem    `json:"directory,omitempty"`
-	NextCursor      string             `json:"next_cursor,omitempty"`
-	SelectedIDs     []string           `json:"selected_ids"`
-	Decision        string             `json:"decision,omitempty"`
-	SaveCandidate   bool               `json:"save_candidate"`
-	Notice          string             `json:"notice"`
-	KeywordSearch   *KeywordSearchInfo `json:"keyword_search,omitempty"`
+	MemoryReview      *MemoryCandidate   `json:"memory_review,omitempty"`
+	PendingCandidates []MemoryCandidate  `json:"pending_candidates,omitempty"`
+	ResponseMode      string             `json:"response_mode,omitempty"`
+	NextAction        string             `json:"next_action,omitempty"`
+	Questions         string             `json:"questions,omitempty"`
+	SourceID          string             `json:"source_id"`
+	Status            string             `json:"status"`
+	Task              string             `json:"task,omitempty"`
+	Matches           []Hit              `json:"matches,omitempty"`
+	MatchNextCursor   string             `json:"match_next_cursor,omitempty"`
+	Directory         []InventoryItem    `json:"directory,omitempty"`
+	NextCursor        string             `json:"next_cursor,omitempty"`
+	SelectedIDs       []string           `json:"selected_ids"`
+	Decision          string             `json:"decision,omitempty"`
+	SaveCandidate     bool               `json:"save_candidate"`
+	Notice            string             `json:"notice"`
+	KeywordSearch     *KeywordSearchInfo `json:"keyword_search,omitempty"`
 }
 
 func (s *Store) RequireContext(ctx context.Context, t HookTurn) error {
@@ -49,6 +53,14 @@ func (s *Store) RequireContext(ctx context.Context, t HookTurn) error {
 }
 func (s *Store) ContextStatus(ctx context.Context, source string) (ContextResult, error) {
 	r := ContextResult{SourceID: source, SelectedIDs: []string{}, Notice: "Read/selection receipts verify sequence and versions, not semantic correctness or actual prevention. Relevant full content remains authoritative over navigation summaries."}
+	candidate, candidateErr := s.CandidateStatus(ctx, source)
+	if candidateErr != nil {
+		return r, candidateErr
+	}
+	if candidate.State != "none" || candidate.WrittenCaseCount > 0 {
+		r.MemoryReview = &candidate
+		r.SaveCandidate = candidate.State == "pending"
+	}
 	var selected string
 	err := s.db.QueryRowContext(ctx, "SELECT task,status,selected_json,decision,questions,save_candidate FROM context_checks WHERE source_id=?", source).Scan(&r.Task, &r.Status, &selected, &r.Decision, &r.Questions, &r.SaveCandidate)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -62,6 +74,7 @@ func (s *Store) ContextStatus(ctx context.Context, source string) (ContextResult
 	if err = json.Unmarshal([]byte(selected), &r.SelectedIDs); err != nil {
 		return r, err
 	}
+	r.SaveCandidate = candidate.State == "pending"
 	r.Notice = "Navigation and receipts are not semantic proof. Follow relevant evidence/exception/replacement links. Do not turn repeated memory citations into independent evidence."
 	return r, err
 }
@@ -82,9 +95,23 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextRes
 	if err := validScope(in.Scope); err != nil {
 		return ContextResult{}, err
 	}
+	if in.Action == "pending" {
+		limit := 20
+		if in.ResponseMode == "compact" {
+			limit = 8
+		}
+		items, next, er := s.PendingCandidates(ctx, in.Scope, in.Cursor, limit)
+		return ContextResult{Status: "pending_candidates", PendingCandidates: items, NextCursor: next, SelectedIDs: []string{}}, er
+	}
+	if in.SourceID == "" {
+		return ContextResult{}, errors.New("actual source_id required for this action")
+	}
 	source, err := userSource(ctx, s.db, in.SourceID, in.Scope)
 	if err != nil {
 		return ContextResult{}, err
+	}
+	if in.Action == "status" {
+		return s.ContextStatus(ctx, in.SourceID)
 	}
 	if strings.HasPrefix(source.SourceRef, HookSourcePrefix) {
 		t, er := s.HookTurn(ctx, in.SourceID)
@@ -105,9 +132,6 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextRes
 			return ContextResult{}, errors.New("context must use the latest user input in this session")
 		}
 	}
-	if in.Action == "status" {
-		return s.ContextStatus(ctx, in.SourceID)
-	}
 	for name, v := range map[string]string{"task": in.Task, "questions": in.Questions, "decision": in.Decision} {
 		if len(v) > 8192 {
 			return ContextResult{}, errors.New("context field too large")
@@ -117,6 +141,32 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextRes
 		}
 	}
 	switch in.Action {
+	case "candidate":
+		if err = candidateReason(in); err != nil {
+			return result, err
+		}
+		target := in.SourceID
+		if in.CandidateSourceID != "" {
+			if _, err = userSource(ctx, s.db, in.CandidateSourceID, in.Scope); err != nil {
+				return result, err
+			}
+			target = in.CandidateSourceID
+			if in.ReviewAtStop && target != in.SourceID {
+				return result, errors.New("review_at_stop must refer to the current source; declare a current candidate for an active review")
+			}
+		}
+		tx, er := s.db.BeginTx(ctx, nil)
+		if er != nil {
+			return result, er
+		}
+		defer tx.Rollback()
+		if er = setCandidate(ctx, tx, target, in.Scope, in.Decision, in.SaveCandidate, in.ReviewAtStop); er != nil {
+			return result, er
+		}
+		if er = tx.Commit(); er != nil {
+			return result, er
+		}
+		return s.ContextStatus(ctx, target)
 	case "prepare":
 		if strings.TrimSpace(in.Task) == "" {
 			return ContextResult{}, errors.New("reconstruct the current task from project and conversation first")
@@ -181,12 +231,26 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextRes
 		if in.SaveCandidate || len(in.SelectedIDs) > 0 || strings.TrimSpace(in.Task) == "" || strings.TrimSpace(in.Decision) == "" {
 			return ContextResult{}, errors.New("skip needs task and concrete non-applicability reason; no selected IDs or save candidate")
 		}
-		_, err = s.db.ExecContext(ctx, `INSERT INTO context_checks(source_id,scope,task,questions,status,decision,updated_at)VALUES(?,?,?,?,'complete',?,?) ON CONFLICT(source_id)DO UPDATE SET task=excluded.task,questions=excluded.questions,status='complete',selected_json='[]',decision=excluded.decision,save_candidate=0,updated_at=excluded.updated_at`, in.SourceID, in.Scope, in.Task, in.Questions, in.Decision, time.Now().UTC().Format(time.RFC3339Nano))
+		tx, er := s.db.BeginTx(ctx, nil)
+		if er != nil {
+			return result, er
+		}
+		defer tx.Rollback()
+		_, err = tx.ExecContext(ctx, `INSERT INTO context_checks(source_id,scope,task,questions,status,decision,updated_at)VALUES(?,?,?,?,'complete',?,?) ON CONFLICT(source_id)DO UPDATE SET task=excluded.task,questions=excluded.questions,status='complete',selected_json='[]',decision=excluded.decision,save_candidate=0,updated_at=excluded.updated_at`, in.SourceID, in.Scope, in.Task, in.Questions, in.Decision, time.Now().UTC().Format(time.RFC3339Nano))
 		if err != nil {
 			return ContextResult{}, err
 		}
+		if er = setCandidate(ctx, tx, in.SourceID, in.Scope, in.Decision, false, false); er != nil {
+			return result, er
+		}
+		if er = tx.Commit(); er != nil {
+			return result, er
+		}
 		return s.ContextStatus(ctx, in.SourceID)
 	case "complete":
+		if in.ReviewAtStop && !in.SaveCandidate {
+			return result, errors.New("review_at_stop requires save_candidate=true")
+		}
 		if len(in.SelectedIDs) > 12 || strings.TrimSpace(in.Decision) == "" {
 			return ContextResult{}, errors.New("complete needs a concrete action/non-applicability explanation and at most 12 entries")
 		}
@@ -240,12 +304,15 @@ func (s *Store) Context(ctx context.Context, in ContextInput) (result ContextRes
 		if er != nil {
 			return ContextResult{}, er
 		}
+		if er = setCandidate(ctx, tx, in.SourceID, in.Scope, in.Decision, in.SaveCandidate, in.ReviewAtStop); er != nil {
+			return result, er
+		}
 		if er = tx.Commit(); er != nil {
 			return ContextResult{}, er
 		}
 		return s.ContextStatus(ctx, in.SourceID)
 	default:
-		return ContextResult{}, errors.New("context action must be prepare, complete, skip or status")
+		return ContextResult{}, errors.New("context action must be prepare, complete, skip, status, candidate or pending")
 	}
 }
 func (s *Store) TrackContextRead(ctx context.Context, source, id string) error {
@@ -308,7 +375,7 @@ func (s *Store) CheckWriteContext(ctx context.Context, d Draft) error {
 }
 
 func (s *Store) CurrentCasesForSource(ctx context.Context, source, scope string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT e.id FROM entries e JOIN links l ON l.entry_id=e.id WHERE l.target_id=? AND e.scope=? AND e.kind='case' AND e.current=1`, source, scope)
+	rows, err := s.db.QueryContext(ctx, casesForSourceSQL+" ORDER BY e.id", scope, source, source)
 	if err != nil {
 		return nil, err
 	}

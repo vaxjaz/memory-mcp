@@ -24,6 +24,7 @@ const SchemaVersion = 3
 
 // Entry bodies are free text. These fields track provenance, not semantic truth.
 type Entry struct {
+	RecordedSourceID       string            `json:"recorded_source_id,omitempty" jsonschema:"Persisted turn bookkeeping association; separate from evidence links and not an assertion of support"`
 	ResponseMode           string            `json:"response_mode,omitempty"`
 	LinkCount              *int              `json:"link_count,omitempty"`
 	CheckedContextSourceID string            `json:"checked_context_source_id,omitempty" jsonschema:"Transient write response: current checkpoint validated for this operation, not a stored evidence link"`
@@ -143,6 +144,10 @@ PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;`)
 		return nil, err
 	}
 	if err := s.initOperationOrder(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := s.initDemandReview(); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -315,6 +320,9 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 			if err = loadGovernance(ctx, tx, &entry); err != nil {
 				return Entry{}, err
 			}
+			if err = loadRecordedSource(ctx, tx, &entry); err != nil {
+				return Entry{}, err
+			}
 			return entry, tx.Commit()
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
@@ -439,6 +447,20 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 		}
 		e.Profile = d.Profile
 	}
+	if (d.Kind == "case" || d.Kind == "hypothesis") && d.ContextSourceID != "" {
+		if _, err = userSource(ctx, tx, d.ContextSourceID, d.Scope); err != nil {
+			return Entry{}, err
+		}
+		if d.Kind == "case" {
+			if _, err = tx.ExecContext(ctx, `INSERT INTO turn_case_writes(entry_id,source_id)VALUES(?,?)`, e.ID, d.ContextSourceID); err != nil {
+				return Entry{}, err
+			}
+			e.RecordedSourceID = d.ContextSourceID
+		}
+		if _, err = tx.ExecContext(ctx, `UPDATE memory_candidates SET state='saved',review_at_stop=0,updated_at=? WHERE source_id=? AND state='pending'`, e.CreatedAt, d.ContextSourceID); err != nil {
+			return Entry{}, err
+		}
+	}
 	if d.Kind == "case" || d.Kind == "hypothesis" {
 		if _, err = tx.ExecContext(ctx, `INSERT INTO maintenance_policy(scope,changes,next_at) VALUES(?,1,100)
  ON CONFLICT(scope) DO UPDATE SET changes=changes+1`, d.Scope); err != nil {
@@ -512,6 +534,9 @@ func (s *Store) ReadPage(ctx context.Context, id, referenceCursor string) (ReadR
 		return r, err
 	}
 	if err = loadGovernance(ctx, tx, &r.Entry); err != nil {
+		return r, err
+	}
+	if err = loadRecordedSource(ctx, tx, &r.Entry); err != nil {
 		return r, err
 	}
 	effective, er := resolveCurrent(ctx, tx, id)
@@ -738,6 +763,9 @@ func (s *Store) Export(ctx context.Context) (Snapshot, error) {
 	}
 	for i := range out.Entries {
 		if err = loadGovernance(ctx, tx, &out.Entries[i]); err != nil {
+			return out, err
+		}
+		if err = loadRecordedSource(ctx, tx, &out.Entries[i]); err != nil {
 			return out, err
 		}
 	}

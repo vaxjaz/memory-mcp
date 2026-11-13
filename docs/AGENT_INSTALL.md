@@ -23,10 +23,12 @@
 6. 对当前项目执行以下命令，所有占位符必须替换为已核实的绝对路径：
 
 ```text
-<新程序> setup --host <实际适配器> --config <实际用户配置> --data-dir <原数据目录> --project <实际业务项目目录> --scope project:<稳定标识> --capture-user-text --review-on-stop
+<新程序> setup --host <实际适配器> --config <实际用户配置> --data-dir <原数据目录> --project <实际业务项目目录> --scope project:<稳定标识> --capture-user-text
 ```
 
 setup 会复用已有服务名；多服务时显式传 `--server-name <已核实服务名>`。
+默认不要加 --review-on-stop；该参数仅保留旧式候选续轮。按需收尾见 ON_DEMAND_STOP.md。
+
 setup 同时安装 `--context-check`，升级旧包后也必须重新 setup 更新 managed hooks。
 Codex 优先取当前进程的 CODEX_HOME，否则取用户目录下 `.codex/config.toml`；与实际宿主环境不同时必须传实际 `--config`。hooks.json 位于同目录。
 Codex 仍须通过原生 Hooks 管理入口信任新配置，再重启/新建会话。本程序不会修改信任或审批设置。

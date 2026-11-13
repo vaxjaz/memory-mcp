@@ -59,7 +59,7 @@ func CompactEntry(e Entry, mode string) Entry {
 	return Entry{ResponseMode: mode, ID: e.ID, RootID: e.RootID, PreviousID: e.PreviousID,
 		Kind: e.Kind, Scope: e.Scope, Current: e.Current, NeedsReview: e.NeedsReview,
 		BodyBytes: e.BodyBytes, BodySHA256: e.BodySHA256, State: compactState(e.State),
-		CheckedContextSourceID: e.CheckedContextSourceID, LinkCount: &n, TextIssues: e.TextIssues}
+		CheckedContextSourceID: e.CheckedContextSourceID, RecordedSourceID: e.RecordedSourceID, LinkCount: &n, TextIssues: e.TextIssues}
 }
 
 func CompactReview(t HookTurn, mode string) HookTurn {
@@ -80,6 +80,10 @@ func CompactReview(t HookTurn, mode string) HookTurn {
 func compactContext(r *ContextResult, in ContextInput) error {
 	query, terms, _ := normalizeSearchQuery(strings.Join(in.Keywords, " "))
 	r.ResponseMode = "compact"
+	compactCandidate(r.MemoryReview)
+	for i := range r.PendingCandidates {
+		compactCandidate(&r.PendingCandidates[i])
+	}
 	r.Task, r.Questions, r.Decision = "", "", ""
 	r.Notice = "Navigation previews only. Read selected FULL entries with this source, then complete before acting. Follow both cursors; no literal hit is not proof of no applicable memory."
 	switch r.Status {
@@ -89,6 +93,9 @@ func compactContext(r *ContextResult, in ContextInput) error {
 		r.NextAction = "ready_subject_to_current_versions"
 	default:
 		r.NextAction = "prepare_current_task"
+	}
+	if r.Status == "pending_candidates" {
+		r.NextAction = "inspect_only_no_automatic_replay"
 	}
 	seen := map[string]bool{}
 	for i := range r.Matches {
@@ -139,7 +146,11 @@ func compactContext(r *ContextResult, in ContextInput) error {
 		}
 		// Keep the last-returned item as the continuation anchor. Never use the
 		// original fetched-page cursor after dropping unseen candidates.
-		if len(r.Directory) > 1 {
+		if len(r.PendingCandidates) > 1 {
+			r.PendingCandidates = r.PendingCandidates[:len(r.PendingCandidates)-1]
+			last := r.PendingCandidates[len(r.PendingCandidates)-1]
+			r.NextCursor = encodeCursor(pageCursor{Version: 1, Filter: digestText("pending-memory:" + in.Scope), ID: last.SourceID, Sort: "source_id"})
+		} else if len(r.Directory) > 1 {
 			r.Directory = r.Directory[:len(r.Directory)-1]
 			last := r.Directory[len(r.Directory)-1]
 			r.NextCursor = encodeCursor(pageCursor{Version: 1, Filter: searchFingerprint(SearchInput{Scope: in.Scope}), ID: last.ID, Sort: last.CreatedAt})
