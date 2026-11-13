@@ -50,6 +50,7 @@ Usage:
   memory-mcp backup --out FILE [--data-dir DIR]  Consistent standalone SQLite snapshot
   memory-mcp forget --id ID --yes [--data-dir DIR]
   memory-mcp setup --host HOST --mode assist --project DIR --scope project:ID
+                     [--experience-trial | --disable-experience-trial]
   memory-mcp hook --host HOST [--data-dir DIR]    User-level event handler (not an MCP server)
   memory-mcp doctor [--data-dir DIR]             Event/recall/review receipts, no chat bodies
   memory-mcp adapters                           List implemented host protocols and validation limits

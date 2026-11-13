@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"strings"
 
@@ -15,6 +16,20 @@ var Guide string
 
 //go:embed strict_guide.md
 var strictGuide string
+
+// Returning a typed output through AddTool duplicates it into both Content and
+// StructuredContent. These new APIs deliberately send a single JSON text copy,
+// including for older MCP clients, to keep attention costs bounded.
+func experienceTextResult(value any, err error) (*mcp.CallToolResult, any, error) {
+	if err != nil {
+		return nil, nil, err
+	}
+	body, err := json.Marshal(value)
+	if err != nil {
+		return nil, nil, err
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(body)}}}, nil, nil
+}
 
 func GuideFor(mode string) string {
 	if mode == memory.ModeStrict {
@@ -89,6 +104,7 @@ func New(store *memory.Store, version string, modes ...string) *mcp.Server {
 			features = append(features, "zcode_hook_workflow", "review_receipts", "linked_case_receipts", "contextual_retrieval", "before_action_check", "on_demand_stop")
 		} else {
 			features = append(features, "assist_mode", "soft_turn_reminder")
+			features = append(features, "compact_experiences", "selective_experience_trial", "current_anchor_locations", "synchronous_experience_writes")
 		}
 		return nil, BootstrapOutput{Version: version, Mode: mode, ModeScope: "persistent service configuration shared by its bound projects; no per-turn switch prompt", ProtocolVersion: protocol, DataDir: store.Dir, Storage: "Local SQLite; no outbound network or model calls", Guide: GuideFor(mode), SchemaVersion: memory.SchemaVersion, Features: features}, nil
 	})
@@ -156,6 +172,16 @@ func New(store *memory.Store, version string, modes ...string) *mcp.Server {
 		return nil, memory.CompactReview(t, in.ResponseMode), err
 	})
 	addGovernanceTools(s, store, mode, readOnly(), write())
+	if mode == memory.ModeAssist {
+		mcp.AddTool(s, &mcp.Tool{Name: "memory_experience_record", Description: "Synchronously save a compact, evidenced failure pattern after a user correction OR autonomous discovery. Before writing, identify the challenged inference, direct counterexample, concrete possible bug and future recognition features. Ordinary recoverable facts/progress do not qualify. No transcript, prescribed destination or long reasoning chain. Bound project required. Code hashes/locators are checked; runtime/business observations remain host-verified claims. Exact repeats deduplicate; material corrections use previous_id. Does not start a sub-agent or Stop continuation.", Annotations: write()}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.ExperienceWrite) (*mcp.CallToolResult, any, error) {
+			result, err := store.RecordExperience(ctx, in)
+			return experienceTextResult(result, toolError("memory_experience_record", store, err))
+		})
+		mcp.AddTool(s, &mcp.Tool{Name: "memory_experience_lookup", Description: "Actively recall compact project failure features using the current conversation, task and uncertainty. Also resolves current literal code locations; location is not semantic verification. No whole-library directory. Optional actual hook challenge is completed only by a successful lookup; its receipt never proves applicability or authorizes other tasks. Empty results are valid and never force a new case. Ordinary autonomous lookup needs bound project; a challenge supplies its exact directory. Existing free-text history remains available through memory_search/read.", Annotations: readOnly()}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.ExperienceLookup) (*mcp.CallToolResult, any, error) {
+			result, err := store.LookupExperience(ctx, in)
+			return experienceTextResult(result, toolError("memory_experience_lookup", store, err))
+		})
+	}
 	return s
 }
 

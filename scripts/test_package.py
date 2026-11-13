@@ -3,11 +3,27 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from package import bundle_tar_mode
+from package import bundle_tar_mode, verified_source_commit
 
 
 class OfflineBundleTests(unittest.TestCase):
+    def test_archived_source_requires_matching_provenance_and_rejects_conflicting_head(self):
+        sha = 'a' * 40
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with patch('package.subprocess.check_output', side_effect=OSError):
+                with self.assertRaises(ValueError):
+                    verified_source_commit(root, sha)
+                (root / '.source-commit').write_text(sha)
+                self.assertEqual(verified_source_commit(root, sha), sha)
+                with self.assertRaises(ValueError):
+                    verified_source_commit(root, 'b' * 40)
+            with patch('package.subprocess.check_output', return_value='b' * 40):
+                with self.assertRaises(ValueError):
+                    verified_source_commit(root, sha)
+
     def test_unix_archive_is_executable_even_from_nonexecutable_builder_files(self):
         with tempfile.TemporaryDirectory() as root:
             bundle = Path(root) / 'bundle'

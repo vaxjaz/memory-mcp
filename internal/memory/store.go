@@ -24,6 +24,7 @@ const SchemaVersion = 3
 
 // Entry bodies are free text. These fields track provenance, not semantic truth.
 type Entry struct {
+	writeReused            bool
 	RecordedSourceID       string            `json:"recorded_source_id,omitempty" jsonschema:"Persisted turn bookkeeping association; separate from evidence links and not an assertion of support"`
 	ResponseMode           string            `json:"response_mode,omitempty"`
 	LinkCount              *int              `json:"link_count,omitempty"`
@@ -57,6 +58,9 @@ type Link struct {
 }
 
 type Draft struct {
+	experienceValidated        bool
+	experienceKey              string
+	requestFingerprint         string
 	ResponseMode               string   `json:"response_mode,omitempty" jsonschema:"compact: short IDs/state/integrity receipt; full: full response. Assist defaults to compact, strict to legacy full. Not part of write identity."`
 	ContextSourceID            string   `json:"context_source_id,omitempty" jsonschema:"Optional actual CURRENT user source for turn association, separate from evidence links. Assist validates source identity without requiring prepare/complete. Strict requires its checkpoint complete. Never fabricate source IDs."`
 	Profile                    *Profile `json:"profile,omitempty" jsonschema:"For cases and hypotheses: concrete future use, counter-check against saving, applicability and boundaries. No fabricated counterexamples."`
@@ -105,6 +109,16 @@ func DefaultDir() (string, error) {
 }
 
 func Open(dir string) (*Store, error) {
+	return openStore(dir, 10000)
+}
+
+// Hooks are advisory and must fail open instead of waiting ten seconds on a
+// writer lock. Normal writes/maintenance retain the original durability policy.
+func OpenForHook(dir string) (*Store, error) {
+	return openStore(dir, 200)
+}
+
+func openStore(dir string, busyMS int) (*Store, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -124,10 +138,13 @@ func Open(dir string) (*Store, error) {
 	db, err := driver.Open(filepath.Join(abs, "memory.db"), func(conn *sqlite3.Conn) error {
 		// Independent hook processes may race the first WAL transition. SQLite
 		// can report BUSY for that PRAGMA before its busy handler can wait.
-		deadline := time.Now().Add(3 * time.Second)
+		deadline := time.Now().Add(time.Duration(busyMS) * time.Millisecond)
+		if busyMS == 10000 {
+			deadline = time.Now().Add(3 * time.Second)
+		}
 		for {
-			err := conn.Exec(`PRAGMA busy_timeout=10000; PRAGMA foreign_keys=ON;
-PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;`)
+			err := conn.Exec(fmt.Sprintf(`PRAGMA busy_timeout=%d; PRAGMA foreign_keys=ON;
+PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;`, busyMS))
 			if err == nil || !errors.Is(err, sqlite3.BUSY) || time.Now().After(deadline) {
 				return err
 			}
@@ -148,6 +165,10 @@ PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;`)
 		return nil, err
 	}
 	if err := s.initDemandReview(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := s.initExperienceTrial(); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -302,6 +323,9 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 	}
 	defer tx.Rollback()
 	fingerprint := writeFingerprint(d, previousID)
+	if d.requestFingerprint != "" {
+		fingerprint = d.requestFingerprint
+	}
 	if d.RequestID != "" {
 		var oldFingerprint, entryID string
 		err = tx.QueryRowContext(ctx, "SELECT fingerprint,entry_id FROM write_requests WHERE scope=? AND request_id=?", d.Scope, d.RequestID).Scan(&oldFingerprint, &entryID)
@@ -344,6 +368,40 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 			return Entry{}, errors.New("revision cannot change scope or kind")
 		}
 		e.RootID = old.RootID
+	}
+	if d.experienceValidated {
+		var root string
+		er := tx.QueryRowContext(ctx, "SELECT root_id FROM experience_keys WHERE scope=? AND fingerprint=?", d.Scope, d.experienceKey).Scan(&root)
+		if er == nil {
+			old, re := scanEntry(tx.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE root_id=? AND current=1", root))
+			if re != nil {
+				return Entry{}, re
+			}
+			if re = loadGovernance(ctx, tx, &old); re != nil {
+				return Entry{}, re
+			}
+			if old.State.State == "active" && !old.NeedsReview && old.Profile != nil && old.Profile.Experience != nil {
+				if previousID != "" && e.RootID != root {
+					return Entry{}, fmt.Errorf("equivalent experience already exists: %s; inspect before merging lineages", old.ID)
+				}
+				old.Links, re = loadLinks(ctx, tx, old.ID)
+				if re != nil {
+					return Entry{}, re
+				}
+				if d.RequestID != "" {
+					if _, re = tx.ExecContext(ctx, "INSERT INTO write_requests(scope,request_id,fingerprint,entry_id)VALUES(?,?,?,?)", d.Scope, d.RequestID, fingerprint, old.ID); re != nil {
+						return Entry{}, re
+					}
+				}
+				old.writeReused = true
+				return old, tx.Commit()
+			}
+			if _, er = tx.ExecContext(ctx, "DELETE FROM experience_keys WHERE scope=? AND fingerprint=?", d.Scope, d.experienceKey); er != nil {
+				return Entry{}, er
+			}
+		} else if !errors.Is(er, sql.ErrNoRows) {
+			return Entry{}, er
+		}
 	}
 	for index, l := range d.Links {
 		source, err := scanEntry(tx.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", l.TargetID))
@@ -418,7 +476,7 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 		}
 		grounded = grounded || valid
 	}
-	if (d.Kind == "hypothesis" || d.Kind == "case" && d.Profile != nil) && !grounded {
+	if (d.Kind == "hypothesis" || d.Kind == "case" && d.Profile != nil) && !grounded && !d.experienceValidated {
 		return Entry{}, errors.New("case/hypothesis needs at least one current active reviewed record or case as support or provenance; stale/context-only invalid material and contradiction targets cannot ground a new conclusion; preserve a factual correction as a record or add fresh evidence")
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO entries (`+columns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, e.ID, e.RootID, e.PreviousID, e.Kind, e.Scope, e.Title, e.Body, e.Origin, e.SourceRef, e.Host, e.Model, e.Session, e.CreatedAt, e.Current, e.NeedsReview)
@@ -446,6 +504,14 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 			return Entry{}, err
 		}
 		e.Profile = d.Profile
+	}
+	if d.experienceValidated {
+		if _, err = tx.ExecContext(ctx, "DELETE FROM experience_keys WHERE scope=? AND root_id=?", d.Scope, e.RootID); err != nil {
+			return Entry{}, err
+		}
+		if _, err = tx.ExecContext(ctx, "INSERT INTO experience_keys(scope,fingerprint,root_id)VALUES(?,?,?)", d.Scope, d.experienceKey, e.RootID); err != nil {
+			return Entry{}, err
+		}
 	}
 	if (d.Kind == "case" || d.Kind == "hypothesis") && d.ContextSourceID != "" {
 		if _, err = userSource(ctx, tx, d.ContextSourceID, d.Scope); err != nil {

@@ -13,7 +13,7 @@ import (
 // separately opt-in, independent of cases, read receipts and model continuations.
 func (r Runtime) assist(ctx context.Context, e Event) (map[string]any, error) {
 	empty := map[string]any{}
-	if e.Name != "SessionStart" && e.Name != "UserPromptSubmit" && (!r.Capture || e.Name != "Stop") {
+	if e.Name != "SessionStart" && e.Name != "UserPromptSubmit" && e.Name != "PreToolUse" && (!r.Capture || e.Name != "Stop") {
 		return empty, nil
 	}
 	scope, err := r.Store.HookResolve(ctx, e.CWD)
@@ -21,6 +21,16 @@ func (r Runtime) assist(ctx context.Context, e Event) (map[string]any, error) {
 		if e.Name == "SessionStart" {
 			return contextOutput(e.Name, "当前记忆模式：辅助。当前目录未绑定；不采集、不回退global。沿用项目既有规范，需启用时核对业务目录和scope。"), nil
 		}
+		return empty, nil
+	}
+	enabled, err := r.Store.ExperienceTrialEnabled(ctx, scope)
+	if err != nil {
+		return empty, err
+	}
+	if enabled {
+		return r.experienceAssist(ctx, e, scope)
+	}
+	if e.Name == "PreToolUse" {
 		return empty, nil
 	}
 	if e.Name == "SessionStart" {

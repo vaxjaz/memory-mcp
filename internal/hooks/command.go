@@ -36,6 +36,9 @@ func Run(ctx context.Context, args []string) error {
 	capture := fs.Bool("capture-user-text", false, "enable raw prompt and supplied answer capture in bound projects")
 	review := fs.Bool("review-on-stop", false, "legacy opt-in: allow a declared pending candidate to request one extra model turn; normally omit and use review_at_stop per candidate")
 	contextCheck := fs.Bool("context-check", false, "strict compatibility: require a completed current-turn memory check before actions")
+	experienceTrial := fs.Bool("experience-trial", false, "setup: opt this bound project into compact synchronous experiences and selective code-query wakeup")
+	disableExperience := fs.Bool("disable-experience-trial", false, "setup: disable this project's experience wakeup, preserving data and other bindings")
+	_ = fs.Bool("experience-hooks", false, "managed launcher capability marker; project policy decides whether to intervene")
 	reviews := fs.Bool("reviews", false, "doctor: include paginated current needs_review entries for --scope")
 	dry := fs.Bool("dry-run", false, "show setup targets without writing config or opening the database")
 	checkText := fs.Bool("check-text", false, "doctor: scan stored text for invalid UTF-8/U+FFFD without changing it")
@@ -90,7 +93,7 @@ func Run(ctx context.Context, args []string) error {
 		if er != nil {
 			return er
 		}
-		r, er := Setup(ctx, SetupOptions{Mode: mode, Host: *host, Config: *config, DataDir: *dir, Project: *project, Scope: *scope, Binary: exe, ServerName: *serverName, Capture: *capture, Review: *review, DryRun: *dry})
+		r, er := Setup(ctx, SetupOptions{Mode: mode, Host: *host, Config: *config, DataDir: *dir, Project: *project, Scope: *scope, Binary: exe, ServerName: *serverName, Capture: *capture, Review: *review, DryRun: *dry, ExperienceTrial: *experienceTrial, DisableExperienceTrial: *disableExperience})
 		if er != nil {
 			return er
 		}
@@ -111,7 +114,11 @@ func Run(ctx context.Context, args []string) error {
 			return fail(err)
 		}
 	}
-	store, err := memory.Open(*dir)
+	openStore := memory.Open
+	if cmd == "hook" {
+		openStore = memory.OpenForHook
+	}
+	store, err := openStore(*dir)
 	if err != nil {
 		return fail(err)
 	}
@@ -192,6 +199,17 @@ func Run(ctx context.Context, args []string) error {
 			r["review_queue"] = p
 		}
 		if *scope != "" {
+			trial, er := store.ExperienceTrialEnabled(ctx, *scope)
+			if er != nil {
+				return er
+			}
+			r["experience_trial"] = trial
+			items, indexErr := store.Experiences(ctx, *scope)
+			index := map[string]any{"available": indexErr == nil, "eligible_cases": len(items), "cold_start": indexErr == nil && len(items) == 0}
+			if indexErr != nil {
+				index["error"] = indexErr.Error()
+			}
+			r["experience_index"] = index
 			m, er := store.Maintenance(ctx, *scope)
 			if er != nil {
 				return er
