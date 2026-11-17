@@ -18,30 +18,19 @@ import (
 const ManagedID = "decision-memory-hooks-v1"
 
 func managedHookArgs(o SetupOptions, name string) []any {
-	mode, _ := memory.IntegrationMode(o.Mode)
-	args := []any{"hook", "--mode", mode, "--host", o.Host, "--data-dir", o.DataDir, "--managed-id", ManagedID + "|" + name, "--server-name", name}
-	if o.Capture {
-		args = append(args, "--capture-user-text")
-	}
+	args := []any{"hook", "--host", o.Host, "--data-dir", o.DataDir, "--managed-id", ManagedID + "|" + name, "--server-name", name}
 	if o.ExperienceHooks {
 		args = append(args, "--experience-hooks")
-	}
-	if mode == memory.ModeStrict {
-		args = append(args, "--context-check")
-	}
-	if o.Review {
-		args = append(args, "--review-on-stop")
 	}
 	return args
 }
 
 type SetupOptions struct {
-	ExperienceTrial, DisableExperienceTrial, ExperienceHooks bool
-	Mode                                                     string
-	Host                                                     string
-	Config, DataDir, Project, Scope, Binary                  string
-	ServerName                                               string
-	Capture, Review, DryRun                                  bool
+	EnableWakeup, DisableWakeup, ExperienceHooks bool
+	Host                                         string
+	Config, DataDir, Project, Scope, Binary      string
+	ServerName                                   string
+	DryRun                                       bool
 }
 
 func object(m map[string]any, key string) (map[string]any, error) {
@@ -175,22 +164,8 @@ func backupFile(p string, raw []byte) (string, error) {
 	return dest, err
 }
 func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
-	mode, modeErr := memory.IntegrationMode(o.Mode)
-	if modeErr != nil {
-		return nil, modeErr
-	}
-	o.Mode = mode
-	if o.ExperienceTrial && o.DisableExperienceTrial {
-		return nil, errors.New("choose enable or disable experience trial, not both")
-	}
-	if (o.ExperienceTrial || o.DisableExperienceTrial) && mode != memory.ModeAssist {
-		return nil, errors.New("experience trial is an assist-mode opt-in, not a strict workflow")
-	}
-	if o.ExperienceTrial && o.Capture {
-		return nil, errors.New("experience trial does not capture raw user text; omit --capture-user-text")
-	}
-	if mode == memory.ModeAssist && o.Review {
-		return nil, errors.New("assist mode has no Stop model review; choose --mode strict explicitly for legacy review")
+	if o.EnableWakeup && o.DisableWakeup {
+		return nil, errors.New("choose enable or disable wakeup, not both")
 	}
 	if o.Host == "" {
 		o.Host = "zcode"
@@ -199,9 +174,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if mode == memory.ModeStrict && !o.Capture {
-		return nil, errors.New("setup requires --capture-user-text to explicitly enable raw input/answer collection for bound projects; read docs/HOOK_SETUP.md first")
-	}
+
 	if o.Project == "" || o.Scope == "" {
 		return nil, errors.New("setup requires --project DIR --scope project:<identifier>")
 	}
@@ -372,7 +345,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 						other.Host = "qoder"
 					}
 					if handler["command"] == nativeCommand(other, name) {
-						return nil, errors.New("Qoder CLI/IDE share this configuration and another memory hook profile is installed; reconcile it or use separate user configurations, never capture each input twice")
+						return nil, errors.New("Qoder CLI/IDE share this configuration and another memory hook profile is installed; reconcile it or use separate user configurations to avoid duplicate hook execution")
 					}
 				}
 				if !(o.Host == "zcode" && managed(handler, name) || o.Host != "zcode" && handler["command"] == nativeCommand(o, name)) {
@@ -388,7 +361,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	}
 	var store *memory.Store
 	var databaseBackup string
-	desiredTrial := o.ExperienceTrial
+	desiredTrial := !o.DisableWakeup
 	if !o.DryRun {
 		store, err = memory.Open(o.DataDir)
 		if err != nil {
@@ -403,34 +376,30 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		if err = store.Backup(ctx, databaseBackup); err != nil {
 			return nil, err
 		}
-		if !o.ExperienceTrial && !o.DisableExperienceTrial {
-			desiredTrial, err = store.ExperienceTrialEnabled(ctx, o.Scope)
-			if err != nil {
-				return nil, err
+		if !o.EnableWakeup && !o.DisableWakeup {
+			found, er := store.ExperiencePolicyExists(ctx, o.Scope)
+			if er != nil {
+				return nil, er
+			}
+			if found {
+				desiredTrial, err = store.ExperienceTrialEnabled(ctx, o.Scope)
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 		other, er := store.OtherExperienceTrialsEnabled(ctx, o.Scope)
 		if er != nil {
 			return nil, er
 		}
-		o.ExperienceHooks = mode == memory.ModeAssist && (other || desiredTrial)
+		o.ExperienceHooks = other || desiredTrial
 	} else {
-		o.ExperienceHooks = o.ExperienceTrial
-	}
-	if desiredTrial && o.Capture {
-		return nil, errors.New("enabled experience trial requires raw capture off")
+		o.ExperienceHooks = desiredTrial
 	}
 	args := managedHookArgs(o, name)
 	installedEvents := []string{"SessionStart", "UserPromptSubmit"}
-	if mode == memory.ModeStrict {
-		installedEvents = append(installedEvents, "PreToolUse", "Stop")
-	} else {
-		if o.ExperienceHooks {
-			installedEvents = append(installedEvents, "PreToolUse")
-		}
-		if o.Capture {
-			installedEvents = append(installedEvents, "Stop")
-		}
+	if o.ExperienceHooks {
+		installedEvents = append(installedEvents, "PreToolUse")
 	}
 	for _, event := range installedEvents {
 		group := map[string]any{"hooks": []any{map[string]any{"type": "process", "command": o.Binary, "args": args, "enabled": true, "timeoutMs": 10000}}}
@@ -438,32 +407,21 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 			group["hooks"] = []any{map[string]any{"type": "command", "command": nativeCommand(o, name), "timeout": 10}}
 		}
 		if event == "PreToolUse" {
-			if mode == memory.ModeAssist && o.ExperienceHooks {
-				group["matcher"] = experienceToolMatcher
-			} else if o.Host == "zcode" {
-				group["matcher"] = ".*"
-			} else {
-				group["matcher"] = "*"
-			}
+			group["matcher"] = experienceToolMatcher
 		}
 		existing, _ := events[event].([]any)
 		events[event] = append(existing, group)
 	}
 	h["enabled"] = true
 	entry["command"] = o.Binary
-	entry["args"] = []string{"serve", "--mode", mode, "--data-dir", o.DataDir}
+	entry["args"] = []string{"serve", "--data-dir", o.DataDir}
 	if o.Host == "zcode" {
 		entry["enable"] = true
 	} else if o.Host == "codex" {
 		entry["enabled"] = true
 	}
 	servers[name] = entry
-	report := map[string]any{"config": o.Config, "mode": mode, "data_dir": o.DataDir, "project": o.Project, "scope": o.Scope, "mcp_server": name, "review_on_stop": o.Review, "raw_capture": o.Capture, "host_event_verified": false, "restart_required": true, "dry_run": o.DryRun}
-	report["context_check"] = mode == memory.ModeStrict
-	report["experience_trial"] = desiredTrial
-	report["experience_hooks_installed"] = o.ExperienceHooks
-	report["mode_scope"] = "this MCP service and all its bound projects; persists until explicitly reconfigured"
-	report["mode_prompt_required"] = false
+	report := map[string]any{"config": o.Config, "workflow": "verified_experience", "data_dir": o.DataDir, "project": o.Project, "scope": o.Scope, "mcp_server": name, "host_event_verified": false, "restart_required": true, "dry_run": o.DryRun, "wakeup_enabled": desiredTrial, "experience_hooks_installed": o.ExperienceHooks}
 	report["host"] = o.Host
 	report["hook_trust_required"] = adapter.RequiresTrust
 	report["hooks_config"] = adapter.DefaultHooks(o.Config)
@@ -494,10 +452,8 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		return nil, err
 	}
 	report["config_backups"] = backupsWritten
-	if mode == memory.ModeAssist {
-		if err = store.ConfigureExperienceTrial(ctx, o.Scope, desiredTrial); err != nil {
-			return nil, err
-		}
+	if err = store.ConfigureExperienceTrial(ctx, o.Scope, desiredTrial); err != nil {
+		return nil, err
 	}
 	for _, backup := range backupsWritten {
 		if strings.HasPrefix(backup, o.Config+".memory-mcp-backup-") {

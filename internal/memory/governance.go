@@ -259,8 +259,10 @@ func (s *Store) ConfigureMaintenance(ctx context.Context, in MaintenanceConfig) 
 	if in.Interval < 1 || in.Interval > 1000000 {
 		return MaintenanceStatus{}, errors.New("interval must be 1..1000000")
 	}
-	if _, err := userSource(ctx, s.db, in.SourceID, in.Scope); err != nil {
+	if source, err := userSource(ctx, s.db, in.SourceID, in.Scope); err != nil {
 		return MaintenanceStatus{}, err
+	} else if strings.HasPrefix(source.SourceRef, MaintenanceSourcePrefix) && source.SourceRef != MaintenanceSourcePrefix+"configure:" {
+		return MaintenanceStatus{}, errors.New("confirmation is not for maintenance configuration")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

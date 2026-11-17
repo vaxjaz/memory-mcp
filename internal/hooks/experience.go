@@ -74,14 +74,14 @@ func experienceClues(e Event) string {
 	return result
 }
 
-func (r Runtime) experienceAssist(ctx context.Context, e Event, scope string) (map[string]any, error) {
+func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[string]any, error) {
 	empty := map[string]any{}
 	switch e.Name {
 	case "SessionStart":
 		if err := r.Store.HookAdapterReceipt(ctx, r.host(), e.Name, scope, e.Session, e.TurnID); err != nil {
 			return empty, err
 		}
-		return contextOutput(e.Name, fmt.Sprintf("记忆经验试用版；scope=%s；服务=%s。真实纠偏或自主发现经证据核实后，用 memory_experience_record 同步保存紧凑风险特征；可自主 memory_experience_lookup。当前规范先行，历史经验只提出待验证疑点。代码工具明确命中索引时才提示一次主动查询；无匹配静默。无原文采集、每轮提醒、异步写入或 Stop 整理。", scope, r.serverName())), nil
+		return contextOutput(e.Name, fmt.Sprintf("记忆经验；scope=%s；服务=%s。真实纠偏或自主发现经证据核实后，用 memory_experience_record 同步保存紧凑风险特征；可自主 memory_experience_lookup。当前规范先行，历史经验只提出待验证疑点。代码工具明确命中索引时才提示一次主动查询；无匹配静默。无原文采集、每轮提醒、异步写入或 Stop 整理。", scope, r.serverName())), nil
 	case "UserPromptSubmit":
 		if err := r.Store.ExperienceStartTurn(ctx, r.host(), scope, e.Session, e.TurnID, e.EventID); err != nil {
 			return empty, err
@@ -97,6 +97,13 @@ func (r Runtime) experienceAssist(ctx context.Context, e Event, scope string) (m
 		}
 		return empty, nil
 	case "PreToolUse":
+		enabled, err := r.Store.ExperienceTrialEnabled(ctx, scope)
+		if err != nil {
+			return empty, err
+		}
+		if !enabled {
+			return empty, nil
+		}
 		clues := experienceClues(e)
 		if clues == "" {
 			return empty, nil

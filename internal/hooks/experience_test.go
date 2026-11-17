@@ -13,9 +13,6 @@ import (
 func trialFixture(t *testing.T) (*memory.Store, Runtime, string) {
 	t.Helper()
 	s, r, p := fixture(t)
-	r.Mode = memory.ModeAssist
-	r.Capture = false
-	r.Review = false
 	r.Host = "zcode"
 	os.WriteFile(filepath.Join(p, "Policy.java"), []byte("boolean canDispatchLynOrder() { return true; }\n"), 0600)
 	_, err := s.RecordExperience(testCtx, memory.ExperienceWrite{Scope: "project:demo", Project: p, Title: "isolated failure features", Experience: memory.Experience{
@@ -127,6 +124,27 @@ func TestExperienceMatcherAvoidsLaunchingOnUnrelatedToolPaths(t *testing.T) {
 	}
 }
 
+func TestDisabledAndUnboundHaveNoFallbackWorkflow(t *testing.T) {
+	s, r, p := trialFixture(t)
+	if err := s.ConfigureExperienceTrial(testCtx, "project:demo", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"UserPromptSubmit", "PreToolUse", "Stop"} {
+		e := event(name, p, "session", "private text")
+		e.Tool = "Grep"
+		e.Input = map[string]any{"pattern": "LYN 创建准入"}
+		if out := handle(t, r, e); len(out) != 0 {
+			t.Fatal("disabled wakeup activated an older workflow", name, out)
+		}
+	}
+	for _, name := range []string{"SessionStart", "UserPromptSubmit", "PreToolUse", "Stop"} {
+		e := event(name, t.TempDir(), "unbound", "private text")
+		if out := handle(t, r, e); len(out) != 0 {
+			t.Fatal("unbound project injected instructions", name, out)
+		}
+	}
+}
+
 func TestExperienceSetupIsProjectOptInAndCanDisable(t *testing.T) {
 	root := t.TempDir()
 	p := filepath.Join(root, "project")
@@ -134,24 +152,23 @@ func TestExperienceSetupIsProjectOptInAndCanDisable(t *testing.T) {
 	config := filepath.Join(root, "home", "config.json")
 	os.MkdirAll(filepath.Dir(config), 0700)
 	os.WriteFile(config, []byte(`{"mcp":{"servers":{"other":{"command":"keep"}}},"hooks":{"events":{}}}`), 0600)
-	o := SetupOptions{Host: "zcode", Mode: "assist", Config: config, DataDir: filepath.Join(root, "data"), Project: p, Scope: "project:demo", Binary: filepath.Join(root, "memory-mcp"), ExperienceTrial: true}
+	o := SetupOptions{Host: "zcode", Config: config, DataDir: filepath.Join(root, "data"), Project: p, Scope: "project:demo", Binary: filepath.Join(root, "memory-mcp")}
 	report, err := Setup(testCtx, o)
-	if err != nil || report["experience_trial"] != true || report["raw_capture"] != false {
+	if err != nil || report["wakeup_enabled"] != true {
 		t.Fatal(report, err)
 	}
 	content, _ := os.ReadFile(config)
 	if !strings.Contains(string(content), "PreToolUse") || strings.Contains(string(content), "Stop") {
 		t.Fatal("wrong event registration", string(content))
 	}
-	o.ExperienceTrial = false
 	// Reinstall preserves the explicit project policy.
 	report, err = Setup(testCtx, o)
-	if err != nil || report["experience_trial"] != true {
+	if err != nil || report["wakeup_enabled"] != true {
 		t.Fatal(report, err)
 	}
-	o.DisableExperienceTrial = true
+	o.DisableWakeup = true
 	report, err = Setup(testCtx, o)
-	if err != nil || report["experience_trial"] != false || report["experience_hooks_installed"] != false {
+	if err != nil || report["wakeup_enabled"] != false || report["experience_hooks_installed"] != false {
 		t.Fatal(report, err)
 	}
 }

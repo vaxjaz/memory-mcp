@@ -1,183 +1,54 @@
 #!/usr/bin/env python3
-"""Exercise an actual packaged stdio executable without a model or MCP client app."""
-import argparse
-import functools
-import hashlib
-import json
+"""Exercise the current packaged MCP executable in an isolated library."""
+import argparse,json,queue,subprocess,tempfile,threading
 from pathlib import Path
-import queue
-import subprocess
-import tempfile
-import threading
-
-
-@functools.lru_cache(maxsize=None)
-def supports_modes(binary):
-    return '--mode' in subprocess.check_output([binary, 'help'], text=True, encoding='utf-8')
-
-
-def mode_args(binary, mode='strict'):
-    return ['--mode', mode] if supports_modes(binary) else []
-
-
-def fixture_profile():
-    """Explicit synthetic fixture metadata, never installed into a user's library."""
-    return {"class": "temporary", "future_use": "Exercise repeated fixture decisions in the isolated regression workspace",
-            "counter_check": "Synthetic regression material, not a real user preference or production rule",
-            "applicability": "This disposable test workspace only", "boundary": "Must never be generalized to a real project"}
-
-
 class Host:
-    def __init__(self, binary, data_dir, mode=None):
-        self.p = subprocess.Popen([binary, "serve", "--data-dir", data_dir, *(mode_args(binary, mode) if mode else [])],
-                                  stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=subprocess.PIPE, text=True)
-        self.lines = queue.Queue()
-        self.errors = []
-        self.reader = threading.Thread(target=self._read, daemon=True)
-        self.reader.start()
-        self.err_reader = threading.Thread(target=lambda: self.errors.extend(self.p.stderr.readlines()), daemon=True)
-        self.err_reader.start()
-        self.counter = 0
-        self.request("initialize", {"protocolVersion": "2024-11-05", "capabilities": {},
-                     "clientInfo": {"name": "generic-offline-test", "version": "1"}})
-        self.send({"jsonrpc": "2.0", "method": "notifications/initialized"})
-
-    def _read(self):
-        for line in self.p.stdout:
-            self.lines.put(line)
-        self.lines.put(None)
-
-    def send(self, value):
-        self.p.stdin.write(json.dumps(value, ensure_ascii=False) + "\n")
-        self.p.stdin.flush()
-
-    def request(self, method, params):
-        self.counter += 1
-        self.send({"jsonrpc": "2.0", "id": self.counter, "method": method, "params": params})
-        while True:
-            line = self.lines.get(timeout=20)
-            assert line is not None, "Server closed stdout"
-            response = json.loads(line)  # Fails on non-protocol stdout logging.
-            if response.get("id") == self.counter:
-                assert "error" not in response, response
-                return response["result"]
-
-    def tool(self, name, args, expect_error=False):
-        result = self.request("tools/call", {"name": name, "arguments": args})
-        assert bool(result.get("isError", False)) == expect_error, result
-        if expect_error:
-            return result
-        # Verify the text fallback expected by clients predating structuredContent.
-        return json.loads(result["content"][0]["text"])
-
-    def close(self):
-        self.p.stdin.close()
-        try:
-            code = self.p.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            self.p.kill()
-            self.p.wait()
-            raise
-        self.reader.join(timeout=1)
-        self.err_reader.join(timeout=1)
-        self.p.stdout.close()
-        self.p.stderr.close()
-        assert code == 0, "".join(self.errors)
-
-
+ def __init__(self,binary,data_dir):
+  self.p=subprocess.Popen([binary,"serve","--data-dir",data_dir],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8")
+  self.lines=queue.Queue();self.errors=[];self.counter=0
+  self.reader=threading.Thread(target=self._read,daemon=True);self.reader.start()
+  self.err_reader=threading.Thread(target=lambda:self.errors.extend(self.p.stderr.readlines()),daemon=True);self.err_reader.start()
+  self.request("initialize",{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"isolated-test","version":"1"}})
+  self.send({"jsonrpc":"2.0","method":"notifications/initialized"})
+ def _read(self):
+  for line in self.p.stdout:self.lines.put(line)
+  self.lines.put(None)
+ def send(self,value):
+  self.p.stdin.write(json.dumps(value,ensure_ascii=False)+"\n");self.p.stdin.flush()
+ def request(self,method,params,accept_error=False):
+  self.counter+=1;self.send({"jsonrpc":"2.0","id":self.counter,"method":method,"params":params})
+  while True:
+   line=self.lines.get(timeout=20);assert line is not None,"server closed"
+   out=json.loads(line)
+   if out.get("id")==self.counter:
+    if accept_error:return out
+    assert "error" not in out,out
+    return out["result"]
+ def tool(self,name,args,expect_error=False):
+  out=self.request("tools/call",{"name":name,"arguments":args})
+  assert bool(out.get("isError",False))==expect_error,out
+  return out if expect_error else json.loads(out["content"][0]["text"])
+ def close(self):
+  self.p.stdin.close();code=self.p.wait(timeout=10);self.reader.join(timeout=1);self.err_reader.join(timeout=1);self.p.stdout.close();self.p.stderr.close();assert code==0,"".join(self.errors)
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("binary")
-    parser.add_argument("--expected-version")
-    args = parser.parse_args()
-    binary = str(Path(args.binary).resolve())
-    if args.expected_version:
-        actual = subprocess.check_output([binary, "version"], text=True).strip()
-        assert actual == args.expected_version, (actual, args.expected_version)
-    with tempfile.TemporaryDirectory(prefix="memory-mcp-smoke-") as temp:
-        data = str(Path(temp) / "local-data")
-        host = Host(binary, data, mode="strict")
-        try:
-            discovered = {t["name"] for t in host.request("tools/list", {})["tools"]}
-            assert {"memory_bootstrap", "memory_search", "memory_read", "memory_record", "memory_revise"} <= discovered
-            bootstrap = host.tool("memory_bootstrap", {})
-            assert bootstrap["integration_protocol"] in ("1", "2")
-            if args.expected_version:
-                assert bootstrap["version"] == args.expected_version
-
-            # New helpers still smoke-test old release tags during release repair.
-            reliable_storage = "request_id" in bootstrap.get("features", [])
-            draft = {"kind": "record", "scope": "project:smoke", "title": "保存反馈",
-                     "body": "方案 B 更清楚，只评价当前表单。", "origin": "host_quote"}
-            if reliable_storage:
-                draft["request_id"] = "smoke-write-001"
-            original = host.tool("memory_record", draft)
-            if reliable_storage:
-                retry = host.tool("memory_record", draft)
-                assert retry["id"] == original["id"]
-                assert retry["body_sha256"] == hashlib.sha256(draft["body"].encode()).hexdigest()
-            hypothesis = {"kind": "hypothesis", "scope": draft["scope"], "title": "局部假设",
-                          "body": "当前表单可能偏好明确保存反馈，其他场景未知。", "origin": "model_inference",
-                          "links": [{"target_id": original["id"], "relation": "supports"}]}
-            if "quality_admission" in bootstrap.get("features", []):
-                hypothesis["profile"] = fixture_profile()
-            inferred = host.tool("memory_revise", {"draft": hypothesis})
-            assert len(host.tool("memory_search", {"scope": draft["scope"], "query": "保存"})["results"]) == 2
-            if reliable_storage:
-                page = host.tool("memory_search", {"scope": draft["scope"], "query": "保存", "limit": 1})
-                assert page["has_more"]
-                next_page = host.tool("memory_search", {"scope": draft["scope"], "query": "保存", "limit": 1, "cursor": page["next_cursor"]})
-                assert not next_page["has_more"]
-                assert next_page["results"][0]["id"] != page["results"][0]["id"]
-            corrected = dict(draft, body="纠正：只偏好方案 B 的保存状态，不包括它的布局。")
-            if reliable_storage:
-                corrected["request_id"] = "smoke-revision-001"
-            current = host.tool("memory_revise", {"previous_id": original["id"], "draft": corrected})
-            if reliable_storage:
-                retried = host.tool("memory_revise", {"previous_id": original["id"], "draft": corrected})
-                assert retried["id"] == current["id"]
-            assert host.tool("memory_read", {"id": inferred["id"]})["entry"]["needs_review"]
-            conflict = dict(corrected)
-            if reliable_storage:
-                conflict["request_id"] = "smoke-conflicting-write"
-            host.tool("memory_revise", {"previous_id": original["id"], "draft": conflict}, expect_error=True)
-        finally:
-            host.close()
-
-        # Reopen from a different host process to verify persistence.
-        host = Host(binary, data, mode="strict")
-        try:
-            old = host.tool("memory_read", {"id": original["id"]})
-            assert old["entry"]["body"] == draft["body"]
-            assert old["current_id"] == current["id"]
-        finally:
-            host.close()
-
-        exported = str(Path(temp) / "export.json")
-        subprocess.run([binary, "export", "--data-dir", data, "--out", exported], check=True, capture_output=True)
-        assert len(json.loads(Path(exported).read_text())["entries"]) == 3
-        before = json.loads(subprocess.check_output([binary, "status", "--data-dir", data], text=True))
-        assert (before["entries_including_history"], before["current_entries"], before["needs_review"]) == (3, 2, 1)
-        if reliable_storage:
-            backup = str(Path(temp) / "snapshot.db")
-            subprocess.run([binary, "backup", "--data-dir", data, "--out", backup], check=True, capture_output=True)
-            restore_dir = Path(temp) / "restored"
-            restore_dir.mkdir()
-            (restore_dir / "memory.db").write_bytes(Path(backup).read_bytes())
-            restored = Host(binary, str(restore_dir), mode="strict")
-            try:
-                assert restored.tool("memory_record", draft)["id"] == original["id"]
-            finally:
-                restored.close()
-        subprocess.run([binary, "forget", "--data-dir", data, "--id", original["id"], "--yes"], check=True, capture_output=True)
-        status = json.loads(subprocess.check_output([binary, "status", "--data-dir", data], text=True))
-        assert status["entries_including_history"] == 0
-        config = json.loads(subprocess.check_output([binary, "config"], text=True))
-        assert config["mcpServers"]["decision-memory"]["command"] == binary
-    print("PASS: legacy MCP stdio tools, revisions, stale evidence, persistence, export, forget, config")
-
-
-if __name__ == "__main__":
-    main()
-
+ p=argparse.ArgumentParser();p.add_argument("binary");p.add_argument("--expected-version");a=p.parse_args();binary=str(Path(a.binary).resolve())
+ if a.expected_version:assert subprocess.check_output([binary,"version"],text=True).strip()==a.expected_version
+ with tempfile.TemporaryDirectory(prefix="experience-smoke-") as tmp:
+  h=Host(binary,str(Path(tmp)/"data"))
+  try:
+   tools=h.request("tools/list",{})["tools"];names={x["name"] for x in tools}
+   assert names=={"memory_bootstrap","memory_experience_record","memory_experience_lookup","memory_search","memory_read","memory_cleanup"},names
+   boot=h.tool("memory_bootstrap",{});assert boot["workflow"]=="verified_experience" and boot["integration_protocol"]=="4"
+   assert not any("mode" in f or "reminder" in f or "checkpoint" in f for f in boot["features"])
+   guide=boot["guide"].lower();assert "a native userpromptsubmit hook supplies a short reminder" not in guide
+   page=h.tool("memory_search",{"scope":"project:fixture","query":""});assert not page["results"]
+   for old in ["memory_record","memory_revise","memory_context","memory_review_done"]:
+    out=h.request("tools/call",{"name":old,"arguments":{}},accept_error=True)
+    assert "error" in out or out.get("result",{}).get("isError"),out
+  finally:h.close()
+ for flag in ["--mode","--capture-user-text","--context-check","--review-on-stop"]:
+  command=[binary,"serve",flag]+(["assist"] if flag=="--mode" else [])
+  p=subprocess.run(command,capture_output=True,text=True,timeout=10)
+  assert p.returncode!=0,(flag,p.stdout,p.stderr)
+ print("PASS: exact six-tool catalog, old tools/flags rejected, single workflow bootstrap and historical access")
+if __name__=="__main__":main()
