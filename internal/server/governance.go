@@ -9,7 +9,9 @@ import (
 )
 
 type CleanupInput struct {
-	Action           string                    `json:"action" jsonschema:"inspect, configure, preview, read_plan, apply, undo, defer, acknowledge or recheck_sources. Apply/undo ONLY after user reviews and explicitly approves the exact displayed plan."`
+	Purpose          string                    `json:"purpose,omitempty" jsonschema:"confirm only: apply, undo or configure"`
+	RequestID        string                    `json:"request_id,omitempty" jsonschema:"confirm only: stable ID for this exact submission"`
+	Action           string                    `json:"action" jsonschema:"inspect, configure, preview, confirm, read_plan, apply, undo, defer, acknowledge or recheck_sources. Apply/undo ONLY after user reviews and explicitly approves the exact displayed plan."`
 	Scope            string                    `json:"scope"`
 	Cursor           string                    `json:"cursor,omitempty"`
 	Operations       []memory.CleanupOperation `json:"operations,omitempty"`
@@ -23,39 +25,30 @@ type CleanupInput struct {
 	Note             string                    `json:"note,omitempty"`
 }
 type CleanupOutput struct {
-	Inventory   *memory.CleanupInventory  `json:"inventory,omitempty"`
-	Plan        *memory.CleanupPlan       `json:"plan,omitempty"`
-	Maintenance *memory.MaintenanceStatus `json:"maintenance,omitempty"`
-	Done        bool                      `json:"done"`
-	Notice      string                    `json:"notice"`
+	ApprovalSourceID string                    `json:"approval_source_id,omitempty"`
+	Inventory        *memory.CleanupInventory  `json:"inventory,omitempty"`
+	Plan             *memory.CleanupPlan       `json:"plan,omitempty"`
+	Maintenance      *memory.MaintenanceStatus `json:"maintenance,omitempty"`
+	Done             bool                      `json:"done"`
+	Notice           string                    `json:"notice"`
 }
 
-func addGovernanceTools(s *mcp.Server, store *memory.Store, mode string, read, write *mcp.ToolAnnotations) {
-	contextDescription := "Optional context-aware lookup: reconstruct the task from current project, visible conversation and already read relevant memory; call action=lookup with grounded keywords. No source_id, prepare/complete, skip or receipt is required for lookup. Compact candidates are <=8192 JSON bytes; both result streams paginate. Read full relevant evidence only as needed; reuse already-read material for an unchanged task, verify again when conditions or versions may have changed. candidate/pending expose explicit outstanding findings without automatically reviewing them. Memory never replaces current user instructions, AGENTS or existing domain routing. Legacy prepare/complete are compatibility tools, not an assist-mode obligation."
-	if mode == memory.ModeStrict {
-		contextDescription = "Strict compatibility: prepare using current project/conversation and actual source_id; read selected full entries with context_source_id, then complete before the configured action check. skip needs a concrete non-applicability reason. Optional lookup is stateless. Explicit review_at_stop may request one legacy model continuation for a meaningful candidate. Receipts verify bookkeeping, not judgment or AGENTS compliance."
-	}
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_context", Description: contextDescription, Annotations: write}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.ContextInput) (*mcp.CallToolResult, memory.ContextResult, error) {
-		if mode == memory.ModeAssist && in.ReviewAtStop {
-			return nil, memory.ContextResult{}, errors.New("assist has no Stop model review; save inline or keep an explicit pending candidate, without switching modes during the task")
-		}
-		if in.ResponseMode == "" {
-			in.ResponseMode = "compact"
-		}
-		r, err := store.Context(ctx, in)
-		return nil, r, err
-	})
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_cleanup", Description: "Manage a separate, reversible maintenance ledger, not business cases. inspect is read-only inventory; preview stores an exact proposed plan without changing memories. Show affected entries, retained/lost content, reasons and unknowns, then offer apply/adjust/later. apply and undo require a NEW actual user approval source and exact quote after preview; installation permission is insufficient. No semantic correctness is certified. configure persists per-project natural-language schedule intent; raw capture/reuse do not count. Never permanently deletes evidence.", Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)}}, func(ctx context.Context, req *mcp.CallToolRequest, in CleanupInput) (*mcp.CallToolResult, CleanupOutput, error) {
+func addGovernanceTools(s *mcp.Server, store *memory.Store) {
+	mcp.AddTool(s, &mcp.Tool{Name: "memory_cleanup", Description: "Manage a separate, reversible maintenance ledger, not business cases. inspect is read-only inventory; preview stores an exact proposed plan without changing memories. Show affected entries, retained/lost content, reasons and unknowns, then offer apply/adjust/later. After NEW actual user approval of the shown preview, confirm stores its compact maintenance-only excerpt; apply/undo use that source ID. Installation permission is insufficient. Configuration intent also uses confirm. No semantic correctness is certified. configure persists per-project natural-language schedule intent; raw capture/reuse do not count. Never permanently deletes evidence.", Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)}}, func(ctx context.Context, req *mcp.CallToolRequest, in CleanupInput) (*mcp.CallToolResult, any, error) {
 		out := CleanupOutput{Notice: "Management records are excluded from ordinary memory search. Preserved bodies/links/history remain readable. Fresh user confirmation is required before applying any cleanup."}
 		var err error
 		switch in.Action {
+		case "confirm":
+			id, e := store.ConfirmMaintenance(ctx, in.Scope, in.PlanID, in.Purpose, in.ApprovalQuote, in.RequestID)
+			out.ApprovalSourceID = id
+			err = e
 		case "inspect":
 			r, e := store.CleanupInventory(ctx, in.Scope, in.Cursor)
 			out.Inventory = &r
 			err = e
 		case "configure":
 			if in.Policy == nil || in.Policy.Scope != in.Scope {
-				return nil, out, errors.New("policy must specify the same scope")
+				return experienceTextResult(out, errors.New("policy must specify the same scope"))
 			}
 			r, e := store.ConfigureMaintenance(ctx, *in.Policy)
 			out.Maintenance = &r
@@ -74,10 +67,10 @@ func addGovernanceTools(s *mcp.Server, store *memory.Store, mode string, read, w
 		case "apply", "undo":
 			p, e := store.CleanupPlan(ctx, in.PlanID)
 			if e != nil {
-				return nil, out, e
+				return experienceTextResult(out, e)
 			}
 			if p.Scope != in.Scope {
-				return nil, out, errors.New("plan outside requested scope")
+				return experienceTextResult(out, errors.New("plan outside requested scope"))
 			}
 			r, e := store.DecideCleanup(ctx, memory.CleanupDecision{PlanID: in.PlanID, ApprovalSourceID: in.ApprovalSourceID, ApprovalQuote: in.ApprovalQuote}, in.Action == "undo")
 			out.Plan = &r
@@ -94,6 +87,6 @@ func addGovernanceTools(s *mcp.Server, store *memory.Store, mode string, read, w
 			err = errors.New("unknown cleanup action")
 		}
 		out.Done = err == nil
-		return nil, out, err
+		return experienceTextResult(out, err)
 	})
 }

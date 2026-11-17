@@ -47,6 +47,11 @@ func (s *Store) ConfigureExperienceTrial(ctx context.Context, scope string, enab
 	_, err := s.db.ExecContext(ctx, "INSERT INTO experience_policy(scope,enabled)VALUES(?,?) ON CONFLICT(scope)DO UPDATE SET enabled=excluded.enabled", scope, enabled)
 	return err
 }
+func (s *Store) ExperiencePolicyExists(ctx context.Context, scope string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM experience_policy WHERE scope=?", scope).Scan(&n)
+	return n > 0, err
+}
 func (s *Store) ExperienceTrialEnabled(ctx context.Context, scope string) (bool, error) {
 	var enabled bool
 	err := s.db.QueryRowContext(ctx, "SELECT enabled FROM experience_policy WHERE scope=?", scope).Scan(&enabled)

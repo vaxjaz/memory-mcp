@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--if-supported", action="store_true")
     opt = parser.parse_args()
     binary = str(Path(opt.binary).resolve())
-    if "--experience-trial" not in subprocess.check_output([binary, "help"], text=True, encoding="utf-8"):
+    if "--enable-wakeup" not in subprocess.check_output([binary, "help"], text=True, encoding="utf-8"):
         if opt.if_supported:
             print("SKIP: historical executable predates experience trial")
             return
@@ -48,16 +48,31 @@ def main():
                 assert p.returncode == 0, (args, p.stdout, p.stderr)
                 return json.loads(p.stdout)
 
-            setup = cli("setup", *options, "--experience-trial")
-            assert setup["experience_trial"] and setup["experience_hooks_installed"] and not setup["raw_capture"]
+            setup = cli("setup", *options)
+            assert setup["wakeup_enabled"] and setup["experience_hooks_installed"]
             doctor = cli("doctor", *options)
-            assert doctor["mode_configuration_consistent"] and doctor["experience_trial"], doctor
+            assert doctor["configuration_consistent"] and doctor["wakeup_enabled"], doctor
             assert doctor["experience_hooks_installed"] and doctor["experience_index"]["cold_start"], doctor
             hooks_file = config if adapter != "codex" else user / "hooks.json"
             cfg = json.loads(hooks_file.read_text(encoding="utf-8"))
             events = cfg["hooks"]["events"] if adapter == "zcode" else cfg["hooks"]
             assert not events.get("Stop"), events
             handler = events["PreToolUse"][0]["hooks"][0]
+            # Reinstall must remove an owned legacy Stop handler, preserving
+            # historical contents rather than maintaining a parallel workflow.
+            events["Stop"] = [{"hooks": [dict(handler)]}]
+            hooks_file.write_text(json.dumps(cfg, ensure_ascii=False), encoding="utf-8")
+            cli("setup", *options)
+            current_cfg = json.loads(hooks_file.read_text(encoding="utf-8"))
+            current_events = current_cfg["hooks"]["events"] if adapter == "zcode" else current_cfg["hooks"]
+            assert not current_events.get("Stop"), current_events
+            with closing(sqlite3.connect(data / "memory.db")) as db:
+                db.execute("INSERT INTO entries(id,root_id,previous_id,kind,scope,title,body,origin,source_ref,host,model,session,created_at,current,needs_review) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                           ("legacy-source", "legacy-source", "", "record", scope,
+                            "Preserved legacy fixture", "Historical source must survive the workflow change",
+                            "user_supplied", "isolated historical fixture", "", "", "",
+                            "2026-01-01T00:00:00Z", 1, 0))
+                db.commit()
             matcher = events["PreToolUse"][0]["matcher"]
             assert re.search(matcher, "Grep") and re.search(matcher, "run_in_terminal")
             assert not re.search(matcher, "mcp__decision_memory__memory_experience_lookup")
@@ -79,6 +94,8 @@ def main():
             try:
                 boot = host.tool("memory_bootstrap", {})
                 assert "compact_experiences" in boot["features"]
+                assert boot["workflow"] == "verified_experience"
+                assert host.tool("memory_read", {"id": "legacy-source"})["entry"]["body"] == "Historical source must survive the workflow change"
                 draft = dict(scope=scope, project=str(project), title="Synthetic multi-entry risk",
                              request_id="experience-once",
                              experience=dict(anchors=["LYN", "canDispatchLynOrder"], signals=["创建准入"],
@@ -124,16 +141,47 @@ def main():
                 assert hook("PreToolUse", **payload)[1] == {}
                 assert hook("Stop", last_assistant_message="Do not start an extra model round")[1] == {}
                 with closing(sqlite3.connect(data / "memory.db")) as db:
-                    assert db.execute("select count(*) from entries").fetchone()[0] == 1
+                    assert db.execute("select count(*) from entries").fetchone()[0] == 2
                     assert "PRIVATE_PROMPT_DO_NOT_COPY" not in json.dumps(list(db.execute("select * from entries")))
                 assert (project / "AGENTS.md").read_bytes() == rules
                 # New native input cannot reuse the earlier query as a permit.
                 hook("UserPromptSubmit", turn="turn-2", prompt="Second isolated request")
                 gated = hook("PreToolUse", turn="turn-2", **payload)
                 assert gated[0] == 2 or gated[1].get("decision") == "block"
-                disabled = cli("setup", *options, "--disable-experience-trial")
-                assert not disabled["experience_trial"] and not disabled["experience_hooks_installed"]
+                disabled = cli("setup", *options, "--disable-wakeup")
+                assert not disabled["wakeup_enabled"] and not disabled["experience_hooks_installed"]
                 assert host.tool("memory_read", dict(id=saved["id"]))["entry"]["current"]
+                cli("setup", *options)
+                assert not cli("doctor", *options)["wakeup_enabled"], "reinstall reset an explicit disabled policy"
+                assert hook("UserPromptSubmit", turn="disabled-input", prompt="No fallback reminder")[1] == {}
+                assert hook("PreToolUse", turn="disabled-input", **payload)[1] == {}
+                if adapter == "zcode":
+                    plan = host.tool("memory_cleanup", dict(action="preview", scope=scope,
+                                     operations=[dict(entry_id=saved["id"], action="distill",
+                                         summary="Isolated verified pattern with the same scope and boundary",
+                                         reason="Exercise explicit maintenance without a generic write tool",
+                                         evidence_ids=[saved["id"]])]))["plan"]
+                    approval = host.tool("memory_cleanup", dict(action="confirm", scope=scope,
+                                         plan_id=plan["id"], purpose="apply",
+                                         approval_quote="Apply this exact displayed fixture plan",
+                                         request_id="fixture-approval"))["approval_source_id"]
+                    applied = host.tool("memory_cleanup", dict(action="apply", scope=scope,
+                                        plan_id=plan["id"], approval_source_id=approval,
+                                        approval_quote="Apply this exact displayed fixture plan"))
+                    assert applied["plan"]["status"] == "applied"
+                    host.tool("memory_cleanup", dict(action="undo", scope=scope,
+                              plan_id=plan["id"], approval_source_id=approval,
+                              approval_quote="Apply this exact displayed fixture plan"), expect_error=True)
+                    undo = host.tool("memory_cleanup", dict(action="confirm", scope=scope,
+                                     plan_id=plan["id"], purpose="undo",
+                                     approval_quote="Undo this exact displayed fixture plan",
+                                     request_id="fixture-undo"))["approval_source_id"]
+                    undone = host.tool("memory_cleanup", dict(action="undo", scope=scope,
+                                       plan_id=plan["id"], approval_source_id=undo,
+                                       approval_quote="Undo this exact displayed fixture plan"))
+                    assert undone["plan"]["status"] == "undone"
+                    assert not host.tool("memory_search", dict(scope=scope, query="displayed",
+                                         include_events=True))["results"]
             finally:
                 host.close()
     print(json.dumps({"result": "PASS", "coverage": "four adapter configurations and actual subprocess protocols; no native/model-quality claim",

@@ -1,15 +1,15 @@
-# 记忆质量与用户确认清洗
+# Quality and confirmed maintenance
 
-紧凑经验试用通过 memory_experience_record 走独立的、有字段上限的证据准入：代码文件在绑定项目内核对，runtime/business 保存真实定位和简短观察，不要求复制原始对话来凑 links。经验仍存为 case，沿用不可变修订、清洗计数和预览确认。精确重复复用不计数；旧自由文本按原准入读取，不能自动提升为试用阻断规则。来源完整性不是语义正确性保证。参见 EXPERIENCE_TRIAL.md。
+New knowledge must challenge a concrete inference with observed evidence, a concrete bug impact and future recognition features. The sole write path is memory_experience_record. Syntax/locators/hashes do not certify causal truth. Preserve conditions and unknowns. Do not create cases for progress, rule repetition or usage bookkeeping.
 
-辅助模式不要求每轮形成案例。保存前必须回答：未来什么具体场景会改变哪项行动？为什么不是一次性、重复、未证实或可普通调查恢复的信息？适用条件和边界是什么？用 profile.future_use/counter_check/applicability/boundary 保留这些判断，不虚构反例或到期日期。
+memory_cleanup maintains a separate reversible ledger:
 
-搜索并读现有相关案例。同一问题无实质变化直接复用，有证据/条件/结论变化才修订，独立问题分开。正文保留实际上下文、不同解释、未知与原始来源。原文与案例、记账关联与证据支持、active 与规范权威均不可混同。
+1. inspect and read relevant sources; preview exact archive/supersede/distill/recheck operations.
+2. Show changes, retained/lost meaning, reasons and unknowns to the user. Wait for a new actual approval of that displayed plan.
+3. confirm with scope, plan_id, purpose=apply, exact compact approval_quote and stable request_id. This saves a maintenance-only audit source, hidden from normal search and excluded from substantive-write counts.
+4. apply the plan using that returned approval_source_id and exact approval_quote. Upgrade/install permission is insufficient. Plan, evidence or management changes invalidate the preview. Exact committed retries are idempotent.
+5. Undo needs another actual confirmation recorded with purpose=undo after application.
 
-清洗是独立可逆管理账本，不自动制造业务案例。默认每项目 100 次 case/hypothesis 有效写入提示到期；用户可说“每 N 次”“再 N 次后”“关闭”，用 configure 与实际用户来源保存设置并回显周期。原始采集、提醒、查询、复用与重试不计数。
+For a real user schedule instruction, confirm with purpose=configure (no plan_id), then configure with policy.source_id equal to that returned source ID. A maintenance quote cannot be reused for a different plan or operation. Mechanical provenance and ordering still cannot establish semantic user consent; the host must read the actual conversation.
 
-到期或用户主动要求：inspect，读相关全文与来源，preview 具体保留/归档/合并/提炼/重查方案，展示内容变化、理由、未知；让用户选择确认、调整或稍后。未获对该预览的新明确确认不得 apply。undo 同样要新确认。授权安装不等于授权清洗。
-
-原文、ID、来源与修订历史保留；管理变动有独立版本、备份和撤销，不自动永久删除。合并/提炼需要用户可审查的新正文与来源，不按文本相似度自动判语义重复。forget 不用于清洗。
-
-needs_review 的解除必须实际重读修正来源并走 recheck 预览与新确认；不得单纯清徽标。更正记录和审查路径不能被 needs_review 自身堵死。显式 pending 可用 memory_context pending 查询，保留待判断状态；模式迁移与普通 Stop 都不能把它悄悄标完成。
+No automatic cleaning, evidence deletion or business-case rewrite occurs on lookup, missing locators, low use or age. Keep backups and immutable history. Preserve old pending records without marking them completed merely because the workflow changed.

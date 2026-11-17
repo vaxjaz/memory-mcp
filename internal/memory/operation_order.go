@@ -68,6 +68,15 @@ func validateCleanupApproval(ctx context.Context, q queryer, p CleanupPlan, in C
 	if err != nil {
 		return err
 	}
+	if strings.HasPrefix(source.SourceRef, MaintenanceSourcePrefix) {
+		purpose := "apply"
+		if undo {
+			purpose = "undo"
+		}
+		if source.SourceRef != MaintenanceSourcePrefix+purpose+":"+p.ID {
+			return errors.New("approval belongs to a different maintenance plan or operation")
+		}
+	}
 	if !strings.Contains(source.Body, in.ApprovalQuote) {
 		return errors.New("approval must quote a new user message after the preview; ask the user to approve this plan")
 	}

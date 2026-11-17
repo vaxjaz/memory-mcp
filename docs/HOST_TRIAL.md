@@ -1,34 +1,9 @@
-# 宿主实战验收：0.3.1-experience.1
+# Real-host acceptance
 
-先读 EXPERIENCE_TRIAL.md。试用有选择性暂停；下方兼容验收只适用于未启用经验试验的普通 assist。只测真实当前项目，禁止把测试案例写进原库。
+Verify 0.4.0-experience.1 and SOURCE_COMMIT, original data_dir/bindings, six tools, current launcher definitions and actual native event receipts. Isolated script replays are not native delivery proof.
 
-1. 无匹配的普通代码调查：不发每轮提醒，不额外 query，记录 hook 实际耗时。
-2. 真实风险同时命中符号和条件：收到仅含索引定位的 challenge；agent 结合完整上下文主动 query，再恢复原工具。原样重试或 bootstrap 不算成功查询。
-3. 同轮重复、并行查询，新输入与旧调用交错：不重复发独立挑战，旧查询不释放新输入；超时降级不能显示已查询。
-4. 规范、Skill、memory 工具保持可读；代码源码定位器不引发自身递归。
-5. 真实用户纠正/自主反例：主线核实后同步保存。只有实际当前代码或真实运行/业务依据；无原文/自我检讨入库，无 Stop 续跑。
-6. 文件移动、符号重名、工作区变化而 HEAD 不变：报告当前定位/失配，不直接宣布适用或自动 revise。
-7. 同一经验精确重复保存不新增版本和清洗计数；真实条件改变才修订。按 N 次维护仍先展示预览、用户确认。
-8. 退出当前项目后恢复普通 assist，其它绑定和数据完整；后台没有额外整理任务。
+Observe: ordinary inputs have no reminder/capture/extra model continuation; no-match code queries are silent; a real anchor-plus-condition match requests the agent's own contextual lookup; lookup returns risk cues/current locations and the agent checks current facts. Record total latency, total model input, duplicate queries, false pauses, misses and concrete decision changes. Do not count hypothetical prevented bugs.
 
-报告本轮查询/写入次数、额外模型续推、实际输入量、无效暂停、定位正确性和业务返工。工具成功与“已核实”自述不能当成效果证明。未出现的错误不能直接计为被预防。
+Test new input/stale/parallel challenge behavior, current source drift, failure/expiry fail-open without fake completion, and disabled/unbound scopes. No old mode, generic write/context/review tool or Stop handler may appear. Reinstall preserves other handlers and the existing disabled policy.
 
-实测成本须保留原始宿主差异。Windows 本机隔离重放（5 次无命中）：ZCode 中位约 18ms，Codex/Qoder/Qoder IDE 约 300ms，后者包含 PowerShell 启动。样本只用于暴露固定开销，不是跨机器性能保证。匹配成功还会增加拒绝、查询及恢复操作的模型成本。
-
-## 未启用经验试验时的普通 assist 兼容验收
-
-先确认真实版本、assist 模式、原库及绑定；每个安装只做一次，不在普通任务中反复问切换。以下需真实宿主执行观察，模拟 hook、工具成功或读回执都不能替代。
-
-| 场景 | 观察标准 |
-|---|---|
-| 新会话与新用户输入 | 有简短模式/按需提醒；无强制 prepare/complete/skip；不自动写案例 |
-| 同任务连续“继续” | 已读材料仍适用时不重读全文、不反复发目录；需要新依据才查询 |
-| 跨会话有历史约定的真实任务 | 宿主结合项目/前文找相关材料；全文依据实际改变事前决策，不把补救算成功 |
-| 主线中插入 SQL/测试等辅助动作 | 按项目既有 AGENTS 路由读适用规范；不能由记忆里通用经验替代。无需执行有风险 SQL 来验收 |
-| 历史资料与现行规范不同 | 以当前适用规范为准，历史信息保留为线索/待核实资料；不先执行旧做法 |
-| 普通结束与有价值新增 | 普通结束无 Stop 模型整理；实质新增才按质量门槛保存，重复结论不造案例 |
-| 旧 pending 事项 | 可查、保持 pending，迁移不宣称处理完 |
-
-每种现象记录一次即可：实际任务、检索/读/写次数、工具回包字节数、是否额外续轮、使用哪条依据改变什么决策、是否遵守现行规范。没发生的错误不能直接算被预防；只报告有证据的决策变化。
-
-不要为验收向用户真实知识库塞合成业务案例，不修改 AGENTS 来迎合插件。未触发、误检索、仍把记忆当权威都算待解决问题；不要补写一条“下次记得遵循规范”案例充当修复。
+Use only disposable libraries for synthetic fixtures. In the original library, save only actual verified experiences. Zero eligible cases is a cold start, not native hook failure. Cleaning always needs a reviewed preview and a new actual approval.

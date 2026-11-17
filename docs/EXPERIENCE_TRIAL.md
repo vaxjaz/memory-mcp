@@ -1,88 +1,21 @@
-# 0.3.1-experience.1：紧凑经验实战试用
+# Verified experience workflow
 
-这是一版可退出的试验，不宣称已经证明 GLM 会正确运用经验。没有异步子 agent、独立模型、后台反思、每轮整理或 Stop 续跑。默认 assist/strict 兼容行为保留；**经验唤醒需要对实际项目显式 opt-in**，不悄悄给全部历史绑定加门禁。
+User corrections and autonomous discoveries are candidate triggers, not truth. Investigate from current code, runtime evidence and explicit business agreements before recording. Reuse evidence already gathered on the main task; no background model or asynchronous write is started.
 
-## 四问与真实执行点
+memory_experience_record accepts the bound project/scope, title, anchors/signals, pitfall, observed counterexample, concrete bug impact, applicability/boundary and 1-3 compact evidence locators. No raw transcript, obligation list or prescribed modification destination. Feature JSON <=3000 bytes. Exact equivalent writes deduplicate; stable request_id protects retries; previous_id records material corrections or converts a genuinely verified historical case.
 
-1. **何时存**：用户纠正是调查信号，不是真理。主线纠偏或自主调查发现反例，经当前代码、运行证据及真实业务约定核实后，同步调用 memory_experience_record。利用本轮已经取得的证据，不额外重做一遍调查。普通事实、完成流水、空泛教训不保存。
-2. **存什么**：anchors/signals（实际标识与独立条件）、pitfall（易错推断）、counterexample（实际反例）、impact（可能 Bug/影响）、applicability/boundary、evidence（定位及简短观察）。没有“本次必须改哪里”的字段，不保存聊天原文或完整源码。格式和定位校验不证明模型填写的因果正确。
-3. **何时取**：可以按完整上下文主动 query。真实 PreToolUse 中只观察已适配代码搜索/读取的字面参数；**一个具体锚点和一个独立条件同时命中**才要求主动 query。无命中静默，不附全库目录，不要求为了无命中再查一次。
-4. **如何用**：查询工具重新定位当前源码，提供路径、行号、内容哈希变化或失配。agent 围绕自己的当前问题，交叉核查调用者、条件和必要运行事实。定位成功不是“本次适用”；失配不自动归档或 revise。
+memory_experience_lookup takes project/scope and a task/question/keywords reconstructed from the whole task. A code hook observes literal known search/read/shell arguments only. A specific anchor AND independent condition must match before it requests a real query. No match is silent; unrelated tools and project-rule reads remain available. Its reason carries only matched features and a challenge identifier, not historical conclusions.
 
-## 写入接口
+Successful lookup returns at most two complete experiences and current literal code locations in one JSON text body <=8 KiB. Protocol wrapping and host costs are additional. Hash/line changes do not establish causal validity; unresolved symbols do not automatically expire or rewrite experiences. Check callers, conditions and relevant runtime facts.
 
-调用 memory_experience_record：
+Each native user input has one interruption budget, not a session-wide or task-wide permit. Denial, bootstrap, historical search/read or failed lookup do not complete it. Late queries cannot release a newer input. A challenge expires after two minutes and fails open without claiming completion. New “continue” inputs can incur a repeated query; a second different risk in the same input may escape this one-pause budget. Measure both duplicates and misses.
 
-- scope：现有 project scope；project：该机的真实已绑定目录。
-- title、experience：以下紧凑结构。
-- previous_id：只有对同一问题作实质修正时才提供当前 case ID。已查明旧案例可通过这个入口转换；不得批量猜测迁移。
-- request_id：同一提交重试保持相同，不能用于不同内容。
+The requested project's first setup enables wakeup; explicit --disable-wakeup silences it, --enable-wakeup restores it. Other bindings are preserved. No-match/unbound/disabled paths never activate another reminder or capture workflow. SessionStart announces this direction once; ordinary UserPromptSubmit stores native identifiers only. There is no raw prompt collection, per-turn reminder, generic action gate or Stop continuation.
 
-experience 的字段：
+Cold start is visible through doctor's experience_index. Old text remains available through historical search/read; it is not automatically an intervention rule. Convert only a few real, currently verified cases when warranted. No synthetic cases in the original library.
 
-| 字段 | 内容 |
-|---|---|
-| anchors | 1–6 个实际业务标识、具体符号或项目相对路径；泛词不能作为自动锚点 |
-| signals | 1–6 个独立的实际动作/条件线索；不堆同义词 |
-| pitfall | 曾被证据挑战的默认推断 |
-| counterexample | 实际观察，不能把推测伪称已复现 |
-| impact | 忽略时可能引发的具体错误及范围 |
-| applicability / boundary | 必要前提、例外、不同环境和未知 |
-| evidence | 1–3 个 code/runtime/business 定位与 observation |
+Native matchers avoid starting the probe on memory/Skill/edit/other tools. Shell and read operations still pay startup cost even when later skipped. Prior Windows fixture measurements were about 18ms for ZCode and 300ms for PowerShell-backed adapters; these are not cross-machine guarantees. Hook DB waits/probes are bounded and fail open. Overlarge candidate scans are not used for blocking. Native identity/challenge diagnostics grow over time without retaining raw prompts.
 
-code 依据需要 path（项目相对文件）、reference（实际版本/记录定位），可给 symbol、预期 sha256；服务检查文件范围、大小、符号及哈希，存储定位和观察，不复制源码。runtime/business 的 reference 必须真实；服务没有连接生产系统替你认证这些观察。**代码说明现状，业务约定定义目标，二者不能混同。**
+Cleaning uses the existing per-project substantive-write counter, preview, fresh user consent, backups and undo. Maintenance-only approval excerpts are hidden from normal retrieval and never counted as knowledge. Legacy case history and schema_version=3 are retained for audit, not for reintroducing legacy host behavior.
 
-特征 JSON 上限 3000 字节。不要为了过大小检查丢掉关键条件。精确内容重复会复用，不增加清洗计数；不同措辞的语义重复仍需宿主查找/read 后判断。历史版本和来源保留。
-
-## 查询与选择性暂停
-
-memory_experience_lookup 需要 scope、当前 task、questions、keywords。普通自主查询还需 project；真实 challenge 可提供它绑定的目录。
-
-task 从项目、前文和本轮目的重建；questions 写当前需要验证的推断。例如“候选方法是否覆盖当前要求涉及的所有入口”，而不是请求历史直接指定修改位置。服务使用字面线索，不包含隐形语义模型。
-
-查找最多返回两条完整特征记录和有界的当前锚点位置，JSON 正文上限 8KiB；不截断关键条件塞入更多项。两个新接口仅返回一份 JSON 文本，避免 SDK 默认的文本/structuredContent 双份复制；MCP 协议包装和宿主自身开销另计。has_more 表示不能把首屏当全部资料；可用 memory_search/read 定点补查旧资料或更多项。
-
-明确命中时，hook **只给候选锚点和真实 challenge_id，不送历史观点、反例正文或修法**。agent 使用当前意图主动查，再重试原工具：
-
-- 拒绝过不算查询过，bootstrap、record、失败 lookup 不会解锁。
-- 成功 lookup 记录的是这个输入轮次的实际查询，不是路由完成、适用性证明或其他任务的授权。
-- 同一原生输入最多发起一次暂停挑战，重试未查询的相同风险仍受暂停；该预算不是“其他风险都已核实”的通行证。
-- 新原生输入使用新 epoch；原生 turn_id 可用时严格对齐。没有稳定事件编号的宿主不能承诺识别重复输入，不能从相同正文猜测是重放。
-- 旧查询不能放行新的输入；挑战两分钟到期后降级放行，**不记成已查询**。服务/数据库/协议失败也放行并留诊断。
-- 规则读取、Skill、memory 工具和不相关操作不阻断。Bash 只取可见字面线索，不执行、改写或声称理解任意 shell；同时读规范的复合命令可能被保守放行。
-
-这不是安全授权门禁，不取代项目现有规范、测试、审批或交付流程。未适配工具、缓存推理和纯文本方案可能不经过它。agent 仍需主动补查语义关联。
-
-## 安装与退出
-
-先按 AGENT_INSTALL.md 停旧进程、完整备份原库及配置。不得将隔离测试资料写进正式库。
-
-    memory-mcp setup --host <实际宿主> --mode assist --config <实际配置> --data-dir <原库> --project <实际目录> --scope <原scope> --experience-trial
-
-安装 SessionStart、UserPromptSubmit、PreToolUse，不安装 Stop，不采集原文。不修改 AGENTS 或领域路由。SessionStart 告知一次；普通 UserPromptSubmit 静默，只创建不含正文的原生输入元数据。到期清洗检查只通知一次，不拉起模型、不要求主任务等待。
-
-doctor 的 experience_trial=true、experience_hooks_installed 和真实事件回执分开核对。Codex 原生 hooks 仍需用户信任；配置生成和脚本重放不能证明客户端真正执行。
-
-doctor 的 experience_index 提供可参与匹配的案例数、索引可用性与 cold_start。启用但案例数为零时不会自动唤醒；这与原生事件缺失是两类问题。
-
-退出当前项目：
-
-    memory-mcp setup --host <实际宿主> --mode assist --config <实际配置> --data-dir <原库> --project <实际目录> --scope <原scope> --disable-experience-trial
-
-保留数据和其他绑定。其他项目仍在试用时保留共用 PreToolUse，但未启用的 scope 不参与经验唤醒；最后一个项目退出后移除自身 PreToolUse。不会移除其他插件的 handlers。
-
-旧自由文本仍通过 memory_search/read 可查，但不自动获得阻断资格。试用开始可由宿主选择少量真实、有证据的旧案例，核实当前项目后用 previous_id 转换；没有依据就不转，不自动全库“提炼”。
-
-## 成本、故障和清洗
-
-无匹配不增加模型回合，但本地 hook 启动和索引查询有耗时。命中后被拒、query、恢复原操作会增加交互；不能只按提示字数计成本。比较主线总时延、全部输入量、误暂停和实际返工。程序测试不证明主模型正确判断。
-
-PreToolUse 的原生 matcher 只覆盖已知代码搜索/读取及终端工具，memory、Skill、编辑和其他工具不启动经验 hook 进程。终端内部还需判断字面命令，因此普通终端操作也有启动成本；读取规范可放行，但仍可能已付启动成本。各宿主工具名变化需要更新适配，未知名字不会自动兜底匹配全部工具。匹配语法依据 ZCode Hooks、Codex Hooks、Qoder CLI/IDE Hooks 官方协议。
-
-hook 使用较短数据库等待及匹配超时；失败降级，不把失败标成完成。经验扫描超过 2000 条显式经验时降级，不用不完整索引决定阻断。案例数量和干预次数不是同一个指标。
-
-重复成本的已知边界：新用户输入（即使只是“继续”）重新获得一次暂停预算，同一个案例可能再次要求查询；本版没有猜测“仍是原任务”来发长期通行证。单次暂停预算也可能让同轮第二个风险未被要求查询。前者统计重复无效查询，后者统计漏查；不能用提高调用率掩盖任一种退化。不含正文的事件/挑战诊断元数据会随会话增加，本版不自动清理它们或将其伪装为业务清洗结果。
-
-继续沿用按项目 N 次新增/实质修订的清洗。复用、查询、重试不计数。inspect/read/preview，展示具体变化，经新的用户确认才 apply；历史、备份与撤销保留。锚点缺失、低使用率或年龄不能单独作为归档理由。不要为使用记录、代码定位缓存或补 link 制造案例版本。
-
-本试用不修改 schema_version=3 的正文/来源历史；增加的是可重建索引键与不含聊天正文的唤醒元数据。共享同一库的客户端应统一升级程序和说明，防止旧工具忽略新字段。
+Current Windows paired fixture (same machine, 5 interleaved no-hit probes): previous version median 824.5ms, current version 826.5ms for the PowerShell-backed Codex launcher. This fixed startup-chain cost remains; do not present the older 300ms measurement as a current guarantee.

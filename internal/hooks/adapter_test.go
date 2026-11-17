@@ -9,106 +9,7 @@ import (
 	"testing"
 
 	"github.com/pelletier/go-toml/v2"
-	"github.com/vaxjaz/memory-mcp/internal/memory"
 )
-
-func TestHostAndNativeTurnIsolation(t *testing.T) {
-	s, r, p := fixture(t)
-	ids := map[string]string{}
-	for _, host := range []string{"zcode", "codex", "qoder", "qoder-ide"} {
-		r.Host = host
-		e := event("UserPromptSubmit", p, "same-session", "相同原话")
-		e.EventID = "same-event"
-		e.TurnID = "turn1"
-		handle(t, r, e)
-		turn, err := s.HookNativeTurn(testCtx, host, "project:demo", e.Session, e.TurnID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, id := range ids {
-			if id == turn.SourceID {
-				t.Fatal("cross-host deduplication")
-			}
-		}
-		ids[host] = turn.SourceID
-		raw, err := s.Read(testCtx, turn.SourceID)
-		if err != nil || raw.Entry.Host != host || raw.Entry.SourceRef != "hook-event:"+host+":user" {
-			t.Fatal(raw, err)
-		}
-		_, err = s.Context(testCtx, memory.ContextInput{Action: "skip", Scope: "project:demo", SourceID: turn.SourceID, Task: "回复普通问候", Decision: "普通问候不涉及历史决定"})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	r.Host = "codex"
-	e := event("UserPromptSubmit", p, "same-session", "第二轮原话")
-	e.EventID = "second"
-	e.TurnID = "turn2"
-	handle(t, r, e)
-	// An old, delayed Stop must attach its answer to turn1, never latest turn2.
-	stop := event("Stop", p, "same-session", "")
-	stop.TurnID = "turn1"
-	stop.Answer = "旧轮答案"
-	handle(t, r, stop)
-	first, _ := s.HookTurn(testCtx, ids["codex"])
-	second, _ := s.HookNativeTurn(testCtx, "codex", "project:demo", "same-session", "turn2")
-	if first.AnswerID == "" || second.AnswerID != "" {
-		t.Fatal(first, second)
-	}
-	answer, err := s.Read(testCtx, first.AnswerID)
-	if err != nil || answer.Entry.Host != "codex" {
-		t.Fatal(answer, err)
-	}
-	// Unknown turn cannot fall back to current input.
-	stop.TurnID = "absent"
-	handle(t, r, stop)
-	second, _ = s.HookTurn(testCtx, second.SourceID)
-	if second.AnswerID != "" {
-		t.Fatal("unknown turn fell back")
-	}
-}
-
-func TestStopContinuationIsNotUserEvidence(t *testing.T) {
-	s, r, p := fixture(t)
-	r.Host = "codex"
-	input := event("UserPromptSubmit", p, "s", "真正用户输入")
-	input.TurnID = "t1"
-	input.EventID = "t1"
-	handle(t, r, input)
-	first, _ := s.HookNativeTurn(testCtx, "codex", "project:demo", "s", "t1")
-	stop := event("Stop", p, "s", "")
-	stop.TurnID = "t1"
-	stop.Answer = "业务答复"
-	out := handle(t, r, stop)
-	reason, _ := out["reason"].(string)
-	if reason == "" {
-		t.Fatal(out)
-	}
-	count, _ := s.Stats(testCtx)
-	synthetic := event("UserPromptSubmit", p, "s", reason)
-	synthetic.TurnID = "t2"
-	synthetic.EventID = "t2"
-	handle(t, r, synthetic)
-	handle(t, r, synthetic)
-	after, _ := s.Stats(testCtx)
-	mapped, err := s.HookNativeTurn(testCtx, "codex", "project:demo", "s", "t2")
-	if err != nil || after.Entries != count.Entries || mapped.SourceID != first.SourceID {
-		t.Fatal(after, count, mapped, err)
-	}
-	stop.TurnID = "t2"
-	stop.StopActive = true
-	if handle(t, r, stop)["decision"] == "block" {
-		t.Fatal("continuation loop")
-	}
-	// An ordinary repeated user prompt remains a new actual event.
-	input.TurnID = "t3"
-	input.EventID = "t3"
-	handle(t, r, input)
-	next, _ := s.HookNativeTurn(testCtx, "codex", "project:demo", "s", "t3")
-	if next.SourceID == first.SourceID {
-		t.Fatal("user text wrongly deduplicated")
-	}
-}
 
 func TestAdapterWireContracts(t *testing.T) {
 	a, _ := AdapterFor("codex")
@@ -172,7 +73,7 @@ func TestAdapterSetupPreservationAndIdempotency(t *testing.T) {
 				os.WriteFile(a.DefaultHooks(config), []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo keep"}]}]}}`), 0600)
 			}
 			os.WriteFile(config, initial, 0600)
-			o := SetupOptions{Mode: "strict", Host: host, Config: config, DataDir: filepath.Join(root, "data with spaces"), Project: project, Scope: "project:demo", Binary: filepath.Join(root, "bin with ' quote", "memory-mcp.exe"), Capture: true, Review: true}
+			o := SetupOptions{Host: host, Config: config, DataDir: filepath.Join(root, "data with spaces"), Project: project, Scope: "project:demo", Binary: filepath.Join(root, "bin with ' quote", "memory-mcp.exe")}
 			report, e := Setup(testCtx, o)
 			if e != nil {
 				t.Fatal(e)
@@ -243,68 +144,5 @@ func TestConfigApplyRollsBackAndDetectsRace(t *testing.T) {
 	actual, _ := os.ReadFile(one)
 	if string(actual) != "old" {
 		t.Fatal("partial config left behind")
-	}
-}
-
-func TestNativeTurnRedeliveryAndCompletedContinuation(t *testing.T) {
-	for _, host := range []string{"codex", "qoder"} {
-		t.Run(host, func(t *testing.T) {
-			s, r, p := fixture(t)
-			r.Host = host
-			input := event("UserPromptSubmit", p, "s", "实际用户原话")
-			input.TurnID = "original"
-			input.EventID = "delivery-one"
-			handle(t, r, input)
-			first, _ := s.HookNativeTurn(testCtx, host, "project:demo", "s", "original")
-			// Different delivery identifiers for the same native turn cannot append a raw record.
-			before, _ := s.Stats(testCtx)
-			input.EventID = "delivery-two"
-			handle(t, r, input)
-			after, _ := s.Stats(testCtx)
-			if before.Entries != after.Entries {
-				t.Fatal("native input duplicated")
-			}
-			stop := event("Stop", p, "s", "")
-			stop.TurnID = "original"
-			stop.Answer = "实际业务答复"
-			out := handle(t, r, stop)
-			reason, _ := out["reason"].(string)
-			if reason == "" {
-				t.Fatal(out)
-			}
-			// Redelivery between Stop and continuation must not erase the pending token.
-			handle(t, r, input)
-			continuation := event("UserPromptSubmit", p, "s", reason)
-			continuation.TurnID = "synthetic"
-			handle(t, r, continuation)
-			mapped, err := s.HookNativeTurn(testCtx, host, "project:demo", "s", "synthetic")
-			if err != nil || mapped.SourceID != first.SourceID {
-				t.Fatal(mapped, err)
-			}
-			if _, err = s.HookReviewDone(testCtx, memory.ReviewInput{Scope: "project:demo", SourceID: first.SourceID, Note: "原文无值得新增的决定，不生成案例"}); err != nil {
-				t.Fatal(err)
-			}
-			before, _ = s.Stats(testCtx)
-			handle(t, r, continuation)
-			after, _ = s.Stats(testCtx)
-			if before.Entries != after.Entries {
-				t.Fatal("known synthetic retry captured after completion")
-			}
-			// A genuinely new turn can quote the SAME text after review; it is real user evidence.
-			quoted := continuation
-			quoted.TurnID = "real-new-input"
-			handle(t, r, quoted)
-			next, err := s.HookNativeTurn(testCtx, host, "project:demo", "s", quoted.TurnID)
-			if err != nil || next.SourceID == first.SourceID {
-				t.Fatal("new user quote swallowed", next, err)
-			}
-			// Late synthetic retries remain identifiable even after another real input arrived.
-			before, _ = s.Stats(testCtx)
-			handle(t, r, continuation)
-			after, _ = s.Stats(testCtx)
-			if before.Entries != after.Entries {
-				t.Fatal("late synthetic retry captured")
-			}
-		})
 	}
 }

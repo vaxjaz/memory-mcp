@@ -24,7 +24,6 @@ func Run(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	host := fs.String("host", "", "explicit protocol adapter; run adapters for supported hosts")
 	dir := fs.String("data-dir", "", "memory directory")
-	modeArg := fs.String("mode", "", "persistent service mode: assist (default) or explicit strict compatibility")
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -33,12 +32,9 @@ func Run(ctx context.Context, args []string) error {
 	project := fs.String("project", "", "project directory to bind without modifying it")
 	scope := fs.String("scope", "", "project:<stable identifier>")
 	serverName := fs.String("server-name", "", "explicit MCP server name (use a distinct name and data directory for isolated acceptance)")
-	capture := fs.Bool("capture-user-text", false, "enable raw prompt and supplied answer capture in bound projects")
-	review := fs.Bool("review-on-stop", false, "legacy opt-in: allow a declared pending candidate to request one extra model turn; normally omit and use review_at_stop per candidate")
-	contextCheck := fs.Bool("context-check", false, "strict compatibility: require a completed current-turn memory check before actions")
-	experienceTrial := fs.Bool("experience-trial", false, "setup: opt this bound project into compact synchronous experiences and selective code-query wakeup")
-	disableExperience := fs.Bool("disable-experience-trial", false, "setup: disable this project's experience wakeup, preserving data and other bindings")
-	_ = fs.Bool("experience-hooks", false, "managed launcher capability marker; project policy decides whether to intervene")
+	enableWakeup := fs.Bool("enable-wakeup", false, "enable selective code-query wakeup for this project")
+	disableWakeup := fs.Bool("disable-wakeup", false, "disable selective wakeup without activating an alternative workflow")
+	_ = fs.Bool("experience-hooks", false, "managed launcher capability marker")
 	reviews := fs.Bool("reviews", false, "doctor: include paginated current needs_review entries for --scope")
 	dry := fs.Bool("dry-run", false, "show setup targets without writing config or opening the database")
 	checkText := fs.Bool("check-text", false, "doctor: scan stored text for invalid UTF-8/U+FFFD without changing it")
@@ -52,20 +48,8 @@ func Run(ctx context.Context, args []string) error {
 	if fs.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
 	}
-	modeValue := *modeArg
-	// Old stored hook commands remain strict until setup replaces them coherently.
-	if cmd == "hook" && modeValue == "" && (*contextCheck || *capture || *review) {
-		modeValue = memory.ModeStrict
-	}
-	mode, modeErr := memory.IntegrationMode(modeValue)
-	if modeErr != nil {
-		return modeErr
-	}
-	if cmd != "doctor" && mode == memory.ModeAssist && (*review || *contextCheck) {
-		return errors.New("assist has no action gate or Stop model review; use --mode strict explicitly")
-	}
 	if *host == "" && cmd != "doctor" {
-		return errors.New("explicit --host required; identify the actual client and read docs/HOOK_SETUP.md")
+		return errors.New("explicit --host required; identify the actual client and read docs/AGENT_INSTALL.md")
 	}
 	// Preserve the original read-only doctor default for existing ZCode scripts.
 	// Installation and event processing always require an explicit actual host.
@@ -93,7 +77,7 @@ func Run(ctx context.Context, args []string) error {
 		if er != nil {
 			return er
 		}
-		r, er := Setup(ctx, SetupOptions{Mode: mode, Host: *host, Config: *config, DataDir: *dir, Project: *project, Scope: *scope, Binary: exe, ServerName: *serverName, Capture: *capture, Review: *review, DryRun: *dry, ExperienceTrial: *experienceTrial, DisableExperienceTrial: *disableExperience})
+		r, er := Setup(ctx, SetupOptions{Host: *host, Config: *config, DataDir: *dir, Project: *project, Scope: *scope, Binary: exe, ServerName: *serverName, DryRun: *dry, EnableWakeup: *enableWakeup, DisableWakeup: *disableWakeup})
 		if er != nil {
 			return er
 		}
@@ -162,14 +146,14 @@ func Run(ctx context.Context, args []string) error {
 							data := configData(ent)
 							a, _ := canonicalForDoctor(data)
 							b, _ := canonicalForDoctor(store.Dir)
-							services = append(services, map[string]any{"mode": configuredMode(stringArgs(ent["args"]), false), "server": name, "command": command, "data_dir": data, "matches_opened_data_dir": a != "" && a == b})
+							services = append(services, map[string]any{"workflow": configuredWorkflow(stringArgs(ent["args"])), "server": name, "command": command, "data_dir": data, "matches_opened_data_dir": a != "" && a == b})
 						}
 					}
 				}
 			}
 		}
 		r["memory_services"] = services
-		inspectManagedModes(r, c, services, *host, *config, *serverName)
+		inspectManagedWorkflow(r, c, services, *host, *config, *serverName)
 		bindings, er := store.HookBindings(ctx)
 		if er != nil {
 			return er
@@ -203,7 +187,7 @@ func Run(ctx context.Context, args []string) error {
 			if er != nil {
 				return er
 			}
-			r["experience_trial"] = trial
+			r["wakeup_enabled"] = trial
 			items, indexErr := store.Experiences(ctx, *scope)
 			index := map[string]any{"available": indexErr == nil, "eligible_cases": len(items), "cold_start": indexErr == nil && len(items) == 0}
 			if indexErr != nil {
@@ -238,7 +222,7 @@ func Run(ctx context.Context, args []string) error {
 	}
 	deadline, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	r, er := (Runtime{Mode: mode, Host: *host, Store: store, Capture: *capture, Review: *review, ServerName: *serverName, ContextCheck: *contextCheck}).Handle(deadline, e)
+	r, er := (Runtime{Host: *host, Store: store, ServerName: *serverName}).Handle(deadline, e)
 	if er != nil {
 		_ = store.HookLog(ctx, e.Name, "", e.Session, "failed", er.Error())
 		return fail(er)

@@ -720,6 +720,7 @@ func (s *Store) SearchPage(ctx context.Context, in SearchInput) (SearchPage, err
 		q += " AND needs_review=?"
 		args = append(args, *in.NeedsReview)
 	}
+	q += " AND source_ref NOT LIKE 'maintenance-event:%'"
 	if !in.IncludeEvents {
 		q += " AND source_ref NOT LIKE 'hook-event:%'"
 	}
