@@ -12,11 +12,14 @@ import (
 // Filter before spawning a hook process. Native aliases are explicit; broad
 // MCP matching would charge every memory/browser/edit call for a code probe.
 // Regex name filters are documented by all four supported adapters.
-const experienceToolMatcher = "^([Gg]rep|[Gg]lob|[Rr]ead|[Bb]ash|exec_command|run_command|run_in_terminal|terminal|read_file|grep_code|search_file|search_files|code_search|mcp__.+__(read_file|search_files|grep|glob|code_search))$"
+const experienceToolMatcher = "^([Gg]rep|[Gg]lob|[Rr]ead|[Bb]ash|exec_command|run_command|run_in_terminal|terminal|read_file|grep_code|search_file|search_files|code_search|mcp__.+__(read_file|search_files|grep|glob|code_search|get_ticket|read_ticket|search_tickets|get_order|query_order|query_orders|search_orders|query|read_query|execute_query|execute_sql|run_sql|query_database))$"
 
 // Only observable literal arguments are used. This is not a shell parser or a
 // semantic task detector. Unknown/compound wrappers may have no usable clues.
 func experienceClues(e Event) string {
+	if isBusinessTool(e.Tool) {
+		return businessClues(e, false)
+	}
 	name := strings.ToLower(e.Tool)
 	if strings.Contains(name, "memory_") || strings.Contains(name, "skill") ||
 		strings.Contains(name, "web") || strings.Contains(name, "browser") {
@@ -78,6 +81,11 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 	empty := map[string]any{}
 	switch e.Name {
 	case "SessionStart":
+		if e.Source == "compact" {
+			if err := r.Store.ExperienceAfterCompact(ctx, r.host(), scope, e.Session); err != nil {
+				return empty, err
+			}
+		}
 		if err := r.Store.HookAdapterReceipt(ctx, r.host(), e.Name, scope, e.Session, e.TurnID); err != nil {
 			return empty, err
 		}
@@ -115,6 +123,12 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		if err != nil {
 			return empty, err
 		} // Run() fails open; never records completion.
+		if len(matches) == 0 && isBusinessTool(e.Tool) {
+			matches, err = r.Store.ObservedBusinessMatches(probe, r.host(), scope, e.Session, e.TurnID, clues)
+			if err != nil {
+				return empty, err
+			}
+		}
 		if len(matches) == 0 {
 			return empty, nil
 		}
@@ -129,8 +143,25 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		}
 		// No case body, counterexample, inferred remedy or route is injected.
 		// A real lookup completes this exact challenge; denial alone never does.
-		reason := fmt.Sprintf("当前代码查询命中经验索引的具体锚点 %q 与条件 %q。先以当前完整上下文和待核实问题调用 %s.memory_experience_lookup(scope=%q, task=当前任务, questions=当前疑问, keywords=[真实业务/符号线索], challenge_id=%q)，再重试。命中不证明本次适用；不要求采用、写回或改路由。", matches[0].Anchor, matches[0].Signal, r.serverName(), scope, challenge.ID)
+		reason := fmt.Sprintf("当前工具操作命中记忆索引的具体锚点 %q 与条件 %q。先结合完整任务和实际疑问调用 %s.memory_experience_lookup(scope=%q, task=当前任务, questions=当前疑问, queries=[宿主构造的业务与机制检索式], challenge_id=%q)，再重试。检索式由你理解当前上下文后生成；命中不是结论、授权或已核实，不要求写回或改路由。", matches[0].Anchor, matches[0].Signal, r.serverName(), scope, challenge.ID)
 		return map[string]any{"decision": "block", "reason": reason}, nil
+	case "PostToolUse":
+		if !isBusinessTool(e.Tool) {
+			return empty, nil
+		}
+		enabled, err := r.Store.ExperienceTrialEnabled(ctx, scope)
+		if err != nil || !enabled {
+			return empty, err
+		}
+		clues := businessClues(e, true)
+		if clues == "" {
+			return empty, nil
+		}
+		probe, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancel()
+		// The source read has already occurred. Observe only; never fabricate a
+		// denial, consume a pause budget, or inject an unsolicited case body.
+		return empty, r.Store.ObserveBusiness(probe, r.host(), scope, e.Session, e.TurnID, clues)
 	}
 	return empty, nil
 }

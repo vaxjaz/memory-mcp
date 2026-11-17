@@ -7,12 +7,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
 
 const ExperienceLookupBudget = 8192
@@ -25,6 +22,8 @@ CREATE TABLE IF NOT EXISTS experience_policy(scope TEXT PRIMARY KEY,enabled INTE
 CREATE TABLE IF NOT EXISTS experience_epochs(host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,generation TEXT NOT NULL,native_turn TEXT NOT NULL,PRIMARY KEY(host,scope,session));
 CREATE TABLE IF NOT EXISTS experience_events(host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,event_id TEXT NOT NULL,generation TEXT NOT NULL,PRIMARY KEY(host,scope,session,event_id));
 CREATE TABLE IF NOT EXISTS experience_challenges(id TEXT PRIMARY KEY,host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,generation TEXT NOT NULL,project TEXT NOT NULL,ids_json TEXT NOT NULL,created_at TEXT NOT NULL,completed INTEGER NOT NULL DEFAULT 0,UNIQUE(host,scope,session,generation));
+CREATE TABLE IF NOT EXISTS business_observations(host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,generation TEXT NOT NULL,matches_json TEXT NOT NULL,PRIMARY KEY(host,scope,session));
+CREATE TABLE IF NOT EXISTS recall_responses(challenge_id TEXT NOT NULL REFERENCES experience_challenges(id) ON DELETE CASCADE,root_id TEXT NOT NULL,entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,PRIMARY KEY(challenge_id,root_id));
 `)
 	return err
 }
@@ -108,10 +107,11 @@ func (s *Store) ExperienceStartTurn(ctx context.Context, host, scope, session, n
 }
 
 type ExperienceMatch struct {
-	ID     string `json:"id"`
-	RootID string `json:"root_id"`
-	Anchor string `json:"anchor"`
-	Signal string `json:"signal"`
+	ID      string   `json:"id"`
+	RootID  string   `json:"root_id"`
+	Anchor  string   `json:"anchor"`
+	Signal  string   `json:"signal"`
+	Objects []string `json:"objects,omitempty"`
 }
 
 func literalExperienceMatch(text, term string) bool {
@@ -145,10 +145,10 @@ func (s *Store) MatchExperiences(ctx context.Context, scope, clues string) ([]Ex
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		x := item.Profile.Experience
+		anchors, signals, prefixes := recognitionFeatures(item)
 		var anchor, signal string
 		score := 0
-		for _, a := range x.Anchors {
+		for _, a := range anchors {
 			if literalExperienceMatch(clues, a) {
 				value := 100 + len(a)
 				if strings.ContainsAny(a, "/\\") {
@@ -160,10 +160,16 @@ func (s *Store) MatchExperiences(ctx context.Context, scope, clues string) ([]Ex
 				}
 			}
 		}
+		for _, p := range prefixes {
+			if identifierPrefixMatch(clues, p) && 100+len(p) > score {
+				anchor = p
+				score = 100 + len(p)
+			}
+		}
 		if anchor == "" {
 			continue
 		}
-		for _, c := range x.Signals {
+		for _, c := range signals {
 			if !strings.EqualFold(c, anchor) && literalExperienceMatch(clues, c) {
 				if signal == "" {
 					signal = c
@@ -173,7 +179,7 @@ func (s *Store) MatchExperiences(ctx context.Context, scope, clues string) ([]Ex
 		}
 		// Two independent observable features, never a domain name alone.
 		if signal != "" {
-			rankedMatches = append(rankedMatches, ranked{ExperienceMatch{item.ID, item.RootID, anchor, signal}, score})
+			rankedMatches = append(rankedMatches, ranked{ExperienceMatch{ID: item.ID, RootID: item.RootID, Anchor: anchor, Signal: signal}, score})
 		}
 	}
 	sort.SliceStable(rankedMatches, func(i, j int) bool { return rankedMatches[i].score > rankedMatches[j].score })
@@ -262,152 +268,23 @@ func (s *Store) ChallengeExperience(ctx context.Context, host, scope, session, n
 }
 
 type ExperienceLookup struct {
-	Scope       string   `json:"scope"`
-	Project     string   `json:"project,omitempty" jsonschema:"Bound current project; a current challenge can supply this exact directory"`
-	Task        string   `json:"task" jsonschema:"Current task reconstructed from visible conversation and project; not just the latest sentence"`
-	Questions   string   `json:"questions" jsonschema:"The current inference or uncertainty you intend to cross-check; no private chain of thought"`
-	Keywords    []string `json:"keywords" jsonschema:"Grounded business/symbol/mechanism terms from current context; literal matching is not semantic proof"`
-	ChallengeID string   `json:"challenge_id,omitempty" jsonschema:"Actual short-lived hook challenge. Never invent; ordinary autonomous lookup needs none."`
+	Queries     []RecallQuery `json:"queries,omitempty" jsonschema:"1-4 host-generated search perspectives; server does lexical retrieval only."`
+	Cursor      string        `json:"cursor,omitempty" jsonschema:"next_cursor for unchanged query/results; otherwise restart."`
+	Limit       int           `json:"limit,omitempty" jsonschema:"1-3 complete items, default 2, within 8 KiB."`
+	Scope       string        `json:"scope"`
+	Project     string        `json:"project,omitempty" jsonschema:"Bound current project; a current challenge can supply this exact directory"`
+	Task        string        `json:"task" jsonschema:"Current task reconstructed from visible conversation and project; not just the latest sentence"`
+	Questions   string        `json:"questions" jsonschema:"The current inference or uncertainty you intend to cross-check; no private chain of thought"`
+	Keywords    []string      `json:"keywords,omitempty" jsonschema:"Compatibility OR search; ignored when queries is present."`
+	ChallengeID string        `json:"challenge_id,omitempty" jsonschema:"Actual short-lived hook challenge. Never invent; ordinary autonomous lookup needs none."`
 }
 type ExperienceLookupResult struct {
+	NextCursor       string           `json:"next_cursor,omitempty"`
+	QueryCount       int              `json:"query_count"`
 	ContentRole      string           `json:"content_role"`
 	Items            []ExperienceItem `json:"items"`
 	HasMore          bool             `json:"has_more"`
 	ChallengeOutcome string           `json:"challenge_outcome,omitempty"`
 	MaintenanceDue   bool             `json:"maintenance_due,omitempty"`
 	Notice           string           `json:"notice"`
-}
-
-func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (ExperienceLookupResult, error) {
-	result := ExperienceLookupResult{ContentRole: "historical_risk_features", Items: []ExperienceItem{},
-		Notice: "Historical failure clues, not current conclusions or authorization. Locations prove only where literal symbols occur. Check current callers/conditions and runtime evidence as needed. No hit does not prove no risk. Do not revise a case merely because a locator misses."}
-	for name, value := range map[string]string{"task": in.Task, "questions": in.Questions} {
-		if strings.TrimSpace(value) == "" || len(value) > 4000 {
-			return result, fmt.Errorf("%s needs 1-4000 bytes", name)
-		}
-		if err := textguard.Check(name, value, false); err != nil {
-			return result, err
-		}
-	}
-	if len(in.Keywords) == 0 {
-		return result, errors.New("ground the query in current project/context keywords")
-	}
-	_, terms, err := normalizeSearchQuery(strings.Join(in.Keywords, " "))
-	if err != nil {
-		return result, err
-	}
-	if len(terms) == 0 {
-		return result, errors.New("query keywords cannot consist only of whitespace")
-	}
-	var generation, host, session, challengeScope, project, created string
-	var challengeMatches []ExperienceMatch
-	challengeActive := false
-	if in.ChallengeID != "" {
-		var data string
-		var completed bool
-		err = s.db.QueryRowContext(ctx, "SELECT host,scope,session,generation,project,ids_json,created_at,completed FROM experience_challenges WHERE id=?", in.ChallengeID).Scan(&host, &challengeScope, &session, &generation, &project, &data, &created, &completed)
-		if err != nil {
-			return result, errors.New("unknown experience challenge; verify service/data_dir, do not copy another session's identifier")
-		}
-		if challengeScope != in.Scope {
-			return result, errors.New("challenge scope mismatch")
-		}
-		if in.Project != "" {
-			if a, er := s.experienceProject(ctx, in.Project, in.Scope); er != nil || a != project {
-				return result, errors.New("challenge project mismatch")
-			}
-		}
-		if err = json.Unmarshal([]byte(data), &challengeMatches); err != nil {
-			return result, err
-		}
-		var current string
-		err = s.db.QueryRowContext(ctx, "SELECT generation FROM experience_epochs WHERE host=? AND scope=? AND session=?", host, in.Scope, session).Scan(&current)
-		at, er := time.Parse(time.RFC3339Nano, created)
-		challengeActive = err == nil && er == nil && generation == current && time.Since(at) <= ExperienceChallengeTTL
-		if !challengeActive {
-			result.ChallengeOutcome = "stale_no_current_turn_release"
-		}
-	}
-	if project == "" {
-		project = in.Project
-	}
-	project, err = s.experienceProject(ctx, project, in.Scope)
-	if err != nil {
-		return result, err
-	}
-	// Reserve all envelope metadata before admitting items. Completing a lookup
-	// must never produce a response larger than the promised context budget.
-	if m, er := s.Maintenance(ctx, in.Scope); er == nil {
-		result.MaintenanceDue = m.Due
-	}
-	if challengeActive {
-		result.ChallengeOutcome = "query_completed_not_applicability_verified"
-	}
-	entries, err := s.Experiences(ctx, in.Scope)
-	if err != nil {
-		return result, err
-	}
-	// Explicit challenge candidates come first, while the host supplies its own
-	// task/question. This avoids an empty/generic query bypassing the actual hit.
-	wanted := map[string]bool{}
-	for _, m := range challengeMatches {
-		wanted[m.RootID] = true
-	}
-	var selected []Entry
-	for _, e := range entries {
-		if wanted[e.RootID] {
-			selected = append(selected, e)
-		}
-	}
-	for _, e := range entries {
-		if wanted[e.RootID] {
-			continue
-		}
-		x := e.Profile.Experience
-		clues := strings.Join(append(append([]string{}, x.Anchors...), x.Signals...), " ")
-		for _, term := range terms {
-			if literalExperienceMatch(clues, term) {
-				selected = append(selected, e)
-				break
-			}
-		}
-	}
-	for _, e := range selected {
-		if len(result.Items) == 2 {
-			result.HasMore = true
-			break
-		}
-		item := ExperienceItem{ID: e.ID, RootID: e.RootID, Title: e.Title, Experience: e.Profile.Experience,
-			Locations: LocateExperience(ctx, project, e.Profile.Experience)}
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		result.Items = append(result.Items, item)
-		body, _ := json.Marshal(result)
-		if len(body) > ExperienceLookupBudget {
-			result.Items = result.Items[:len(result.Items)-1]
-			result.HasMore = true
-			break // Never truncate conditions/evidence to squeeze in an item.
-		}
-	}
-	if len(result.Items) == 0 && len(selected) > 0 {
-		return result, errors.New("experience result exceeds bounded response; compact the record, not its conditions at read time")
-	}
-	if challengeActive {
-		// Recheck the current epoch in the UPDATE. A late result can never release
-		// an operation belonging to a newer user input.
-		update, er := s.db.ExecContext(ctx, `UPDATE experience_challenges SET completed=1 WHERE id=? AND generation=?
-AND julianday(created_at)>=julianday(?)
-AND EXISTS(SELECT 1 FROM experience_epochs e WHERE e.host=experience_challenges.host AND e.scope=experience_challenges.scope AND e.session=experience_challenges.session AND e.generation=experience_challenges.generation)`, in.ChallengeID, generation, time.Now().Add(-ExperienceChallengeTTL).UTC().Format(time.RFC3339Nano))
-		if er != nil {
-			return result, er
-		}
-		n, _ := update.RowsAffected()
-		if n > 0 {
-			result.ChallengeOutcome = "query_completed_not_applicability_verified"
-		} else {
-			result.ChallengeOutcome = "stale_no_current_turn_release"
-		}
-	}
-	return result, nil
 }

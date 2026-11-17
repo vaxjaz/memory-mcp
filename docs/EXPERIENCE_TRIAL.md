@@ -1,21 +1,35 @@
-# Verified experience workflow
+# 0.5.0 host-generated recall
 
-User corrections and autonomous discoveries are candidate triggers, not truth. Investigate from current code, runtime evidence and explicit business agreements before recording. Reuse evidence already gathered on the main task; no background model or asynchronous write is started.
+## Writes
 
-memory_experience_record accepts the bound project/scope, title, anchors/signals, pitfall, observed counterexample, concrete bug impact, applicability/boundary and 1-3 compact evidence locators. No raw transcript, obligation list or prescribed modification destination. Feature JSON <=3000 bytes. Exact equivalent writes deduplicate; stable request_id protects retries; previous_id records material corrections or converts a genuinely verified historical case.
+memory_experience_record retains verified failure features, not conclusions or manuals: actual anchors/signals, challenged inference, counterexample, impact, applicability, boundary and evidence. Essential fields <=240 characters; feature JSON <=3000 bytes. Optional anchor_prefixes explicitly register an evidence-grounded ASCII numbering convention (3-40 characters), never a regex guessed from one sample.
 
-memory_experience_lookup takes project/scope and a task/question/keywords reconstructed from the whole task. A code hook observes literal known search/read/shell arguments only. A specific anchor AND independent condition must match before it requests a real query. No match is silent; unrelated tools and project-rule reads remain available. Its reason carries only matched features and a challenge identifier, not historical conclusions.
+memory_reference_record accepts compact already-confirmed requirement, applicability/boundary, authority, confirmation_reference and evidence, with recognition features. No fabricated counterexample. Changing an agreement needs its authority; indexing an already authorized source does not create a new business rule.
 
-Successful lookup returns at most two complete experiences and current literal code locations in one JSON text body <=8 KiB. Protocol wrapping and host costs are additional. Hash/line changes do not establish causal validity; unresolved symbols do not automatically expire or rewrite experiences. Check callers, conditions and relevant runtime facts.
+Both writes are synchronous and idempotent. The entry, profile and inverted index commit together. indexed=true follows commit; validation/locators do not certify semantic truth. Local source hashes are rechecked; external sources are marked not revalidated.
 
-Each native user input has one interruption budget, not a session-wide or task-wide permit. Denial, bootstrap, historical search/read or failed lookup do not complete it. Late queries cannot release a newer input. A challenge expires after two minutes and fails open without claiming completion. New “continue” inputs can incur a repeated query; a second different risk in the same input may escape this one-pause budget. Measure both duplicates and misses.
+## Queries
 
-The requested project's first setup enables wakeup; explicit --disable-wakeup silences it, --enable-wakeup restores it. Other bindings are preserved. No-match/unbound/disabled paths never activate another reminder or capture workflow. SessionStart announces this direction once; ordinary UserPromptSubmit stores native identifiers only. There is no raw prompt collection, per-turn reminder, generic action gate or Stop continuation.
+memory_experience_lookup requires explicit scope/project (or real challenge), task and questions. The host constructs queries: 1-4 distinct perspectives, each with terms and match=all/any. Up to 16 terms per explicit query, combined <=4096 bytes. Compatibility keywords remains a single OR query. MCP performs no translation/model call.
 
-Cold start is visible through doctor's experience_index. Old text remains available through historical search/read; it is not automatically an intervention rule. Convert only a few real, currently verified cases when warranted. No synthetic cases in the original library.
+The index covers titles and complete recorded features, including counterexamples and exceptions, and preserved historical evidence. Han bigrams support short Chinese terms; ASCII identifiers stay whole. No implicit synonyms, negation interpretation or identifier-prefix inference.
 
-Native matchers avoid starting the probe on memory/Skill/edit/other tools. Shell and read operations still pay startup cost even when later skipped. Prior Windows fixture measurements were about 18ms for ZCode and 300ms for PowerShell-backed adapters; these are not cross-machine guarantees. Hook DB waits/probes are bounded and fail open. Overlarge candidate scans are not used for blocking. Native identity/challenge diagnostics grow over time without retaining raw prompts.
+Field-weighted BM25-style lexical scoring ranks each query; reciprocal-rank fusion combines independent rankings. Exact registered anchors are prioritized and duplicate identical queries do not inflate scores. matched_queries/matched_terms explain lexical hits only. The host evaluates current applicability.
 
-Cleaning uses the existing per-project substantive-write counter, preview, fresh user consent, backups and undo. Maintenance-only approval excerpts are hidden from normal retrieval and never counted as knowledge. Legacy case history and schema_version=3 are retained for audit, not for reintroducing legacy host behavior.
+Default two, maximum three complete items within one JSON text body <=8 KiB. next_cursor makes remaining items explicit; changed queries/corpus invalidate cursors. More than 2000 lexical candidates requires refinement instead of an incomplete silent result. Legacy excerpts are navigation, not confirmed conventions or automatic triggers.
 
-Current Windows paired fixture (same machine, 5 interleaved no-hit probes): previous version median 824.5ms, current version 826.5ms for the PowerShell-backed Codex launcher. This fixed startup-chain cost remains; do not present the older 300ms measurement as a current guarantee.
+## Hooks
+
+PreToolUse observes existing code tools and narrowly named business MCP tools: ticket/order reads and database-query suffixes. A specific anchor/prefix plus independent actual condition must match. Domain names alone do not interrupt.
+
+Selected business PostToolUse only observes bounded source fields. It stores matched IDs and hashes of identifiers with explicitly registered prefixes, never raw text. A subsequent call must contain the same identifier. New input, reported compaction, changed revision and explicit different agent identity cannot reuse the observation. The source read itself is not denied and no unsolicited material is injected.
+
+The existing challenge has one native-input interruption budget. Required candidates must appear in actual generated responses before completion; bounded pages accumulate server-side ID receipts without a model-authored complete statement. This proves response creation, not transport delivery or reading. Errors/two-minute expiry fail open without pretending completion. Pure text, unknown tools/wrappers, absent stable identifiers and unreported pruning remain gaps. A receipt does not prove semantic consumption or current context visibility.
+
+## Costs and schema
+
+No extra model is run by MCP and ordinary inputs have no reminder. Local matching, SQLite, process startup, tool round trips and returned evidence all have costs. Business pre/post can require two launches. Earlier Windows PowerShell measurements on this machine were around 0.8 seconds per launch; do not enable every tool or claim zero cost.
+
+Schema 4 builds derived postings while preserving original entries, revisions and IDs. Migration happens once. Stop old writers and back up the entire library/configuration BEFORE opening it with the new version. Schema-3 rollback requires restoring that backup; mixed versions are unsupported.
+
+Executable replays validate mechanisms, not actual native delivery or model quality. Measure those separately.

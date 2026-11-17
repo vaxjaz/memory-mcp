@@ -399,7 +399,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	args := managedHookArgs(o, name)
 	installedEvents := []string{"SessionStart", "UserPromptSubmit"}
 	if o.ExperienceHooks {
-		installedEvents = append(installedEvents, "PreToolUse")
+		installedEvents = append(installedEvents, "PreToolUse", "PostToolUse")
 	}
 	for _, event := range installedEvents {
 		group := map[string]any{"hooks": []any{map[string]any{"type": "process", "command": o.Binary, "args": args, "enabled": true, "timeoutMs": 10000}}}
@@ -408,6 +408,9 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		}
 		if event == "PreToolUse" {
 			group["matcher"] = experienceToolMatcher
+		}
+		if event == "PostToolUse" {
+			group["matcher"] = businessToolMatcher
 		}
 		existing, _ := events[event].([]any)
 		events[event] = append(existing, group)

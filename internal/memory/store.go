@@ -20,7 +20,7 @@ import (
 	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
 
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // Entry bodies are free text. These fields track provenance, not semantic truth.
 type Entry struct {
@@ -58,6 +58,7 @@ type Link struct {
 }
 
 type Draft struct {
+	referenceValidated         bool
 	experienceValidated        bool
 	experienceKey              string
 	requestFingerprint         string
@@ -230,6 +231,9 @@ PRAGMA user_version=2;`)
 	if err = migrateGovernance(tx); err != nil {
 		return err
 	}
+	if err = migrateRecall(tx); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
@@ -369,7 +373,7 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 		}
 		e.RootID = old.RootID
 	}
-	if d.experienceValidated {
+	if d.experienceValidated || d.referenceValidated {
 		var root string
 		er := tx.QueryRowContext(ctx, "SELECT root_id FROM experience_keys WHERE scope=? AND fingerprint=?", d.Scope, d.experienceKey).Scan(&root)
 		if er == nil {
@@ -380,7 +384,7 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 			if re = loadGovernance(ctx, tx, &old); re != nil {
 				return Entry{}, re
 			}
-			if old.State.State == "active" && !old.NeedsReview && old.Profile != nil && old.Profile.Experience != nil {
+			if old.State.State == "active" && !old.NeedsReview && old.Profile != nil && ((d.experienceValidated && old.Profile.Experience != nil) || (d.referenceValidated && old.Profile.Agreement != nil)) {
 				if previousID != "" && e.RootID != root {
 					return Entry{}, fmt.Errorf("equivalent experience already exists: %s; inspect before merging lineages", old.ID)
 				}
@@ -505,7 +509,7 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 		}
 		e.Profile = d.Profile
 	}
-	if d.experienceValidated {
+	if d.experienceValidated || d.referenceValidated {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM experience_keys WHERE scope=? AND root_id=?", d.Scope, e.RootID); err != nil {
 			return Entry{}, err
 		}
@@ -541,6 +545,9 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 	// The immediate write response must report the same effective management
 	// state/profile as a subsequent read, including unchanged lineage state.
 	if err = loadGovernance(ctx, tx, &e); err != nil {
+		return Entry{}, err
+	}
+	if err = indexRecallEntry(ctx, tx, e); err != nil {
 		return Entry{}, err
 	}
 	if err := tx.Commit(); err != nil {

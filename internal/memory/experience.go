@@ -21,6 +21,7 @@ import (
 // Experience is an observed failure pattern, never a prescribed implementation.
 // Evidence stores locators and concise observations, not chat transcripts/code.
 type Experience struct {
+	AnchorPrefixes []string             `json:"anchor_prefixes,omitempty" jsonschema:"Up to six confirmed ASCII identifier prefixes, 3-40 characters; not guesses or regexes."`
 	Anchors        []string             `json:"anchors" jsonschema:"1-6 real business identifiers, specific symbols or project-relative paths; no generic words such as code/check/Service"`
 	Signals        []string             `json:"signals" jsonschema:"1-6 independently matching operation or condition phrases, grounded in this incident; not synonyms stuffed to increase hits"`
 	Pitfall        string               `json:"pitfall" jsonschema:"The fallible inference that this incident challenged, not a correct destination or instruction"`
@@ -32,12 +33,12 @@ type Experience struct {
 }
 
 type ExperienceEvidence struct {
-	Kind        string `json:"kind" jsonschema:"code, runtime or business; a source kind is not a truth certificate"`
-	Reference   string `json:"reference" jsonschema:"Actual commit, trace/report or explicit business-agreement locator; never fabricate"`
-	Observation string `json:"observation" jsonschema:"Concise verified observation, not raw source text or an unverified causal explanation"`
-	Path        string `json:"path,omitempty" jsonschema:"Code only: project-relative existing file; stays inside the bound project"`
-	Symbol      string `json:"symbol,omitempty" jsonschema:"Code only: actual literal symbol to relocate; location does not establish applicability"`
-	SHA256      string `json:"sha256,omitempty" jsonschema:"Code file hash; computed on write, optional expected hash rejects drift"`
+	Kind        string `json:"kind" jsonschema:"code/runtime/business; host verifies truth."`
+	Reference   string `json:"reference" jsonschema:"Actual commit, trace or confirmed-agreement locator."`
+	Observation string `json:"observation" jsonschema:"Verified observation; no raw source or assumed cause."`
+	Path        string `json:"path,omitempty" jsonschema:"Existing file within bound workspace; required for code."`
+	Symbol      string `json:"symbol,omitempty" jsonschema:"Literal locator, not semantic proof."`
+	SHA256      string `json:"sha256,omitempty" jsonschema:"Optional expected SHA256; rejects local source drift."`
 }
 
 type ExperienceWrite struct {
@@ -50,6 +51,7 @@ type ExperienceWrite struct {
 }
 
 type ExperienceReceipt struct {
+	Indexed    bool   `json:"indexed"`
 	ID         string `json:"id"`
 	RootID     string `json:"root_id"`
 	Reused     bool   `json:"reused"`
@@ -68,11 +70,19 @@ type AnchorLocation struct {
 }
 
 type ExperienceItem struct {
-	ID         string           `json:"id"`
-	RootID     string           `json:"root_id"`
-	Title      string           `json:"title"`
-	Experience *Experience      `json:"experience"`
-	Locations  []AnchorLocation `json:"locations,omitempty"`
+	BodySHA256     string           `json:"body_sha256"`
+	FeatureSHA256  string           `json:"feature_sha256,omitempty"`
+	ID             string           `json:"id"`
+	RootID         string           `json:"root_id"`
+	Title          string           `json:"title"`
+	Experience     *Experience      `json:"experience"`
+	Agreement      *Agreement       `json:"agreement,omitempty"`
+	SourceKind     string           `json:"source_kind,omitempty"`
+	Excerpt        string           `json:"excerpt,omitempty"`
+	NeedsReview    bool             `json:"needs_review,omitempty"`
+	MatchedQueries []int            `json:"matched_queries,omitempty"`
+	MatchedTerms   []string         `json:"matched_terms,omitempty"`
+	Locations      []AnchorLocation `json:"locations,omitempty"`
 }
 
 var genericExperienceAnchor = map[string]bool{
@@ -83,6 +93,9 @@ var genericExperienceAnchor = map[string]bool{
 func validateExperience(x *Experience) error {
 	if x == nil {
 		return errors.New("experience required")
+	}
+	if err := validatePrefixes(x.AnchorPrefixes); err != nil {
+		return err
 	}
 	for name, terms := range map[string][]string{"anchors": x.Anchors, "signals": x.Signals} {
 		if len(terms) < 1 || len(terms) > 6 {
@@ -200,9 +213,11 @@ func experienceKey(x *Experience) string {
 	copyX := *x
 	copyX.Anchors = append([]string(nil), x.Anchors...)
 	copyX.Signals = append([]string(nil), x.Signals...)
+	copyX.AnchorPrefixes = append([]string(nil), x.AnchorPrefixes...)
 	copyX.Evidence = append([]ExperienceEvidence(nil), x.Evidence...)
 	sort.Strings(copyX.Anchors)
 	sort.Strings(copyX.Signals)
+	sort.Strings(copyX.AnchorPrefixes)
 	for i := range copyX.Evidence {
 		copyX.Evidence[i].SHA256 = ""
 		if copyX.Evidence[i].Kind == "code" {
@@ -246,7 +261,7 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 	}
 	for i := range in.Experience.Evidence {
 		e := &in.Experience.Evidence[i]
-		if e.Kind != "code" {
+		if e.Kind != "code" && e.Path == "" {
 			continue
 		}
 		path, er := experienceFile(project, e.Path)
@@ -283,7 +298,7 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 }
 
 func experienceReceipt(e Entry, reused bool) ExperienceReceipt {
-	return ExperienceReceipt{ID: e.ID, RootID: e.RootID, Reused: reused, BodySHA256: e.BodySHA256,
+	return ExperienceReceipt{ID: e.ID, RootID: e.RootID, Reused: reused, BodySHA256: e.BodySHA256, Indexed: true,
 		Notice: "Saved failure features, not an instruction or prescribed destination. Code hashes/locators check mechanics; semantic evidence remains the host's responsibility."}
 }
 
@@ -294,13 +309,13 @@ func (s *Store) Experiences(ctx context.Context, scope string) ([]Entry, error) 
 }
 
 func (s *Store) experienceCandidates(ctx context.Context, scope, clues string) ([]Entry, error) {
-	query := "SELECT " + columns + " FROM entries JOIN entry_profiles p ON p.entry_id=entries.id WHERE current=1 AND needs_review=0 AND kind='case' AND scope=? AND json_type(p.profile_json,'$.experience')='object'"
+	query := "SELECT " + columns + " FROM entries JOIN entry_profiles p ON p.entry_id=entries.id WHERE current=1 AND needs_review=0 AND scope=? AND (json_type(p.profile_json,'$.experience')='object' OR json_type(p.profile_json,'$.agreement')='object')"
 	args := []any{scope}
 	if clues != "" {
 		// Cheap SQL prefilter, followed by exact identifier/independent-signal
 		// matching in Go. Ordinary no-hit probes do not materialize every case.
-		query += " AND EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.experience.anchors') anchor WHERE instr(lower(replace(?,char(92),'/')),lower(replace(anchor.value,char(92),'/')))>0)"
-		args = append(args, clues)
+		query += " AND (EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.experience.anchors') anchor WHERE instr(lower(replace(?,char(92),'/')),lower(replace(anchor.value,char(92),'/')))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.experience.anchor_prefixes') anchor WHERE instr(lower(?),lower(anchor.value))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.agreement.anchors') anchor WHERE instr(lower(replace(?,char(92),'/')),lower(replace(anchor.value,char(92),'/')))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.agreement.anchor_prefixes') anchor WHERE instr(lower(?),lower(anchor.value))>0))"
+		args = append(args, clues, clues, clues, clues)
 	}
 	query += " ORDER BY created_at DESC,id DESC LIMIT 2001"
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -329,7 +344,7 @@ func (s *Store) experienceCandidates(ctx context.Context, scope, clues string) (
 		if err = loadGovernance(ctx, s.db, &e); err != nil {
 			return nil, err
 		}
-		if e.NeedsReview || e.State.State != "active" || e.Profile == nil || e.Profile.Experience == nil {
+		if e.NeedsReview || e.State.State != "active" || e.Profile == nil || (e.Profile.Experience == nil && e.Profile.Agreement == nil) {
 			continue
 		}
 		if e.Profile.ExpiresAt != "" {
@@ -338,8 +353,15 @@ func (s *Store) experienceCandidates(ctx context.Context, scope, clues string) (
 				continue
 			}
 		}
-		if err = validateExperience(e.Profile.Experience); err != nil {
-			continue
+		if e.Profile.Experience != nil {
+			if err = validateExperience(e.Profile.Experience); err != nil {
+				continue
+			}
+		}
+		if e.Profile.Agreement != nil {
+			if err = validateAgreement(e.Profile.Agreement); err != nil {
+				continue
+			}
 		}
 		out = append(out, e)
 	}
@@ -353,7 +375,7 @@ func LocateExperience(ctx context.Context, project string, x *Experience) []Anch
 			break
 		}
 		item := AnchorLocation{Reference: e.Reference, Path: e.Path, Symbol: e.Symbol, Status: "external_reference_not_revalidated"}
-		if e.Kind != "code" {
+		if e.Kind != "code" && e.Path == "" {
 			out = append(out, item)
 			continue
 		}

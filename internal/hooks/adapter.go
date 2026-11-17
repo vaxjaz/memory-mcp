@@ -65,7 +65,7 @@ func (a Adapter) Decode(raw []byte) (Event, error) {
 		return e, err
 	}
 	e.normalize()
-	if e.Name != "SessionStart" && e.Name != "UserPromptSubmit" && e.Name != "PreToolUse" && e.Name != "Stop" {
+	if e.Name != "SessionStart" && e.Name != "UserPromptSubmit" && e.Name != "PreToolUse" && e.Name != "PostToolUse" && e.Name != "Stop" {
 		return e, nil
 	}
 	if strings.TrimSpace(e.CWD) == "" || strings.TrimSpace(e.Session) == "" {

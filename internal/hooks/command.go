@@ -189,7 +189,16 @@ func Run(ctx context.Context, args []string) error {
 			}
 			r["wakeup_enabled"] = trial
 			items, indexErr := store.Experiences(ctx, *scope)
-			index := map[string]any{"available": indexErr == nil, "eligible_cases": len(items), "cold_start": indexErr == nil && len(items) == 0}
+			caseCount, referenceCount := 0, 0
+			for _, item := range items {
+				if item.Profile.Experience != nil {
+					caseCount++
+				}
+				if item.Profile.Agreement != nil {
+					referenceCount++
+				}
+			}
+			index := map[string]any{"available": indexErr == nil, "eligible_cases": caseCount, "eligible_references": referenceCount, "eligible_total": len(items), "cold_start": indexErr == nil && len(items) == 0}
 			if indexErr != nil {
 				index["error"] = indexErr.Error()
 			}

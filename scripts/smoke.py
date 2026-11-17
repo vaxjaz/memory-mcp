@@ -37,8 +37,8 @@ def main():
   h=Host(binary,str(Path(tmp)/"data"))
   try:
    tools=h.request("tools/list",{})["tools"];names={x["name"] for x in tools}
-   assert names=={"memory_bootstrap","memory_experience_record","memory_experience_lookup","memory_search","memory_read","memory_cleanup"},names
-   boot=h.tool("memory_bootstrap",{});assert boot["workflow"]=="verified_experience" and boot["integration_protocol"]=="4"
+   assert names=={"memory_bootstrap","memory_experience_record","memory_reference_record","memory_experience_lookup","memory_search","memory_read","memory_cleanup"},names
+   boot=h.tool("memory_bootstrap",{});assert boot["workflow"]=="verified_experience" and boot["integration_protocol"]=="5"
    assert not any("mode" in f or "reminder" in f or "checkpoint" in f for f in boot["features"])
    guide=boot["guide"].lower();assert "a native userpromptsubmit hook supplies a short reminder" not in guide
    page=h.tool("memory_search",{"scope":"project:fixture","query":""});assert not page["results"]
@@ -50,5 +50,5 @@ def main():
   command=[binary,"serve",flag]+(["assist"] if flag=="--mode" else [])
   p=subprocess.run(command,capture_output=True,text=True,timeout=10)
   assert p.returncode!=0,(flag,p.stdout,p.stderr)
- print("PASS: exact six-tool catalog, old tools/flags rejected, single workflow bootstrap and historical access")
+ print("PASS: exact seven-tool catalog, old tools/flags rejected, single workflow bootstrap and historical access")
 if __name__=="__main__":main()

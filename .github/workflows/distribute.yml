@@ -85,6 +85,9 @@ jobs:
           binary=$(find "$RUNNER_TEMP/memory-mcp-check" -type f -name memory-mcp -print -quit)
           python3 tooling/scripts/smoke.py "$binary" --expected-version "$BUILD_VERSION"
           python3 tooling/scripts/check_experience_trial.py "$binary" --if-supported
+          if [ -f source/scripts/check_host_recall.py ]; then
+            python3 source/scripts/check_host_recall.py "$binary"
+          fi
 
       - name: Save downloadable build artifacts
         uses: actions/upload-artifact@v4

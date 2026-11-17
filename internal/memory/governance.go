@@ -17,6 +17,7 @@ import (
 
 // Profiles are navigation and admission metadata, not an ontology or proof of truth.
 type Profile struct {
+	Agreement     *Agreement  `json:"agreement,omitempty"`
 	Experience    *Experience `json:"experience,omitempty" jsonschema:"Compact verified failure features. Write through memory_experience_record, not the legacy free-text record API."`
 	Class         string      `json:"class" jsonschema:"long_term or temporary; task progress must not become permanent preference"`
 	FutureUse     string      `json:"future_use" jsonschema:"A concrete future situation and the decision/action this information changes"`
@@ -33,6 +34,14 @@ func validateProfile(p *Profile) error {
 	}
 	if p.Experience != nil {
 		if err := validateExperience(p.Experience); err != nil {
+			return err
+		}
+	}
+	if p.Agreement != nil {
+		if p.Experience != nil {
+			return errors.New("agreement and experience are distinct source identities")
+		}
+		if err := validateAgreement(p.Agreement); err != nil {
 			return err
 		}
 	}
@@ -72,6 +81,9 @@ func validateProfile(p *Profile) error {
 // Enforced at the MCP boundary. Existing historical material can still be read
 // and migrated without inventing retrospective admission reasons.
 func ValidateAdmission(d Draft) error {
+	if d.Profile != nil && d.Profile.Agreement != nil && !d.referenceValidated {
+		return errors.New("agreement references require memory_reference_record and an existing explicit authority source")
+	}
 	if d.Profile != nil && d.Profile.Experience != nil && !d.experienceValidated {
 		return errors.New("compact experiences require memory_experience_record to validate scoped evidence and deduplication")
 	}
