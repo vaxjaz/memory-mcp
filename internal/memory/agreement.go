@@ -20,9 +20,9 @@ import (
 // A compact pointer to an existing, explicitly confirmed agreement. It is not
 // manufactured failure evidence, a document manual, or new operational authority.
 type Agreement struct {
-	Anchors               []string             `json:"anchors" jsonschema:"1-6 actual identifiers, symbols or paths."`
+	Anchors               []string             `json:"anchors" jsonschema:"1-12 verified direct/indirect identifiers, symbols or paths; retain relationship evidence."`
 	AnchorPrefixes        []string             `json:"anchor_prefixes,omitempty" jsonschema:"Confirmed ASCII identifier prefixes, not guesses or regexes."`
-	Signals               []string             `json:"signals" jsonschema:"1-6 independent observable conditions."`
+	Signals               []string             `json:"signals" jsonschema:"1-16 local human expressions/abbreviations; case and whitespace are automatic."`
 	Requirement           string               `json:"requirement" jsonschema:"Compact already-confirmed agreement; not a manual or new rule."`
 	Applicability         string               `json:"applicability" jsonschema:"Actual scope, conditions and environment."`
 	Boundary              string               `json:"boundary" jsonschema:"Exceptions and unknowns; retrieval grants no permission."`
@@ -70,13 +70,20 @@ func validateAgreement(a *Agreement) error {
 	if err := validatePrefixes(a.AnchorPrefixes); err != nil {
 		return err
 	}
-	for _, terms := range [][]string{a.Anchors, a.Signals} {
-		if len(terms) < 1 || len(terms) > 6 {
-			return errors.New("agreement anchors/signals need 1-6 specific grounded features")
+	for name, terms := range map[string][]string{"anchors": a.Anchors, "signals": a.Signals} {
+		limit := 12
+		if name == "signals" {
+			limit = 16
+		}
+		if len(terms) < 1 || len(terms) > limit {
+			return fmt.Errorf("agreement.%s needs 1-%d specific grounded features", name, limit)
 		}
 		seen := map[string]bool{}
 		for _, v := range terms {
 			k := strings.ToLower(strings.TrimSpace(v))
+			if name == "signals" {
+				k = humanSignalKey(v)
+			}
 			if k == "" || utf8.RuneCountInString(v) < 2 || utf8.RuneCountInString(v) > 80 || genericExperienceAnchor[k] || seen[k] {
 				return errors.New("invalid, generic or duplicate agreement feature")
 			}
@@ -111,6 +118,8 @@ func validateAgreement(a *Agreement) error {
 
 func (s *Store) RecordAgreement(ctx context.Context, in AgreementWrite) (ExperienceReceipt, error) {
 	var zero ExperienceReceipt
+	original, _ := json.Marshal(in)
+	in.Agreement.Signals = uniqueHumanSignals(in.Agreement.Signals)
 	if err := validateAgreement(&in.Agreement); err != nil {
 		return zero, err
 	}
@@ -118,7 +127,6 @@ func (s *Store) RecordAgreement(ctx context.Context, in AgreementWrite) (Experie
 	if err != nil {
 		return zero, err
 	}
-	original, _ := json.Marshal(in)
 	fingerprint := "agreement-v1:" + digestText(string(original))
 	if in.RequestID != "" {
 		var fp, id string

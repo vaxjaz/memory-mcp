@@ -70,6 +70,7 @@ func TestExperienceHookSelectiveWakeupAndNoTranscript(t *testing.T) {
 	if err != nil || len(lookup.Items) != 1 {
 		t.Fatal(lookup, err)
 	}
+	observeLookup(t, s, r, p, "session", "call-lookup", token[1], lookup)
 	if len(handle(t, r, e)) != 0 {
 		t.Fatal("actual lookup not recognized")
 	}

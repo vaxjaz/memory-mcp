@@ -33,6 +33,7 @@ def main():
                          request_id="fixture-experience", experience=dict(
                              anchors=["ObjectType"], anchor_prefixes=["OBJ"],
                              signals=["取消"],
+                             cues=[dict(cue_id="cancellation",label="状态约束",text="合成取消实验中本地状态未覆盖关联影响限制。",evidence_refs=["fixture:runtime"],entrances=[dict(kind="business_signal",value="取消 OBJ-001")])],
                              pitfall="An isolated task assumes a local status represents every condition",
                              counterexample="Synthetic observation: 取消受状态约束与关联影响限制",
                              impact="An isolated state transition may miss a required condition",
@@ -107,12 +108,15 @@ def main():
             assert blocked["hookSpecificOutput"]["permissionDecision"] == "deny", blocked
             import re
             challenge = re.search(r'challenge_id="([a-f0-9]{32})"', blocked["reason"]).group(1)
-            resolved = host.tool("memory_experience_lookup", dict(
-                scope=scope, task="Current synthetic cancellation investigation",
+            lookup_args = dict(scope=scope, task="Current synthetic cancellation investigation",
                 questions="Compare source conditions against actual evidence",
-                queries=[dict(terms=["状态约束"])], challenge_id=challenge))
-            assert resolved["challenge_outcome"] == "query_completed_not_applicability_verified"
+                queries=[dict(terms=["状态约束"])], challenge_id=challenge)
+            lookup_name="mcp__decision_memory__memory_experience_lookup"
+            assert hook("PreToolUse",tool_name=lookup_name,tool_use_id="native-business-lookup",tool_input=lookup_args)=={}
+            resolved = host.tool("memory_experience_lookup",lookup_args)
+            assert resolved["challenge_outcome"] == "response_generated"
             assert {x["id"] for x in resolved["items"]} == {saved["id"], agreement["id"]}
+            assert hook("PostToolUse",tool_name=lookup_name,tool_use_id="native-business-lookup",tool_response={"content":[{"type":"text","text":json.dumps(resolved)}]})=={}
             assert hook("PreToolUse", tool_name="mcp__mysql__query",
                         tool_input={"sql":"select status from t where object_no='OBJ-001'"}) == {}
             assert not host.tool("memory_search", dict(scope=scope, query="PRIVATE_PROMPT_SENTINEL PRIVATE_RESULT_SENTINEL",

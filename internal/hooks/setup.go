@@ -407,10 +407,10 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 			group["hooks"] = []any{map[string]any{"type": "command", "command": nativeCommand(o, name), "timeout": 10}}
 		}
 		if event == "PreToolUse" {
-			group["matcher"] = experienceToolMatcher
+			group["matcher"] = "(" + experienceToolMatcher + ")|(" + lookupToolMatcher(name) + ")"
 		}
 		if event == "PostToolUse" {
-			group["matcher"] = businessToolMatcher
+			group["matcher"] = "(" + businessToolMatcher + ")|(" + lookupToolMatcher(name) + ")"
 		}
 		existing, _ := events[event].([]any)
 		events[event] = append(existing, group)

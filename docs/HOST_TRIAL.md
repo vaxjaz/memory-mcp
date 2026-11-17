@@ -1,13 +1,11 @@
-# Real-host acceptance: 0.5.0-host-recall.1
+# Native acceptance
 
-Confirm version/source commit, seven tools, original data/bindings/disabled-policy preservation and actual managed hooks. Executable replay is not native delivery or proof of model use.
+See [DELIVERY_ACCEPTANCE](DELIVERY_ACCEPTANCE.md) for this implementation's A01-A43 evidence and honest coverage boundaries. Use disposable libraries for all invented scenarios; never insert fixture experience into the original library.
 
-Isolated regressions cover full-feature search, multi-query fusion/deduplication, paging/snapshot changes, atomic index-write failure, explicit agreement identity, source drift, legacy search without activation, code challenges and same-object business observation. Check different objects, new inputs, explicit agent identities, compaction, failures and expiry. No removed mode, prepare/complete, raw capture or Stop continuation.
+Check actual version/source commit, seven tools, original history/bindings/disabled-policy preservation, exact service matcher and native hooks. Separate generated results, observed native success, model-visible request material and autonomous reasoning quality. Replays only certify mechanisms.
 
-Native/model trials use natural requests without telling the agent to query memory. Test equivalent wording, negation, different actions on the same object and changed conditions. Include unrelated requests as negative controls. The host judges semantics; lexical matches do not certify them.
+Native transport trial scripts/check_native_delivery.py runs the real Codex CLI with a deterministic local Responses endpoint and a restricted read-only fixture MCP. It inspects only synthetic requests and persists aggregate flags/counts/bytes. It neither reads real transcripts nor measures token usage/model reasoning. Native client version, total wall time and failure scenarios must be reported. Test continue, explicit compact, distinct agent identity, failure and late-result isolation separately.
 
-Proposed initial budgets (not measured guarantees): <=1% false pauses among unrelated requests and >=95% of forced lookups independently judged worth checking. Report sample sizes/denominators, missed recall, duplicate queries, real decision changes, total token delta and complete-task latency including model round trips. Invocation count is not value.
+For autonomous model trials use natural requests with no instruction to query memory. Include equivalent wording, negation, same object/different action, changed conditions and unrelated controls. Record sample sizes, misses, false interruptions, real decision changes and complete-task time/token delta; invocation count alone is not value. Judging inapplicable/already repaired/no current problem must allow direct continuation with no write or refusal registration.
 
-Known gaps: only listed tool names/fields are observed; business pre/post may require two launches. Pure text is not gated. Missing subagent identity/hooks and unreported pruning remain unverified. Receipts do not establish actual context visibility. Explicitly bind worktrees to a stable shared scope; resolve sources inside the actual current workspace. No automatic global fallback.
-
-Use disposable libraries for all manufactured scenarios. Schema-3 rollback restores a pre-upgrade backup. Never test synthetic writes directly in the original library.
+Observe supported narrow names and fields only. No automatic global fallback, whole-class propagation, Stop continuation or raw capture. Missing native agent/call IDs and unreported pruning must remain explicit limits.

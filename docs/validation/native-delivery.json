@@ -1,0 +1,288 @@
+{
+  "native-success": {
+    "requests": 6,
+    "stage": 6,
+    "checks": [
+      {
+        "stage": 0,
+        "operation": "A",
+        "native_challenge_seen": false,
+        "body_seen": false,
+        "cue_seen": false
+      },
+      {
+        "stage": 1,
+        "operation": "lookup",
+        "native_challenge_seen": true,
+        "body_seen": false,
+        "cue_seen": false
+      },
+      {
+        "stage": 2,
+        "operation": "repeat_A",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": false
+      },
+      {
+        "stage": 3,
+        "operation": "B",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": false
+      },
+      {
+        "stage": 4,
+        "operation": "repeat_B",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": true
+      },
+      {
+        "stage": 5,
+        "operation": "done",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": true
+      }
+    ],
+    "body_seen": true,
+    "cue_seen": true,
+    "material_bytes_by_stage": [
+      0,
+      479,
+      2244,
+      2244,
+      2542,
+      2542
+    ],
+    "block_count": 1,
+    "body_result_count": 1,
+    "file_results": 3,
+    "cue_context_count": 1,
+    "cue_context_bytes": 298,
+    "lookup_result_bytes": 1765,
+    "elapsed_seconds": 10.656,
+    "exit_code": 0,
+    "native_body_receipts": 1,
+    "generated_receipts": 1,
+    "faulted_challenges": 0,
+    "native_cue_records": 2,
+    "scenario": "success",
+    "repeat_A_added_memory_bytes": 0,
+    "repeat_B_added_memory_bytes": 0,
+    "native_transport_pass": true
+  },
+  "native-iserror": {
+    "requests": 4,
+    "stage": 4,
+    "checks": [
+      {
+        "stage": 0,
+        "operation": "A",
+        "native_challenge_seen": false,
+        "body_seen": false,
+        "cue_seen": false
+      },
+      {
+        "stage": 1,
+        "operation": "lookup",
+        "native_challenge_seen": true,
+        "body_seen": false,
+        "cue_seen": false
+      },
+      {
+        "stage": 2,
+        "operation": "repeat_A",
+        "native_challenge_seen": true,
+        "body_seen": false,
+        "cue_seen": false
+      },
+      {
+        "stage": 3,
+        "operation": "done",
+        "native_challenge_seen": true,
+        "body_seen": false,
+        "cue_seen": false
+      }
+    ],
+    "body_seen": false,
+    "cue_seen": false,
+    "material_bytes_by_stage": [
+      0,
+      479,
+      479,
+      958
+    ],
+    "block_count": 2,
+    "body_result_count": 0,
+    "file_results": 0,
+    "cue_context_count": 0,
+    "cue_context_bytes": 0,
+    "lookup_result_bytes": 0,
+    "elapsed_seconds": 9.141,
+    "exit_code": 0,
+    "native_body_receipts": 0,
+    "generated_receipts": 1,
+    "faulted_challenges": 0,
+    "native_cue_records": 0,
+    "scenario": "iserror",
+    "repeat_A_added_memory_bytes": 479,
+    "repeat_B_added_memory_bytes": null,
+    "native_transport_pass": true,
+    "native_failure_event_observed": false,
+    "failure_boundary": "No false delivery credit. This Codex build emits no matching failure event; the technical deadline, not immediate event release, is the fallback."
+  },
+  "native-lifecycle": {
+    "requests": 12,
+    "stage": 12,
+    "checks": [
+      {
+        "stage": 0,
+        "operation": "A",
+        "native_challenge_seen": false,
+        "body_seen": false,
+        "cue_seen": false
+      },
+      {
+        "stage": 1,
+        "operation": "lookup",
+        "native_challenge_seen": true,
+        "body_seen": false,
+        "cue_seen": false
+      },
+      {
+        "stage": 2,
+        "operation": "repeat_A",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": false
+      },
+      {
+        "stage": 3,
+        "operation": "B",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": false
+      },
+      {
+        "stage": 4,
+        "operation": "repeat_B",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": true
+      },
+      {
+        "stage": 5,
+        "operation": "done",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": true
+      },
+      {
+        "stage": 6,
+        "operation": "continued_A",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": true
+      },
+      {
+        "stage": 7,
+        "operation": "done",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": true
+      },
+      {
+        "stage": 8,
+        "operation": "post_compact_A",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": true
+      },
+      {
+        "stage": 9,
+        "operation": "post_compact_lookup",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": true
+      },
+      {
+        "stage": 10,
+        "operation": "post_compact_retry",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": true
+      },
+      {
+        "stage": 11,
+        "operation": "done",
+        "native_challenge_seen": true,
+        "body_seen": true,
+        "cue_seen": true
+      }
+    ],
+    "body_seen": true,
+    "cue_seen": true,
+    "material_bytes_by_stage": [
+      0,
+      479,
+      2244,
+      2244,
+      2542,
+      2542,
+      2542,
+      2542,
+      0,
+      479,
+      2244,
+      2244
+    ],
+    "isolated_hook_trust": [
+      "trusted",
+      "trusted",
+      "trusted",
+      "trusted"
+    ],
+    "block_count": 1,
+    "body_result_count": 1,
+    "file_results": 1,
+    "cue_context_count": 0,
+    "cue_context_bytes": 0,
+    "lookup_result_bytes": 1765,
+    "initial_stage": 6,
+    "continued_stage": 8,
+    "continued_block_count": 1,
+    "compacting": false,
+    "compaction_model_requests": 1,
+    "native_compact_generation_changed": true,
+    "appserver_notification_counts": {
+      "hook/started": 16,
+      "hook/completed": 16,
+      "account/rateLimits/updated": 15,
+      "warning": 3,
+      "item/agentMessage/delta": 3,
+      "item/started": 14,
+      "turn/completed": 4,
+      "thread/tokenUsage/updated": 15,
+      "mcpServer/startupStatus/updated": 4,
+      "thread/started": 1,
+      "remoteControl/status/changed": 1,
+      "turn/started": 4,
+      "thread/status/changed": 8,
+      "item/completed": 14
+    },
+    "elapsed_seconds": 13.375,
+    "exit_code": 0,
+    "native_body_receipts": 2,
+    "generated_receipts": 2,
+    "faulted_challenges": 0,
+    "native_cue_records": 3,
+    "scenario": "lifecycle",
+    "repeat_A_added_memory_bytes": 0,
+    "repeat_B_added_memory_bytes": 0,
+    "native_transport_pass": true
+  },
+  "host": "Windows Codex CLI/app-server 0.169.0-alpha.11.1 (desktop 26.1111.2228.0)",
+  "meaning": "Actual native transport with deterministic local Responses fixture; not autonomous model quality or token measurements."
+}

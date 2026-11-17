@@ -12,19 +12,32 @@ import (
 // An observed compaction invalidates bookkeeping; it does not claim that the
 // host exposes the actual model context or that all pruning emits this event.
 func (s *Store) ExperienceAfterCompact(ctx context.Context, host, scope, session string) error {
+	return s.ExperienceContextReset(ctx, host, scope, session, "")
+}
+func (s *Store) ExperienceContextReset(ctx context.Context, host, scope, session, eventID string) error {
 	generation := experienceNonce()
 	if generation == "" {
-		return errors.New("cannot reset compacted input")
+		return errors.New("cannot create context epoch")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
+	if eventID != "" {
+		result, e := tx.ExecContext(ctx, "INSERT OR IGNORE INTO experience_context_events VALUES(?,?,?,?)", host, scope, session, eventID)
+		if e != nil {
+			return e
+		}
+		n, _ := result.RowsAffected()
+		if n == 0 {
+			return tx.Commit()
+		}
+	}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM business_observations WHERE host=? AND scope=? AND session=?", host, scope, session); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, "UPDATE experience_epochs SET generation=? WHERE host=? AND scope=? AND session=?", generation, host, scope, session); err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT INTO experience_epochs VALUES(?,?,?,?,?) ON CONFLICT(host,scope,session)DO UPDATE SET generation=excluded.generation", host, scope, session, generation, ""); err != nil {
 		return err
 	}
 	return tx.Commit()

@@ -51,9 +51,10 @@ func TestBusinessResultObservationWakesOnlySameObjectAndInput(t *testing.T) {
 		t.Fatal(reason)
 	}
 	lookup, err := s.LookupExperience(testCtx, memory.ExperienceLookup{Scope: "project:demo", Task: "核对当前取消要求", Questions: "当前业务约定是否适用", Queries: []memory.RecallQuery{{Terms: []string{"WXN", "取消"}}}, ChallengeID: token[1]})
-	if err != nil || len(lookup.Items) != 1 || lookup.Items[0].ID != saved.ID || lookup.ChallengeOutcome != "query_completed_not_applicability_verified" {
+	if err != nil || len(lookup.Items) != 1 || lookup.Items[0].ID != saved.ID || lookup.ChallengeOutcome != "response_generated" {
 		t.Fatal(lookup, err)
 	}
+	observeLookup(t, s, r, p, "business-session", "business-lookup", token[1], lookup)
 	if out := handle(t, r, query); len(out) != 0 {
 		t.Fatal("lookup was not recognized", out)
 	}
@@ -122,7 +123,7 @@ func TestCompactionAndExplicitChildIdentityDoNotReuseParentRead(t *testing.T) {
 	}
 	child := query
 	child.AgentID = "isolated-child"
-	if out := handle(t, r, child); len(out) != 0 {
-		t.Fatal("parent input/permit reused by child lacking own epoch", out)
+	if out := handle(t, r, child); out["decision"] != "block" {
+		t.Fatal("new child did not get its own first delivery", out)
 	}
 }

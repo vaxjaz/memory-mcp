@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -81,15 +82,18 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 	empty := map[string]any{}
 	switch e.Name {
 	case "SessionStart":
-		if e.Source == "compact" {
-			if err := r.Store.ExperienceAfterCompact(ctx, r.host(), scope, e.Session); err != nil {
+		if err := r.Store.ExperienceEnsureContext(ctx, r.host(), scope, e.Session); err != nil {
+			return empty, err
+		}
+		if e.Source == "compact" || e.Source == "clear" {
+			if err := r.Store.ExperienceContextReset(ctx, r.host(), scope, e.Session, e.EventID); err != nil {
 				return empty, err
 			}
 		}
 		if err := r.Store.HookAdapterReceipt(ctx, r.host(), e.Name, scope, e.Session, e.TurnID); err != nil {
 			return empty, err
 		}
-		return contextOutput(e.Name, fmt.Sprintf("记忆经验；scope=%s；服务=%s。真实纠偏或自主发现经证据核实后，用 memory_experience_record 同步保存紧凑风险特征；可自主 memory_experience_lookup。当前规范先行，历史经验只提出待验证疑点。代码工具明确命中索引时才提示一次主动查询；无匹配静默。无原文采集、每轮提醒、异步写入或 Stop 整理。", scope, r.serverName())), nil
+		return contextOutput(e.Name, fmt.Sprintf("记忆经验；scope=%s；服务=%s。真实纠偏或自主发现经证据核实后，用 memory_experience_record 同步保存紧凑风险特征；可自主 memory_experience_lookup。当前规范先行，历史经验只提出待验证疑点。工具明确命中索引且正文未交付时主动查询；正文交付后仅新关联给短反例，同关联静默。无原文采集、每轮提醒、异步写入或 Stop 整理。", scope, r.serverName())), nil
 	case "UserPromptSubmit":
 		if err := r.Store.ExperienceStartTurn(ctx, r.host(), scope, e.Session, e.TurnID, e.EventID); err != nil {
 			return empty, err
@@ -111,6 +115,17 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		}
 		if !enabled {
 			return empty, nil
+		}
+		if err := r.Store.ExperienceEnsureContext(ctx, r.host(), scope, e.Session); err != nil {
+			return empty, err
+		}
+		if r.isLookup(e.Tool) {
+			challenge, _ := e.Input["challenge_id"].(string)
+			if provided, _ := e.Input["scope"].(string); provided != scope {
+				return empty, nil
+			}
+			err := r.Store.BeginExperienceLookup(ctx, r.host(), scope, e.Session, e.CWD, e.ToolUseID, e.Tool, challenge)
+			return empty, err // fail-open; no context and never an experience gate
 		}
 		clues := experienceClues(e)
 		if clues == "" {
@@ -138,14 +153,30 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		}
 		info, _ := json.Marshal(map[string]any{"candidate_ids": matches, "outcome": challenge.Outcome, "probe_ms": time.Since(start).Milliseconds()})
 		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "experience_probe", string(info))
+		if challenge.Context != "" {
+			out := contextOutput(e.Name, challenge.Context)
+			out["_cue_emission"] = challenge.EmissionID
+			return out, nil
+		}
 		if challenge.ID == "" {
 			return empty, nil
 		}
-		// No case body, counterexample, inferred remedy or route is injected.
-		// A real lookup completes this exact challenge; denial alone never does.
-		reason := fmt.Sprintf("当前工具操作命中记忆索引的具体锚点 %q 与条件 %q。先结合完整任务和实际疑问调用 %s.memory_experience_lookup(scope=%q, task=当前任务, questions=当前疑问, queries=[宿主构造的业务与机制检索式], challenge_id=%q)，再重试。检索式由你理解当前上下文后生成；命中不是结论、授权或已核实，不要求写回或改路由。", matches[0].Anchor, matches[0].Signal, r.serverName(), scope, challenge.ID)
+		reason := fmt.Sprintf("当前操作命中经验入口。请结合完整任务和当前疑问调用 %s.memory_experience_lookup(scope=%q, task=当前任务, questions=当前疑问, queries=自主检索式, challenge_id=%q)，再重试。", r.serverName(), scope, challenge.ID)
 		return map[string]any{"decision": "block", "reason": reason}, nil
+
 	case "PostToolUse":
+		if r.isLookup(e.Tool) {
+			result, err := lookupResult(e)
+			if err != nil {
+				_ = r.Store.FailExperienceLookup(ctx, r.host(), scope, e.Session, e.ToolUseID)
+				return empty, err
+			}
+			err = r.Store.ObserveExperienceLookup(ctx, r.host(), scope, e.Session, e.ToolUseID, e.Tool, result)
+			if err != nil {
+				_ = r.Store.FailExperienceLookup(ctx, r.host(), scope, e.Session, e.ToolUseID)
+			}
+			return empty, err
+		}
 		if !isBusinessTool(e.Tool) {
 			return empty, nil
 		}
@@ -160,8 +191,19 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		probe, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 		defer cancel()
 		// The source read has already occurred. Observe only; never fabricate a
-		// denial, consume a pause budget, or inject an unsolicited case body.
+		// denial, credit delivery, or inject an unsolicited case body.
 		return empty, r.Store.ObserveBusiness(probe, r.host(), scope, e.Session, e.TurnID, clues)
 	}
 	return empty, nil
+}
+
+// Only this configured service's lookup gets receipt hooks. Host canonical
+// names may normalize '-' to '_'; neither pattern matches arbitrary MCP calls.
+func lookupToolMatcher(name string) string {
+	escaped := regexp.QuoteMeta(name)
+	normalized := regexp.QuoteMeta(strings.ReplaceAll(name, "-", "_"))
+	return "^mcp__(" + escaped + "|" + normalized + ")__memory_experience_lookup$"
+}
+func (r Runtime) isLookup(tool string) bool {
+	return regexp.MustCompile(lookupToolMatcher(r.serverName())).MatchString(tool)
 }

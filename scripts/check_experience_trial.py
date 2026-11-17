@@ -75,7 +75,7 @@ def main():
                 db.commit()
             matcher = events["PreToolUse"][0]["matcher"]
             assert re.search(matcher, "Grep") and re.search(matcher, "run_in_terminal")
-            assert not re.search(matcher, "mcp__decision_memory__memory_experience_lookup")
+            assert re.search(matcher, "mcp__decision_memory__memory_experience_lookup")
             assert not re.search(matcher, "apply_patch")
 
             def hook(event, turn="turn-1", **fields):
@@ -98,7 +98,7 @@ def main():
                 assert host.tool("memory_read", {"id": "legacy-source"})["entry"]["body"] == "Historical source must survive the workflow change"
                 draft = dict(scope=scope, project=str(project), title="Synthetic multi-entry risk",
                              request_id="experience-once",
-                             experience=dict(anchors=["LYN", "canDispatchLynOrder"], signals=["创建准入"],
+                             experience=dict(anchors=["LYN", "canDispatchLynOrder"], signals=["创建准入"], cues=[dict(cue_id="admission",label="入口准入",text="合成多入口实验中本地调用未覆盖另一入口的准入条件。",evidence_refs=["isolated fixture"],entrances=[dict(kind="code_symbol",value="canDispatchLynOrder"),dict(kind="business_signal",value="LYN 创建准入")])],
                                              pitfall="A local caller is assumed to cover every entry",
                                              counterexample="An explicitly synthetic isolated counterexample, not a real business rule",
                                              impact="One entry may miss a required admission check",
@@ -130,6 +130,8 @@ def main():
                                      task="Current fixture multi-entry admission change",
                                      questions="Does the candidate method cover the current real entries?",
                                      keywords=["LYN"], challenge_id=token)
+                lookup_name="mcp__decision_memory__memory_experience_lookup"
+                assert hook("PreToolUse",tool_name=lookup_name,tool_use_id="native-1",tool_input=lookup_args)[1]=={}
                 wire = host.request("tools/call", {"name": "memory_experience_lookup", "arguments": lookup_args})
                 assert not wire.get("isError") and "structuredContent" not in wire, wire
                 assert len(wire["content"]) == 1, wire
@@ -137,17 +139,19 @@ def main():
                 response = json.loads(wire["content"][0]["text"])
                 assert response["items"][0]["id"] == saved["id"]
                 assert response["items"][0]["locations"][0]["lines"] == [2]
-                assert response["challenge_outcome"] == "query_completed_not_applicability_verified"
+                assert response["challenge_outcome"] == "response_generated"
+                assert hook("PreToolUse", **payload)[0] in (0,2)
+                assert hook("PostToolUse",tool_name=lookup_name,tool_use_id="native-1",tool_response=wire)[1]=={}
                 assert hook("PreToolUse", **payload)[1] == {}
                 assert hook("Stop", last_assistant_message="Do not start an extra model round")[1] == {}
                 with closing(sqlite3.connect(data / "memory.db")) as db:
                     assert db.execute("select count(*) from entries").fetchone()[0] == 2
                     assert "PRIVATE_PROMPT_DO_NOT_COPY" not in json.dumps(list(db.execute("select * from entries")))
                 assert (project / "AGENTS.md").read_bytes() == rules
-                # New native input cannot reuse the earlier query as a permit.
+                # A new native input preserves body/cue delivery.
                 hook("UserPromptSubmit", turn="turn-2", prompt="Second isolated request")
                 gated = hook("PreToolUse", turn="turn-2", **payload)
-                assert gated[0] == 2 or gated[1].get("decision") == "block"
+                assert gated[1] == {}, gated
                 disabled = cli("setup", *options, "--disable-wakeup")
                 assert not disabled["wakeup_enabled"] and not disabled["experience_hooks_installed"]
                 assert host.tool("memory_read", dict(id=saved["id"]))["entry"]["current"]

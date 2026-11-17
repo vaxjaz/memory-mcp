@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 
 	"github.com/vaxjaz/memory-mcp/internal/textguard"
@@ -24,7 +23,7 @@ func identifierPrefixMatch(text, prefix string) bool {
 }
 
 func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (ExperienceLookupResult, error) {
-	out := ExperienceLookupResult{ContentRole: "evidence_candidates", Items: []ExperienceItem{}, Notice: "Host-generated lexical searches, not server interpretation of the task. Experiences are risk clues; agreement references retain their explicit source identity. Neither receipt nor location proves current visibility, semantic applicability, authority or execution permission. No hit does not establish no risk."}
+	out := ExperienceLookupResult{ContentRole: "evidence_candidates", Items: []ExperienceItem{}, ReceiptID: experienceNonce(), Notice: "Historical evidence; judge current conditions and exceptions. A receipt records response generation until a native successful result is observed. No hit proves no absence of risk."}
 	for name, value := range map[string]string{"task": in.Task, "questions": in.Questions} {
 		if strings.TrimSpace(value) == "" || len(value) > 4000 {
 			return out, errors.New(name + " needs 1-4000 bytes from the current task")
@@ -45,14 +44,14 @@ func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (Expe
 	if limit == 0 {
 		limit = 2
 	}
-	var host, session, generation, created, project string
+	var host, session, generation, project string
 	var matches []ExperienceMatch
 	active := false
 	attached := false
 	if in.ChallengeID != "" {
 		var scope, data, current string
 		var completed bool
-		if err = s.db.QueryRowContext(ctx, "SELECT host,scope,session,generation,project,ids_json,created_at,completed FROM experience_challenges WHERE id=?", in.ChallengeID).Scan(&host, &scope, &session, &generation, &project, &data, &created, &completed); err != nil {
+		if err = s.db.QueryRowContext(ctx, "SELECT host,scope,session,generation,project,ids_json,completed FROM experience_challenges WHERE id=?", in.ChallengeID).Scan(&host, &scope, &session, &generation, &project, &data, &completed); err != nil {
 			return out, errors.New("unknown challenge: verify service and data directory")
 		}
 		if scope != in.Scope {
@@ -60,7 +59,8 @@ func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (Expe
 		}
 		if in.Project != "" {
 			p, er := s.experienceProject(ctx, in.Project, in.Scope)
-			if er != nil || p != project {
+			binding, _ := s.ExperienceProjectBinding(ctx, p, in.Scope)
+			if er != nil || binding != project {
 				return out, errors.New("challenge project mismatch")
 			}
 		}
@@ -68,19 +68,22 @@ func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (Expe
 			return out, err
 		}
 		er := s.db.QueryRowContext(ctx, "SELECT generation FROM experience_epochs WHERE host=? AND scope=? AND session=?", host, scope, session).Scan(&current)
-		at, e := time.Parse(time.RFC3339Nano, created)
-		attached = er == nil && e == nil && current == generation && time.Since(at) <= ExperienceChallengeTTL
+		attached = er == nil && current == generation
 		active = attached && !completed
 		if !attached {
-			out.ChallengeOutcome = "stale_no_current_turn_release"
+			out.ChallengeOutcome = "stale_context_not_released"
 		} else if completed {
-			out.ChallengeOutcome = "query_completed_not_applicability_verified"
+			out.ChallengeOutcome = "response_generated"
 		}
 	}
 	if project == "" {
 		project = in.Project
 	}
 	project, err = s.experienceProject(ctx, project, in.Scope)
+	if err != nil {
+		return out, err
+	}
+	project, err = s.ExperienceProjectBinding(ctx, project, in.Scope)
 	if err != nil {
 		return out, err
 	}
@@ -98,7 +101,13 @@ func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (Expe
 			return out, er
 		}
 		for _, e := range entries {
-			if !required[e.RootID] {
+			exact := false
+			for _, m := range matches {
+				if m.ID == e.ID {
+					exact = true
+				}
+			}
+			if !required[e.RootID] || !exact {
 				continue
 			}
 			found := false
@@ -113,17 +122,31 @@ func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (Expe
 				ranked = append(ranked, recallRank{Entry: e, Forced: true})
 			}
 		}
+		for _, m := range matches {
+			status := "unavailable_or_revised"
+			for _, r := range ranked {
+				if r.Entry.ID == m.ID {
+					status = "candidate"
+					break
+				}
+			}
+			if status != "candidate" {
+				_, err = s.db.ExecContext(ctx, "UPDATE experience_challenges SET faulted=1 WHERE id=?", in.ChallengeID)
+				if err != nil {
+					return out, err
+				}
+				out.CandidateStates = append(out.CandidateStates, CandidateState{m.ID, status})
+			}
+		}
 		sortRecall(ranked)
 		if active {
 			out.ChallengeOutcome = "query_pending"
 		}
-		if limit < len(required) {
-			limit = len(required)
-		}
+
 	}
 	// A continuation belongs to this exact ranked result snapshot. A revision or
 	// changed query cannot silently skip or repeat evidence on the next page.
-	snapshot := []string{in.Scope, project}
+	snapshot := []string{in.Scope, project, in.ChallengeID}
 	qb, _ := json.Marshal(queries)
 	snapshot = append(snapshot, string(qb))
 	for _, r := range ranked {
@@ -148,10 +171,10 @@ func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (Expe
 		item := ExperienceItem{ID: e.ID, RootID: e.RootID, Title: e.Title, BodySHA256: e.BodySHA256, SourceKind: "legacy_evidence", NeedsReview: e.NeedsReview, MatchedQueries: r.Queries, MatchedTerms: r.Terms}
 		if e.Profile != nil && e.Profile.Experience != nil {
 			item.SourceKind = "experience"
-			item.Experience = e.Profile.Experience
+			item.Experience = visibleExperience(e.Profile.Experience)
 			features, _ := json.Marshal(item.Experience)
 			item.FeatureSHA256 = digestText(string(features))
-			item.Locations = LocateExperience(ctx, project, item.Experience)
+			item.Locations = LocateExperience(ctx, project, e.Profile.Experience)
 		} else if e.Profile != nil && e.Profile.Agreement != nil {
 			item.SourceKind = "agreement_reference"
 			item.Agreement = e.Profile.Agreement
@@ -180,7 +203,7 @@ func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (Expe
 			out.NextCursor = ""
 		}
 		if active {
-			out.ChallengeOutcome = "query_completed_not_applicability_verified"
+			out.ChallengeOutcome = "response_generated"
 		}
 		body, _ := json.Marshal(out)
 		if len(body) > ExperienceLookupBudget {
@@ -206,11 +229,12 @@ func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (Expe
 	if len(body) > ExperienceLookupBudget {
 		return out, errors.New("response envelope exceeds 8 KiB")
 	}
-	if active {
-		out.ChallengeOutcome, err = s.recallResponseReceipt(ctx, in.ChallengeID, generation, in.Scope, required, out.Items)
-		if err != nil {
-			return out, err
-		}
+	if in.ChallengeID != "" && attached {
+		out.ChallengeOutcome = "response_generated"
 	}
+	if _, err = s.generateExperienceReceipt(ctx, in.Scope, project, in.ChallengeID, out); err != nil {
+		return out, err
+	}
+
 	return out, nil
 }

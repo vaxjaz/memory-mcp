@@ -71,20 +71,35 @@ func indexRecallEntry(ctx context.Context, tx *sql.Tx, e Entry) error {
 	}
 	add(e.Title, 3)
 	add(e.Body, 1)
+	addSignals := func(signals []string) {
+		for _, signal := range uniqueHumanSignals(signals) {
+			add(signal, 5)
+			compact := humanSignalKey(signal)
+			if compact != strings.ToLower(signal) {
+				add(compact, 5)
+			}
+		}
+	}
 	if e.Profile != nil {
 		if x := e.Profile.Experience; x != nil {
 			add(strings.Join(x.Anchors, " "), 8)
 			add(strings.Join(x.AnchorPrefixes, " "), 8)
-			add(strings.Join(x.Signals, " "), 5)
+			addSignals(x.Signals)
 			add(x.Applicability, 3)
 			add(x.Pitfall, 2)
 			add(x.Counterexample, 2)
 			add(x.Impact, 2)
 			add(x.Boundary, 1)
+			for _, c := range x.Cues {
+				add(c.Text, 2)
+				for _, a := range c.Entrances {
+					add(a.Value, 8)
+				}
+			}
 		} else if x := e.Profile.Agreement; x != nil {
 			add(strings.Join(x.Anchors, " "), 8)
 			add(strings.Join(x.AnchorPrefixes, " "), 8)
-			add(strings.Join(x.Signals, " "), 5)
+			addSignals(x.Signals)
 			add(x.Requirement, 3)
 			add(x.Applicability, 3)
 			add(x.Boundary, 1)
@@ -112,7 +127,7 @@ func indexRecallEntry(ctx context.Context, tx *sql.Tx, e Entry) error {
 			return err
 		}
 	}
-	return nil
+	return indexExperienceEntrances(ctx, tx, e)
 }
 
 func migrateRecall(tx *sql.Tx) error {
@@ -121,6 +136,10 @@ func migrateRecall(tx *sql.Tx) error {
  CREATE INDEX IF NOT EXISTS recall_documents_scope ON recall_documents(scope);
  CREATE TABLE IF NOT EXISTS recall_terms(scope TEXT NOT NULL,term TEXT NOT NULL,entry_id TEXT NOT NULL REFERENCES recall_documents(entry_id) ON DELETE CASCADE,frequency REAL NOT NULL,PRIMARY KEY(scope,term,entry_id));
  CREATE INDEX IF NOT EXISTS recall_terms_entry ON recall_terms(entry_id);
+ CREATE TABLE IF NOT EXISTS experience_keys(scope TEXT NOT NULL,fingerprint TEXT NOT NULL,root_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,PRIMARY KEY(scope,fingerprint));
+ CREATE TABLE IF NOT EXISTS experience_entrances(entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,cue_id TEXT NOT NULL,kind TEXT NOT NULL,value TEXT NOT NULL,match_key TEXT NOT NULL,scope TEXT NOT NULL,PRIMARY KEY(entry_id,cue_id,kind,value));
+ CREATE INDEX IF NOT EXISTS experience_entrances_scope ON experience_entrances(scope);
+ CREATE TABLE IF NOT EXISTS recall_index_version(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL);
  `); err != nil {
 		return err
 	}
@@ -162,7 +181,7 @@ func migrateRecall(tx *sql.Tx) error {
 			break
 		}
 	}
-	_, err := tx.Exec("PRAGMA user_version=4")
+	_, err := tx.Exec("INSERT INTO recall_index_version(id,version)VALUES(1,3) ON CONFLICT(id)DO UPDATE SET version=excluded.version; PRAGMA user_version=5")
 	return err
 }
 
@@ -203,7 +222,7 @@ func normalizeRecallQueries(in ExperienceLookup) ([]RecallQuery, error) {
 		for _, term := range q.Terms {
 			term = strings.ToLower(strings.TrimSpace(term))
 			total += len(term)
-			if term == "" || len(term) > 256 || len(recallTokens(term)) == 0 {
+			if term == "" || len(term) > 256 || len(recallTermOptions(term)) == 0 {
 				return nil, errors.New("query term is empty, oversized or has no indexable identifier/Chinese pair")
 			}
 			if err := textguard.Check("query.term", term, false); err != nil {
@@ -246,8 +265,10 @@ func (s *Store) rankedRecall(ctx context.Context, scope string, queries []Recall
 	allTokens := map[string]bool{}
 	for _, q := range queries {
 		for _, term := range q.Terms {
-			for _, token := range recallTokens(term) {
-				allTokens[token] = true
+			for _, option := range recallTermOptions(term) {
+				for _, token := range option {
+					allTokens[token] = true
+				}
 			}
 		}
 	}
@@ -315,14 +336,7 @@ func (s *Store) rankedRecall(ctx context.Context, scope string, queries []Recall
 			score := 0.0
 			used := map[string]bool{}
 			for _, term := range q.Terms {
-				tokens := recallTokens(term)
-				complete := true
-				for _, token := range tokens {
-					if d.terms[token] == 0 {
-						complete = false
-						break
-					}
-				}
+				tokens, complete := matchedRecallTokens(term, d.terms)
 				if !complete {
 					continue
 				}
@@ -379,13 +393,7 @@ func (s *Store) rankedRecall(ctx context.Context, scope string, queries []Recall
 		r.Terms = nil
 		for _, qi := range r.Queries {
 			for _, term := range queries[qi].Terms {
-				tokens := recallTokens(term)
-				complete := true
-				for _, t := range tokens {
-					if docs[id].terms[t] == 0 {
-						complete = false
-					}
-				}
+				_, complete := matchedRecallTokens(term, docs[id].terms)
 				if complete && !uniq[term] {
 					uniq[term] = true
 					r.Terms = append(r.Terms, term)

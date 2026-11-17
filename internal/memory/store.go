@@ -20,7 +20,7 @@ import (
 	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
 
-const SchemaVersion = 4
+const SchemaVersion = 5
 
 // Entry bodies are free text. These fields track provenance, not semantic truth.
 type Entry struct {
@@ -170,6 +170,10 @@ PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;`, bus
 		return nil, err
 	}
 	if err := s.initExperienceTrial(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := s.initRecognitionRecallIndex(busyMS == 10000); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -387,6 +391,17 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 			if old.State.State == "active" && !old.NeedsReview && old.Profile != nil && ((d.experienceValidated && old.Profile.Experience != nil) || (d.referenceValidated && old.Profile.Agreement != nil)) {
 				if previousID != "" && e.RootID != root {
 					return Entry{}, fmt.Errorf("equivalent experience already exists: %s; inspect before merging lineages", old.ID)
+				}
+				if d.experienceValidated {
+					// Preserve historical facts/hashes while replacing recognition aliases.
+					old.Profile.Experience = recognitionUpdate(old.Profile.Experience, d.Profile.Experience)
+					profile, _ := json.Marshal(old.Profile)
+					if _, re = tx.ExecContext(ctx, "UPDATE entry_profiles SET profile_json=? WHERE entry_id=?", string(profile), old.ID); re != nil {
+						return Entry{}, re
+					}
+					if re = indexRecallEntry(ctx, tx, old); re != nil {
+						return Entry{}, re
+					}
 				}
 				old.Links, re = loadLinks(ctx, tx, old.ID)
 				if re != nil {

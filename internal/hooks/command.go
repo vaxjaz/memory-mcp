@@ -236,14 +236,21 @@ func Run(ctx context.Context, args []string) error {
 		_ = store.HookLog(ctx, e.Name, "", e.Session, "failed", er.Error())
 		return fail(er)
 	}
+	emission, _ := r["_cue_emission"].(string)
+	delete(r, "_cue_emission")
 	response, err := adapter.Encode(e, r)
 	if err != nil {
+		_ = store.FinishCueEmission(ctx, emission, false)
 		return fail(err)
 	}
 	if len(response.Stdout) > 0 {
 		if _, err = os.Stdout.Write(response.Stdout); err != nil {
+			_ = store.FinishCueEmission(ctx, emission, false)
 			return err
 		}
+	}
+	if err = store.FinishCueEmission(ctx, emission, true); err != nil {
+		return err
 	}
 	if response.Stderr != "" {
 		fmt.Fprintln(os.Stderr, response.Stderr)

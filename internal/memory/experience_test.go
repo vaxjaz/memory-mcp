@@ -141,7 +141,7 @@ func TestExperienceMatchingRequiresIndependentFeaturesAndRelocatesOnly(t *testin
 	}
 }
 
-func TestExperienceChallengeDoesNotUseDeniedOrOldTurnAsPermit(t *testing.T) {
+func TestExperienceChallengeUsesNativeDeliveryNotTurnOrGeneration(t *testing.T) {
 	s, project, in := experienceFixture(t)
 	s.RecordExperience(ctx, in)
 	matches, _ := s.MatchExperiences(ctx, in.Scope, "LYN 创建准入")
@@ -150,38 +150,34 @@ func TestExperienceChallengeDoesNotUseDeniedOrOldTurnAsPermit(t *testing.T) {
 	if err != nil || c.ID == "" {
 		t.Fatal(c, err)
 	}
-	again, _ := s.ChallengeExperience(ctx, "codex", in.Scope, "session", "turn-1", project, matches)
-	if again.ID != c.ID {
-		t.Fatal("denial alone granted a permit")
-	}
-	bad := ExperienceLookup{Scope: in.Scope, Task: "", Questions: "coverage", Keywords: []string{"LYN"}, ChallengeID: c.ID}
-	if _, err = s.LookupExperience(ctx, bad); err == nil {
-		t.Fatal("empty task completed challenge")
-	}
 	s.ExperienceStartTurn(ctx, "codex", in.Scope, "session", "turn-2", "event-2")
-	newC, _ := s.ChallengeExperience(ctx, "codex", in.Scope, "session", "turn-2", project, matches)
-	if newC.ID == "" || newC.ID == c.ID {
-		t.Fatal("new input inherited old challenge")
+	again, _ := s.ChallengeExperience(ctx, "codex", in.Scope, "session", "turn-2", project, matches)
+	if again.ID != c.ID {
+		t.Fatal("new turn reset delivery/challenge")
 	}
-	bad.Task = "current task reconstructed from conversation"
-	out, err := s.LookupExperience(ctx, bad)
-	if err != nil || out.ChallengeOutcome != "stale_no_current_turn_release" {
-		t.Fatal(out, err)
+	input := ExperienceLookup{Scope: in.Scope, Task: "current task reconstructed from conversation", Questions: "check current conditions", Keywords: []string{"LYN"}, ChallengeID: c.ID}
+	if err = s.BeginExperienceLookup(ctx, "codex", in.Scope, "session", project, "lookup-1", "lookup", c.ID); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.LookupExperience(ctx, input)
+	if err != nil {
+		t.Fatal(err)
 	}
 	still, _ := s.ChallengeExperience(ctx, "codex", in.Scope, "session", "turn-2", project, matches)
-	if still.ID != newC.ID {
-		t.Fatal("late result released current input")
+	if still.ID != c.ID {
+		t.Fatal("generated response released gate")
 	}
-	// An out-of-order duplicate native input cannot reactivate turn-1.
-	s.ExperienceStartTurn(ctx, "codex", in.Scope, "session", "turn-1", "event-1")
-	bad.ChallengeID = newC.ID
-	out, err = s.LookupExperience(ctx, bad)
-	if err != nil || out.ChallengeOutcome != "query_completed_not_applicability_verified" {
-		t.Fatal(out, err)
+	if err = s.ObserveExperienceLookup(ctx, "codex", in.Scope, "session", "lookup-1", "lookup", out); err != nil {
+		t.Fatal(err)
 	}
 	allowed, _ := s.ChallengeExperience(ctx, "codex", in.Scope, "session", "turn-2", project, matches)
-	if allowed.ID != "" {
-		t.Fatal("successful actual lookup did not release", allowed)
+	if allowed.ID != "" || allowed.Context != "" {
+		t.Fatal("native receipt not recognized", allowed)
+	}
+	s.ExperienceAfterCompact(ctx, "codex", in.Scope, "session")
+	fresh, _ := s.ChallengeExperience(ctx, "codex", in.Scope, "session", "turn-2", project, matches)
+	if fresh.ID == "" || fresh.ID == c.ID {
+		t.Fatal("compact reused old delivery")
 	}
 }
 
@@ -217,7 +213,7 @@ func TestExperienceChallengeConcurrencyAndExpiry(t *testing.T) {
 	}
 	s.db.ExecContext(ctx, "UPDATE experience_challenges SET created_at=?", time.Now().Add(-3*time.Minute).UTC().Format(time.RFC3339Nano))
 	expired, err := s.ChallengeExperience(ctx, "zcode", in.Scope, "session", "", project, matches)
-	if err != nil || expired.ID != "" || expired.Outcome != "expired_fail_open_not_completed" {
+	if err != nil || expired.ID != "" || expired.Outcome != "fault_fail_open_not_delivered" {
 		t.Fatal(expired, err)
 	}
 	var completed bool

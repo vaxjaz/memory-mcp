@@ -21,9 +21,10 @@ import (
 // Experience is an observed failure pattern, never a prescribed implementation.
 // Evidence stores locators and concise observations, not chat transcripts/code.
 type Experience struct {
+	Cues           []ExperienceCue      `json:"cues" jsonschema:"Evidenced stable associations; provide with the synchronous write. New facts require a revision. Entrances are aliases, not separate risks."`
 	AnchorPrefixes []string             `json:"anchor_prefixes,omitempty" jsonschema:"Up to six confirmed ASCII identifier prefixes, 3-40 characters; not guesses or regexes."`
-	Anchors        []string             `json:"anchors" jsonschema:"1-6 real business identifiers, specific symbols or project-relative paths; no generic words such as code/check/Service"`
-	Signals        []string             `json:"signals" jsonschema:"1-6 independently matching operation or condition phrases, grounded in this incident; not synonyms stuffed to increase hits"`
+	Anchors        []string             `json:"anchors,omitempty" jsonschema:"1-12 verified direct or indirect identifiers/symbols/paths. During maintenance inspect callers/config/peers; cite actual relationships in evidence. No generic names."`
+	Signals        []string             `json:"signals,omitempty" jsonschema:"1-16 human task/condition expressions, including relevant colloquial forms and abbreviations. Local to this record; case/whitespace variants are automatic."`
 	Pitfall        string               `json:"pitfall" jsonschema:"The fallible inference that this incident challenged, not a correct destination or instruction"`
 	Counterexample string               `json:"counterexample" jsonschema:"Observed code/runtime/business evidence that challenges that inference; distinguish observation from explanation"`
 	Impact         string               `json:"impact" jsonschema:"Concrete possible bug, affected behavior or wrong decision if this condition is missed; do not invent an incident"`
@@ -75,7 +76,7 @@ type ExperienceItem struct {
 	ID             string           `json:"id"`
 	RootID         string           `json:"root_id"`
 	Title          string           `json:"title"`
-	Experience     *Experience      `json:"experience"`
+	Experience     *ExperienceBody  `json:"experience"`
 	Agreement      *Agreement       `json:"agreement,omitempty"`
 	SourceKind     string           `json:"source_kind,omitempty"`
 	Excerpt        string           `json:"excerpt,omitempty"`
@@ -98,12 +99,19 @@ func validateExperience(x *Experience) error {
 		return err
 	}
 	for name, terms := range map[string][]string{"anchors": x.Anchors, "signals": x.Signals} {
-		if len(terms) < 1 || len(terms) > 6 {
-			return fmt.Errorf("experience.%s needs 1-6 grounded terms", name)
+		limit := 12
+		if name == "signals" {
+			limit = 16
+		}
+		if (len(terms) < 1 && len(x.Cues) == 0) || len(terms) > limit {
+			return fmt.Errorf("experience.%s needs 1-%d grounded terms", name, limit)
 		}
 		seen := map[string]bool{}
 		for _, term := range terms {
 			key := strings.ToLower(strings.TrimSpace(term))
+			if name == "signals" {
+				key = humanSignalKey(term)
+			}
 			if key == "" || utf8.RuneCountInString(term) > 80 || utf8.RuneCountInString(term) < 2 || seen[key] {
 				return fmt.Errorf("experience.%s contains an empty/duplicate/oversized term", name)
 			}
@@ -150,7 +158,10 @@ func validateExperience(x *Experience) error {
 			}
 		}
 	}
-	body, _ := json.Marshal(x)
+	if err := validateCues(x); err != nil {
+		return err
+	}
+	body, _ := json.Marshal(visibleExperience(x))
 	if len(body) > 3000 {
 		return errors.New("experience exceeds 3000-byte feature budget; split independent mechanisms, never drop conditions")
 	}
@@ -211,9 +222,21 @@ func experienceKey(x *Experience) string {
 	// Content-equivalent writes do not create revisions merely for changed line
 	// positions or code hashes. The original observed evidence remains historical.
 	copyX := *x
-	copyX.Anchors = append([]string(nil), x.Anchors...)
-	copyX.Signals = append([]string(nil), x.Signals...)
-	copyX.AnchorPrefixes = append([]string(nil), x.AnchorPrefixes...)
+	copyX.Anchors = nil
+	copyX.Signals = nil
+	copyX.AnchorPrefixes = nil
+	copyX.Cues = cueContent(x.Cues)
+	for i := range copyX.Cues {
+		for j, ref := range copyX.Cues[i].EvidenceRefs {
+			for _, e := range x.Evidence {
+				if e.Kind == "code" && e.Reference == ref {
+					copyX.Cues[i].EvidenceRefs[j] = "code:" + e.Path + ":" + e.Symbol
+				}
+			}
+		}
+		sort.Strings(copyX.Cues[i].EvidenceRefs)
+	}
+
 	copyX.Evidence = append([]ExperienceEvidence(nil), x.Evidence...)
 	sort.Strings(copyX.Anchors)
 	sort.Strings(copyX.Signals)
@@ -230,6 +253,8 @@ func experienceKey(x *Experience) string {
 
 func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (ExperienceReceipt, error) {
 	var result ExperienceReceipt
+	raw, _ := json.Marshal(in)
+	in.Experience.Signals = uniqueHumanSignals(in.Experience.Signals)
 	if err := validateExperience(&in.Experience); err != nil {
 		return result, err
 	}
@@ -237,7 +262,6 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 	if err != nil {
 		return result, err
 	}
-	raw, _ := json.Marshal(in)
 	requestFingerprint := "experience-v1:" + digestText(string(raw))
 	// Hash enrichment must not mutate the caller's slice or change a retry's
 	// original payload (in-process hosts/tests may reuse that exact object).
@@ -314,8 +338,8 @@ func (s *Store) experienceCandidates(ctx context.Context, scope, clues string) (
 	if clues != "" {
 		// Cheap SQL prefilter, followed by exact identifier/independent-signal
 		// matching in Go. Ordinary no-hit probes do not materialize every case.
-		query += " AND (EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.experience.anchors') anchor WHERE instr(lower(replace(?,char(92),'/')),lower(replace(anchor.value,char(92),'/')))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.experience.anchor_prefixes') anchor WHERE instr(lower(?),lower(anchor.value))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.agreement.anchors') anchor WHERE instr(lower(replace(?,char(92),'/')),lower(replace(anchor.value,char(92),'/')))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.agreement.anchor_prefixes') anchor WHERE instr(lower(?),lower(anchor.value))>0))"
-		args = append(args, clues, clues, clues, clues)
+		query += " AND (EXISTS(SELECT 1 FROM experience_entrances a WHERE a.entry_id=entries.id AND instr(lower(replace(?,char(92),'/')),lower(replace(a.value,char(92),'/')))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.experience.anchors') anchor WHERE instr(lower(replace(?,char(92),'/')),lower(replace(anchor.value,char(92),'/')))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.experience.anchor_prefixes') anchor WHERE instr(lower(?),lower(anchor.value))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.agreement.anchors') anchor WHERE instr(lower(replace(?,char(92),'/')),lower(replace(anchor.value,char(92),'/')))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.agreement.anchor_prefixes') anchor WHERE instr(lower(?),lower(anchor.value))>0))"
+		args = append(args, clues, clues, clues, clues, clues)
 	}
 	query += " ORDER BY created_at DESC,id DESC LIMIT 2001"
 	rows, err := s.db.QueryContext(ctx, query, args...)
@@ -354,12 +378,16 @@ func (s *Store) experienceCandidates(ctx context.Context, scope, clues string) (
 			}
 		}
 		if e.Profile.Experience != nil {
-			if err = validateExperience(e.Profile.Experience); err != nil {
+			checked := *e.Profile.Experience
+			checked.Signals = uniqueHumanSignals(checked.Signals)
+			if err = validateExperience(&checked); err != nil {
 				continue
 			}
 		}
 		if e.Profile.Agreement != nil {
-			if err = validateAgreement(e.Profile.Agreement); err != nil {
+			checked := *e.Profile.Agreement
+			checked.Signals = uniqueHumanSignals(checked.Signals)
+			if err = validateAgreement(&checked); err != nil {
 				continue
 			}
 		}

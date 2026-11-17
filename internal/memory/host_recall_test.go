@@ -249,7 +249,7 @@ func TestChallengeCanReturnLargeRequiredCasesAcrossBoundedPages(t *testing.T) {
 	}
 	input := ExperienceLookup{Scope: in.Scope, Task: "current synthetic investigation", Questions: "inspect required current evidence", Queries: []RecallQuery{{Terms: []string{"unrelated"}}}, ChallengeID: challenge.ID}
 	first, err := s.LookupExperience(ctx, input)
-	if err != nil || len(first.Items) != 1 || !first.HasMore || first.ChallengeOutcome != "partial_query_response_not_completed" {
+	if err != nil || len(first.Items) != 1 || !first.HasMore || first.ChallengeOutcome != "response_generated" {
 		t.Fatal(first, err)
 	}
 	b, _ := json.Marshal(first)
@@ -258,7 +258,7 @@ func TestChallengeCanReturnLargeRequiredCasesAcrossBoundedPages(t *testing.T) {
 	}
 	input.Cursor = first.NextCursor
 	second, err := s.LookupExperience(ctx, input)
-	if err != nil || len(second.Items) != 1 || second.Items[0].ID == first.Items[0].ID || second.HasMore || second.ChallengeOutcome != "query_completed_not_applicability_verified" {
+	if err != nil || len(second.Items) != 1 || second.Items[0].ID == first.Items[0].ID || second.HasMore || second.ChallengeOutcome != "response_generated" {
 		t.Fatal(second, err)
 	}
 }

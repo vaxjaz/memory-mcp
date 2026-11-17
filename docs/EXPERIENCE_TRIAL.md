@@ -1,35 +1,29 @@
-# 0.5.0 host-generated recall
+# 0.6.0 first-body and incremental-cue protocol
 
-## Writes
+## Writes and identity
 
-memory_experience_record retains verified failure features, not conclusions or manuals: actual anchors/signals, challenged inference, counterexample, impact, applicability, boundary and evidence. Essential fields <=240 characters; feature JSON <=3000 bytes. Optional anchor_prefixes explicitly register an evidence-grounded ASCII numbering convention (3-40 characters), never a regex guessed from one sample.
+Experiences contain pitfall, counterexample, impact, applicability, boundary, 1-3 evidence locators and 1-12 cues. Each cue has stable cue_id, label (<=24 Unicode characters), a complete historical sentence (<=160), 1-3 evidence_refs present in the body and 1-12 directly evidenced entrances (code_symbol/file/config/business_signal). Pure business cases require no source file. Multiple aliases for one association share one cue. Do not turn dependencies into associations. The host verifies meaning; length and locators cannot certify semantic truth.
 
-memory_reference_record accepts compact already-confirmed requirement, applicability/boundary, authority, confirmation_reference and evidence, with recognition features. No fabricated counterexample. Changing an agreement needs its authority; indexing an already authorized source does not create a new business rule.
+Visible experience facts stay <=3000 UTF-8 bytes, without truncation. Every cue fact is included in the first body; a material new risk cannot hide in a short reminder. Visible DTO omits recognition arrays, entrances, cue metadata and file hashes. Evidence and concrete source-drift indicators remain available. Titles are identity/navigation, not substitutes for a counterexample.
 
-Both writes are synchronous and idempotent. The entry, profile and inverted index commit together. indexed=true follows commit; validation/locators do not certify semantic truth. Local source hashes are rechecked; external sources are marked not revalidated.
+Body, cues, index and revisions commit atomically. Alias-only updates, code hash or line/commit relocation preserve content identity and historical evidence. Material facts/conditions/boundaries/cue changes create a previous_id revision; independent mechanisms create separate experiences. Agreements retain their separately authorized source/authority. Historical structured experiences without cues remain eligible through legacy_primary, with a first body and no invented extra associations. Legacy prose stays searchable without promotion.
 
-## Queries
+## Delivery and hooks
 
-memory_experience_lookup requires explicit scope/project (or real challenge), task and questions. The host constructs queries: 1-4 distinct perspectives, each with terms and match=all/any. Up to 16 terms per explicit query, combined <=4096 bytes. Compatibility keywords remains a single OR query. MCP performs no translation/model call.
+consumer = host + stable bound project + scope + native session/agent + context generation. Body keys are consumer + root/version; cue keys additionally include cue_id. Turns are not context generations. Explicit compact/clear starts lazy re-delivery on the next related entrance; resume/continue does not. Explicit agent identity is isolated; no ID is invented from task text.
 
-The index covers titles and complete recorded features, including counterexamples and exceptions, and preserved historical evidence. Han bigrams support short Chinese terms; ASCII identifiers stay whole. No implicit synonyms, negation interpretation or identifier-prefix inference.
+No hit: empty output. Unseen body: short challenge, no duplicate body. Host constructs task/questions/queries. The challenge's actual candidates cannot disappear merely because query wording misses. Lookup returns complete pages in one JSON text <=8192 bytes, with receipt_id, has_more/next_cursor. The generated receipt contains only identities/digest and does not credit delivery.
 
-Field-weighted BM25-style lexical scoring ranks each query; reciprocal-rank fusion combines independent rankings. Exact registered anchors are prioritized and duplicate identical queries do not inflate scores. matched_queries/matched_terms explain lexical hits only. The host evaluates current applicability.
+Only this configured service's exact lookup name (including native hyphen/underscore spelling) gets a narrow nonblocking Pre observer and Post observer. Pre binds native tool_use_id to its consumer/context; Post parses the documented complete success result, checks isError/transport state, receipt/digest/project/challenge/version and credits only returned items. Late results stay with their original context. Ordinary lookup credits bodies but invents no trigger cues. read remains unrestricted and has no forced receipt. Post emits no repeated context.
 
-Default two, maximum three complete items within one JSON text body <=8 KiB. next_cursor makes remaining items explicit; changed queries/corpus invalidate cursors. More than 2000 lexical candidates requires refinement instead of an incomplete silent result. Legacy excerpts are navigation, not confirmed conventions or automatic triggers.
+A delivered body's unseen cue allows the operation with a fixed fact, grouped by experience. Aliases merge. Total cue text <=1024 UTF-8 bytes; full sentences are never sliced. Overflow is explicitly marked and undisplayed cues remain pending. SQLite serializable transactions claim output once among concurrent processes. stdout failure releases reservations; process-start identity permits recovery after a dead emitter. The small crash window after stdout and before commit may conservatively replay; this is not an end-to-end exactly-once guarantee. A receipt proves observed output only, not model retention or understanding.
 
-## Hooks
+Two minutes is only a technical stuck-challenge fail-open deadline, never a reminder interval. Failure does not credit a body/cue or schedule compensation. There is no global turn permit, time/count-based reminding, model acknowledgement, skip/complete requirement or Stop continuation. Another experience requires its own first body. A current revision cannot be released by an old receipt. Active voluntary lookup/read is never suppressed.
 
-PreToolUse observes existing code tools and narrowly named business MCP tools: ticket/order reads and database-query suffixes. A specific anchor/prefix plus independent actual condition must match. Domain names alone do not interrupt.
+## Costs and migration
 
-Selected business PostToolUse only observes bounded source fields. It stores matched IDs and hashes of identifiers with explicitly registered prefixes, never raw text. A subsequent call must contain the same identifier. New input, reported compaction, changed revision and explicit different agent identity cannot reuse the observation. The source read itself is not denied and no unsolicited material is injected.
+MCP calls no model. Hook process startup, SQLite, tool round trips and appended context cost time/tokens; there is no overwriteable memory slot. Narrow business observations preserve only identifier hashes and candidate IDs, and are invalidated independently on new inputs/context changes. Unknown tools, missing native IDs, absent hooks and unreported pruning remain gaps.
 
-The existing challenge has one native-input interruption budget. Required candidates must appear in actual generated responses before completion; bounded pages accumulate server-side ID receipts without a model-authored complete statement. This proves response creation, not transport delivery or reading. Errors/two-minute expiry fail open without pretending completion. Pure text, unknown tools/wrappers, absent stable identifiers and unreported pruning remain gaps. A receipt does not prove semantic consumption or current context visibility.
+Schema 5 adds derived entrances, delivery ledgers and call/response association, replacing old generated-receipt/challenge/cooldown tables. Original entries/profiles, revisions, IDs, evidence, bindings, policies and maintenance survive. Stop ALL sharing writers and independently back up the complete data directory and client configuration BEFORE any new DB-opening command. Restore pre-upgrade library/config/binary together for rollback. Never point an old executable at the upgraded library.
 
-## Costs and schema
-
-No extra model is run by MCP and ordinary inputs have no reminder. Local matching, SQLite, process startup, tool round trips and returned evidence all have costs. Business pre/post can require two launches. Earlier Windows PowerShell measurements on this machine were around 0.8 seconds per launch; do not enable every tool or claim zero cost.
-
-Schema 4 builds derived postings while preserving original entries, revisions and IDs. Migration happens once. Stop old writers and back up the entire library/configuration BEFORE opening it with the new version. Schema-3 rollback requires restoring that backup; mixed versions are unsupported.
-
-Executable replays validate mechanisms, not actual native delivery or model quality. Measure those separately.
+See DELIVERY_ACCEPTANCE.md for actual measurements and unverified native/model boundaries. Deterministic replay is not evidence that an autonomous model used a counterexample.
