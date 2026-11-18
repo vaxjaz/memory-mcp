@@ -10,6 +10,8 @@ Visible experience facts stay <=3000 UTF-8 bytes, without truncation. Every cue 
 
 Body, cues, index and revisions commit atomically. Alias-only updates, code hash or line/commit relocation preserve content identity and historical evidence. Material facts/conditions/boundaries/cue changes create a previous_id revision; independent mechanisms create separate experiences. Confirmed agreements use the same cues and keep their own requirement, authority and confirmation reference. The cue entrances are the only automatic trigger selectors. The optional object_id_prefixes field identifies objects for same-input result association. It has no effect on direct matching or search ranking.
 
+Write receipts include trigger_preview for the saved revision. It reports the scope, record eligibility, stored wakeup policy when readable, total active entrance count and at most four example entrances. After the write, summarize the normal action and verified conditions that can match an entrance. Use memory_read for the full saved profile. Actual dispatch and delivery depend on the active host and session.
+
 ## Delivery and hooks
 
 consumer = host + stable bound project + scope + native session/agent + context generation. Body keys are consumer + root/version; cue keys additionally include cue_id. Turns are not context generations. Explicit compact/clear starts lazy re-delivery on the next related entrance; resume/continue does not. Explicit agent identity is isolated; no ID is invented from task text.

@@ -47,12 +47,27 @@ type ExperienceWrite struct {
 }
 
 type ExperienceReceipt struct {
-	Indexed    bool   `json:"indexed"`
-	ID         string `json:"id"`
-	RootID     string `json:"root_id"`
-	Reused     bool   `json:"reused"`
-	BodySHA256 string `json:"body_sha256"`
-	Notice     string `json:"notice"`
+	Indexed        bool           `json:"indexed"`
+	ID             string         `json:"id"`
+	RootID         string         `json:"root_id"`
+	Reused         bool           `json:"reused"`
+	BodySHA256     string         `json:"body_sha256"`
+	TriggerPreview TriggerPreview `json:"trigger_preview"`
+	Notice         string         `json:"notice"`
+}
+
+// TriggerPreview describes the saved revision, independently of host dispatch.
+type TriggerPreview struct {
+	Scope         string            `json:"scope"`
+	RecordStatus  string            `json:"record_status"`
+	WakeupEnabled *bool             `json:"wakeup_enabled,omitempty"`
+	EntranceCount int               `json:"entrance_count"`
+	Entrances     []PreviewEntrance `json:"entrances,omitempty"`
+}
+
+type PreviewEntrance struct {
+	CueID string `json:"cue_id"`
+	CueEntrance
 }
 
 type EvidenceLocation struct {
@@ -257,7 +272,35 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 
 func experienceReceipt(e Entry, reused bool) ExperienceReceipt {
 	return ExperienceReceipt{ID: e.ID, RootID: e.RootID, Reused: reused, BodySHA256: e.BodySHA256, Indexed: true,
-		Notice: "Saved failure features, not an instruction or prescribed destination. Code hashes/locators check mechanics; semantic evidence remains the host's responsibility."}
+		TriggerPreview: previewTriggers(e),
+		Notice:         "Saved failure features, not an instruction or prescribed destination. Code hashes/locators check mechanics; semantic evidence remains the host's responsibility."}
+}
+
+func previewTriggers(e Entry) TriggerPreview {
+	out := TriggerPreview{Scope: e.Scope}
+	switch {
+	case !e.Current:
+		out.RecordStatus = "superseded"
+	case e.NeedsReview:
+		out.RecordStatus = "needs_review"
+	case e.State.State != "active":
+		out.RecordStatus = "inactive"
+	case profileExpired(e.Profile):
+		out.RecordStatus = "expired"
+	default:
+		out.RecordStatus = "no_entrances"
+		const maxPreviewEntrances = 4
+		for _, cue := range entryCues(e) {
+			out.EntranceCount += len(cue.Entrances)
+			for _, entrance := range cue.Entrances[:min(len(cue.Entrances), maxPreviewEntrances-len(out.Entrances))] {
+				out.Entrances = append(out.Entrances, PreviewEntrance{CueID: cue.ID, CueEntrance: entrance})
+			}
+		}
+		if out.EntranceCount > 0 {
+			out.RecordStatus = "eligible"
+		}
+	}
+	return out
 }
 
 // Load only explicit compact experiences. Legacy prose is still searchable but

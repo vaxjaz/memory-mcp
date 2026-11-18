@@ -29,6 +29,9 @@ def main():
         subprocess.run(setup, check=True, capture_output=True)
         host = Host(binary, str(data))
         try:
+            tools = {t["name"]: t["description"] for t in host.request("tools/list", {})["tools"]}
+            for name in ("memory_experience_record", "memory_reference_record"):
+                assert "use trigger_preview to tell the user" in tools[name], tools[name]
             draft = dict(scope=scope, project=str(project), title="Synthetic failure recognition",
                          request_id="fixture-experience", experience=dict(
                              object_id_prefixes=["OBJ"],
@@ -45,6 +48,11 @@ def main():
             host.tool("memory_experience_record", obsolete, expect_error=True)
             saved = host.tool("memory_experience_record", draft)
             assert saved["indexed"]
+            preview = saved["trigger_preview"]
+            assert preview == {
+                "scope": scope, "record_status": "eligible", "wakeup_enabled": True, "entrance_count": 1,
+                "entrances": [{"cue_id": "cancellation", "kind": "business_signal", "value": "取消 OBJ-001"}],
+            }, preview
             assert host.tool("memory_experience_record", draft)["id"] == saved["id"]
             reference = dict(scope=scope, project=str(project), title="Synthetic confirmed convention",
                              request_id="fixture-agreement", agreement=dict(
@@ -64,6 +72,9 @@ def main():
             host.tool("memory_reference_record", obsolete, expect_error=True)
             agreement = host.tool("memory_reference_record", reference)
             assert agreement["indexed"]
+            assert agreement["trigger_preview"]["entrances"] == [
+                {"cue_id": "confirm", "kind": "business_signal", "value": "取消 OBJ-001"},
+            ], agreement
             query = dict(scope=scope, project=str(project), task="Compare the current cancellation scenario",
                          questions="Which observed constraints challenge the current assumption?",
                          queries=[dict(terms=["状态约束"], match="all"),
@@ -170,9 +181,29 @@ def main():
             assert replacement["id"] != saved["id"] and replacement["root_id"] == saved["root_id"], replacement
             assert not host.tool("memory_read", {"id": saved["id"]})["entry"]["current"]
             assert host.tool("memory_read", {"id": replacement["id"]})["entry"]["previous_id"] == saved["id"]
+            assert replacement["trigger_preview"] == preview, replacement
+
+            alias_edit = json.loads(json.dumps(revision))
+            alias_edit.update(previous_id=replacement["id"], request_id="fixture-entrances")
+            entrances = [dict(kind="business_signal", value=f"取消 OBJ-00{i}") for i in range(2, 7)]
+            alias_edit["experience"]["cues"][0]["entrances"] = entrances
+            refreshed = host.tool("memory_experience_record", alias_edit)
+            assert refreshed["reused"] and refreshed["id"] == replacement["id"], refreshed
+            refreshed_preview = refreshed["trigger_preview"]
+            assert refreshed_preview["entrance_count"] == 5, refreshed_preview
+            assert [item["value"] for item in refreshed_preview["entrances"]] == [e["value"] for e in entrances[:4]], refreshed_preview
+            actual = host.tool("memory_read", {"id": refreshed["id"]})["entry"]["profile"]["experience"]["cues"][0]["entrances"]
+            assert actual == entrances, actual
+
+            superseded = host.tool("memory_experience_record", draft)
+            assert superseded["id"] == saved["id"] and superseded["trigger_preview"]["record_status"] == "superseded", superseded
+            assert not superseded["trigger_preview"].get("entrances"), superseded
+            subprocess.run(setup + ["--disable-wakeup"], check=True, capture_output=True)
+            disabled = host.tool("memory_experience_record", alias_edit)["trigger_preview"]
+            assert disabled["record_status"] == "eligible" and disabled["wakeup_enabled"] is False, disabled
         finally:
             host.close()
-        print(json.dumps(dict(result="PASS", coverage="actual executable MCP: indexed writes, multi-query recall, source identity, paging, drift and admission",
+        print(json.dumps(dict(result="PASS", coverage="actual executable MCP: indexed writes, trigger previews, revisions, multi-query recall, source identity, paging, drift and admission",
                               model_quality_verified=False, query_ms=round(elapsed, 2),
                               original_library_touched=False), ensure_ascii=False))
 
