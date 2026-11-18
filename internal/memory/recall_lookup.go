@@ -6,21 +6,9 @@ import (
 	"errors"
 	"strconv"
 	"strings"
-	"unicode"
 
 	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
-
-func identifierPrefixMatch(text, prefix string) bool {
-	for _, token := range strings.FieldsFunc(text, func(r rune) bool {
-		return !(r < 128 && (unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' || r == '-'))
-	}) {
-		if len(token) > len(prefix) && strings.EqualFold(token[:len(prefix)], prefix) {
-			return true
-		}
-	}
-	return false
-}
 
 func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (ExperienceLookupResult, error) {
 	out := ExperienceLookupResult{ContentRole: "evidence_candidates", Items: []ExperienceItem{}, ReceiptID: experienceNonce(), Notice: "Historical evidence; judge current conditions and exceptions. A receipt records response generation until a native successful result is observed. No hit proves no absence of risk."}
@@ -169,18 +157,18 @@ func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (Expe
 		r := ranked[next]
 		e := r.Entry
 		item := ExperienceItem{ID: e.ID, RootID: e.RootID, Title: e.Title, BodySHA256: e.BodySHA256, SourceKind: "legacy_evidence", NeedsReview: e.NeedsReview, MatchedQueries: r.Queries, MatchedTerms: r.Terms}
-		if e.Profile != nil && e.Profile.Experience != nil {
+		if e.Profile != nil && e.Profile.Experience != nil && len(entryCues(e)) > 0 {
 			item.SourceKind = "experience"
 			item.Experience = visibleExperience(e.Profile.Experience)
 			features, _ := json.Marshal(item.Experience)
 			item.FeatureSHA256 = digestText(string(features))
 			item.Locations = LocateExperience(ctx, project, e.Profile.Experience)
-		} else if e.Profile != nil && e.Profile.Agreement != nil {
+		} else if e.Profile != nil && e.Profile.Agreement != nil && len(entryCues(e)) > 0 {
 			item.SourceKind = "agreement_reference"
-			item.Agreement = e.Profile.Agreement
+			item.Agreement = visibleAgreement(e.Profile.Agreement)
 			features, _ := json.Marshal(item.Agreement)
 			item.FeatureSHA256 = digestText(string(features))
-			item.Locations = LocateExperience(ctx, project, &Experience{Evidence: item.Agreement.Evidence})
+			item.Locations = LocateExperience(ctx, project, &Experience{Evidence: e.Profile.Agreement.Evidence})
 		} else {
 			text := []rune(e.Body)
 			if len(text) > 360 {

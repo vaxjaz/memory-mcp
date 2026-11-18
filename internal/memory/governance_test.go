@@ -2,6 +2,7 @@ package memory
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -342,7 +343,7 @@ func TestV2UpgradeKeepsHistoricalContentAndRequestsInitialInspection(t *testing.
 		t.Fatal(err)
 	}
 	s.Close()
-	upgraded, err := Open(dir)
+	upgraded, err := openStore(dir, 10000, filepath.Join(t.TempDir(), "migration.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

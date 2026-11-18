@@ -1,52 +1,10 @@
 package memory
 
 import (
-	"path"
 	"strings"
 	"unicode"
 	"unicode/utf8"
 )
-
-// A narrow code locator can wake recall without a transient task phrase.
-// Business names/prefixes and bare generic words remain a two-feature match.
-// Provenance is admitted on write; the host still checks current applicability.
-func specificEvidenceAnchor(e Entry, anchor string) bool {
-	if e.Profile == nil {
-		return false
-	}
-	var evidence []ExperienceEvidence
-	if e.Profile.Experience != nil {
-		evidence = e.Profile.Experience.Evidence
-	}
-	if e.Profile.Agreement != nil {
-		evidence = e.Profile.Agreement.Evidence
-	}
-	value := normalizedResource(anchor)
-	for _, source := range evidence {
-		if source.Kind != "code" || source.Path == "" {
-			continue
-		}
-		file := normalizedResource(source.Path)
-		base := path.Base(file)
-		stem := strings.TrimSuffix(base, path.Ext(base))
-		if value == file && (strings.Contains(file, "/") || strings.Contains(file, ".")) {
-			return true
-		}
-		if value == base && path.Ext(base) != "" && specificSymbol(stem) {
-			return true
-		}
-		if value == stem && specificSymbol(stem) && len([]rune(stem)) >= 4 {
-			return true
-		}
-		if strings.EqualFold(anchor, source.Symbol) && specificSymbol(anchor) {
-			return true
-		}
-		if source.Symbol != "" && strings.EqualFold(anchor, stem+"."+source.Symbol) && specificSymbol(source.Symbol) {
-			return true
-		}
-	}
-	return false
-}
 
 // Human phrases ignore case and Unicode whitespace, not punctuation or meaning.
 // Abbreviations remain explicitly scoped values in the record's signals list.
@@ -58,20 +16,6 @@ func humanSignalKey(s string) string {
 		}
 	}
 	return b.String()
-}
-
-func uniqueHumanSignals(signals []string) []string {
-	out := make([]string, 0, len(signals))
-	seen := map[string]bool{}
-	for _, s := range signals {
-		key := humanSignalKey(s)
-		// Preserve invalid blanks for admission to reject, rather than hide damage.
-		if key == "" || !seen[key] {
-			out = append(out, s)
-			seen[key] = true
-		}
-	}
-	return out
 }
 
 type humanSignalText struct {

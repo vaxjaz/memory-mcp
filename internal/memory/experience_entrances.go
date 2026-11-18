@@ -11,18 +11,25 @@ func indexExperienceEntrances(ctx context.Context, tx *sql.Tx, e Entry) error {
 	if _, err := tx.ExecContext(ctx, "DELETE FROM experience_entrances WHERE entry_id=?", e.ID); err != nil {
 		return err
 	}
-	if e.Profile == nil || e.Profile.Experience == nil {
+	cues := entryCues(e)
+	if len(cues) == 0 {
 		return nil
 	}
 	if e.Current {
+		var key string
+		if e.Profile.Experience != nil {
+			key = experienceKey(e.Profile.Experience)
+		} else {
+			key = agreementKey(e.Profile.Agreement)
+		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM experience_keys WHERE scope=? AND root_id=?", e.Scope, e.RootID); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO experience_keys VALUES(?,?,?)", e.Scope, experienceKey(e.Profile.Experience), e.RootID); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO experience_keys VALUES(?,?,?)", e.Scope, key, e.RootID); err != nil {
 			return err
 		}
 	}
-	for _, c := range e.Profile.Experience.Cues {
+	for _, c := range cues {
 		for _, a := range c.Entrances {
 			if _, err := tx.ExecContext(ctx, "INSERT INTO experience_entrances VALUES(?,?,?,?,?,?)", e.ID, c.ID, a.Kind, a.Value, humanSignalKey(normalizedResource(a.Value)), e.Scope); err != nil {
 				return err
@@ -33,10 +40,7 @@ func indexExperienceEntrances(ctx context.Context, tx *sql.Tx, e Entry) error {
 }
 
 func (s *Store) MatchExperiences(ctx context.Context, scope, clues string) ([]ExperienceMatch, error) {
-	out, err := s.matchLegacyExperiences(ctx, scope, clues)
-	if err != nil {
-		return nil, err
-	}
+	var out []ExperienceMatch
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT a.entry_id FROM experience_entrances a JOIN entries e ON e.id=a.entry_id WHERE a.scope=? AND e.current=1 AND e.needs_review=0 AND instr(?,a.match_key)>0 ORDER BY a.entry_id LIMIT 2001`, scope, humanSignalKey(normalizedResource(clues)))
 	if err != nil {
 		return nil, err
@@ -65,17 +69,17 @@ func (s *Store) MatchExperiences(ctx context.Context, scope, clues string) ([]Ex
 			return nil, er
 		}
 		e := r.Entry
-		if !e.Current || e.NeedsReview || e.State.State != "active" || profileExpired(e.Profile) || e.Profile.Experience == nil {
+		if !e.Current || e.NeedsReview || e.State.State != "active" || profileExpired(e.Profile) {
 			continue
 		}
-		for _, c := range e.Profile.Experience.Cues {
+		for _, c := range entryCues(e) {
 			for _, a := range c.Entrances {
 				matched := literalExperienceMatch(clues, a.Value)
 				if a.Kind == "business_signal" {
 					matched = text.matches(a.Value)
 				}
 				if matched {
-					out = append(out, ExperienceMatch{ID: e.ID, RootID: e.RootID, CueID: c.ID, CueLabel: c.Label, CueText: c.Text, Anchor: a.Value, Trigger: a.Kind, entry: &e})
+					out = append(out, ExperienceMatch{ID: e.ID, RootID: e.RootID, CueID: c.ID, CueLabel: c.Label, CueText: c.Text, Entrance: a.Value, Trigger: a.Kind, entry: &e})
 					break
 				}
 			}

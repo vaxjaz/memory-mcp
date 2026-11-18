@@ -21,16 +21,14 @@ import (
 // Experience is an observed failure pattern, never a prescribed implementation.
 // Evidence stores locators and concise observations, not chat transcripts/code.
 type Experience struct {
-	Cues           []ExperienceCue      `json:"cues" jsonschema:"Evidenced stable associations; provide with the synchronous write. New facts require a revision. Entrances are aliases, not separate risks."`
-	AnchorPrefixes []string             `json:"anchor_prefixes,omitempty" jsonschema:"Up to six confirmed ASCII identifier prefixes, 3-40 characters; not guesses or regexes."`
-	Anchors        []string             `json:"anchors,omitempty" jsonschema:"1-12 verified direct or indirect identifiers/symbols/paths. During maintenance inspect callers/config/peers; cite actual relationships in evidence. No generic names."`
-	Signals        []string             `json:"signals,omitempty" jsonschema:"1-16 human task/condition expressions, including relevant colloquial forms and abbreviations. Local to this record; case/whitespace variants are automatic."`
-	Pitfall        string               `json:"pitfall" jsonschema:"The fallible inference that this incident challenged, not a correct destination or instruction"`
-	Counterexample string               `json:"counterexample" jsonschema:"Observed code/runtime/business evidence that challenges that inference; distinguish observation from explanation"`
-	Impact         string               `json:"impact" jsonschema:"Concrete possible bug, affected behavior or wrong decision if this condition is missed; do not invent an incident"`
-	Applicability  string               `json:"applicability" jsonschema:"Conditions in which this failure pattern is worth investigating"`
-	Boundary       string               `json:"boundary" jsonschema:"Exceptions, different environments and unknowns; no universally correct implementation"`
-	Evidence       []ExperienceEvidence `json:"evidence" jsonschema:"1-3 actual evidence locators; no entire conversations or source files"`
+	Cues             []ExperienceCue      `json:"cues" jsonschema:"Evidenced stable associations; provide with the synchronous write. New facts require a revision. Entrances are aliases, not separate risks."`
+	ObjectIDPrefixes []string             `json:"object_id_prefixes,omitempty" jsonschema:"Prefixes of object identifiers for same-input business result association only; no effect on direct matching or search."`
+	Pitfall          string               `json:"pitfall" jsonschema:"The fallible inference that this incident challenged, not a correct destination or instruction"`
+	Counterexample   string               `json:"counterexample" jsonschema:"Observed code/runtime/business evidence that challenges that inference; distinguish observation from explanation"`
+	Impact           string               `json:"impact" jsonschema:"Concrete possible bug, affected behavior or wrong decision if this condition is missed; do not invent an incident"`
+	Applicability    string               `json:"applicability" jsonschema:"Conditions in which this failure pattern is worth investigating"`
+	Boundary         string               `json:"boundary" jsonschema:"Exceptions, different environments and unknowns; no universally correct implementation"`
+	Evidence         []ExperienceEvidence `json:"evidence" jsonschema:"1-3 actual evidence locators; no entire conversations or source files"`
 }
 
 type ExperienceEvidence struct {
@@ -60,7 +58,7 @@ type ExperienceReceipt struct {
 	Notice     string `json:"notice"`
 }
 
-type AnchorLocation struct {
+type EvidenceLocation struct {
 	Reference      string `json:"reference"`
 	Path           string `json:"path,omitempty"`
 	Symbol         string `json:"symbol,omitempty"`
@@ -71,22 +69,22 @@ type AnchorLocation struct {
 }
 
 type ExperienceItem struct {
-	BodySHA256     string           `json:"body_sha256"`
-	FeatureSHA256  string           `json:"feature_sha256,omitempty"`
-	ID             string           `json:"id"`
-	RootID         string           `json:"root_id"`
-	Title          string           `json:"title"`
-	Experience     *ExperienceBody  `json:"experience"`
-	Agreement      *Agreement       `json:"agreement,omitempty"`
-	SourceKind     string           `json:"source_kind,omitempty"`
-	Excerpt        string           `json:"excerpt,omitempty"`
-	NeedsReview    bool             `json:"needs_review,omitempty"`
-	MatchedQueries []int            `json:"matched_queries,omitempty"`
-	MatchedTerms   []string         `json:"matched_terms,omitempty"`
-	Locations      []AnchorLocation `json:"locations,omitempty"`
+	BodySHA256     string             `json:"body_sha256"`
+	FeatureSHA256  string             `json:"feature_sha256,omitempty"`
+	ID             string             `json:"id"`
+	RootID         string             `json:"root_id"`
+	Title          string             `json:"title"`
+	Experience     *ExperienceBody    `json:"experience"`
+	Agreement      *AgreementBody     `json:"agreement,omitempty"`
+	SourceKind     string             `json:"source_kind,omitempty"`
+	Excerpt        string             `json:"excerpt,omitempty"`
+	NeedsReview    bool               `json:"needs_review,omitempty"`
+	MatchedQueries []int              `json:"matched_queries,omitempty"`
+	MatchedTerms   []string           `json:"matched_terms,omitempty"`
+	Locations      []EvidenceLocation `json:"locations,omitempty"`
 }
 
-var genericExperienceAnchor = map[string]bool{
+var genericEntranceValue = map[string]bool{
 	"代码": true, "检查": true, "方案": true, "需求": true, "项目": true,
 	"service": true, "controller": true, "main": true, "test": true, "code": true,
 }
@@ -95,34 +93,8 @@ func validateExperience(x *Experience) error {
 	if x == nil {
 		return errors.New("experience required")
 	}
-	if err := validatePrefixes(x.AnchorPrefixes); err != nil {
+	if err := validatePrefixes(x.ObjectIDPrefixes); err != nil {
 		return err
-	}
-	for name, terms := range map[string][]string{"anchors": x.Anchors, "signals": x.Signals} {
-		limit := 12
-		if name == "signals" {
-			limit = 16
-		}
-		if (len(terms) < 1 && len(x.Cues) == 0) || len(terms) > limit {
-			return fmt.Errorf("experience.%s needs 1-%d grounded terms", name, limit)
-		}
-		seen := map[string]bool{}
-		for _, term := range terms {
-			key := strings.ToLower(strings.TrimSpace(term))
-			if name == "signals" {
-				key = humanSignalKey(term)
-			}
-			if key == "" || utf8.RuneCountInString(term) > 80 || utf8.RuneCountInString(term) < 2 || seen[key] {
-				return fmt.Errorf("experience.%s contains an empty/duplicate/oversized term", name)
-			}
-			if genericExperienceAnchor[key] {
-				return fmt.Errorf("experience.%s contains generic term %q", name, term)
-			}
-			if err := textguard.Check(name, term, false); err != nil {
-				return err
-			}
-			seen[key] = true
-		}
 	}
 	for name, value := range map[string]string{
 		"pitfall": x.Pitfall, "counterexample": x.Counterexample, "impact": x.Impact,
@@ -135,10 +107,25 @@ func validateExperience(x *Experience) error {
 			return err
 		}
 	}
-	if len(x.Evidence) < 1 || len(x.Evidence) > 3 {
+	if err := validateEvidence(x.Evidence); err != nil {
+		return err
+	}
+	if err := validateCues(x.Cues, x.Evidence); err != nil {
+		return err
+	}
+	body, _ := json.Marshal(visibleExperience(x))
+	if len(body) > 3000 {
+		return errors.New("experience exceeds 3000-byte feature budget; split independent mechanisms, never drop conditions")
+	}
+	return nil
+}
+
+// Resolve symlinks before reading; memory content never authorizes external reads.
+func validateEvidence(evidence []ExperienceEvidence) error {
+	if len(evidence) < 1 || len(evidence) > 3 {
 		return errors.New("experience needs 1-3 actual evidence locators")
 	}
-	for _, e := range x.Evidence {
+	for _, e := range evidence {
 		if e.Kind != "code" && e.Kind != "runtime" && e.Kind != "business" {
 			return errors.New("evidence.kind must be code/runtime/business")
 		}
@@ -158,17 +145,9 @@ func validateExperience(x *Experience) error {
 			}
 		}
 	}
-	if err := validateCues(x); err != nil {
-		return err
-	}
-	body, _ := json.Marshal(visibleExperience(x))
-	if len(body) > 3000 {
-		return errors.New("experience exceeds 3000-byte feature budget; split independent mechanisms, never drop conditions")
-	}
 	return nil
 }
 
-// Resolve symlinks before reading; memory content never authorizes external reads.
 func experienceFile(project, relative string) (string, error) {
 	if relative == "" || filepath.IsAbs(relative) || strings.Contains(relative, "\\") && filepath.Separator != '\\' {
 		return "", errors.New("code path must be project-relative")
@@ -222,9 +201,7 @@ func experienceKey(x *Experience) string {
 	// Content-equivalent writes do not create revisions merely for changed line
 	// positions or code hashes. The original observed evidence remains historical.
 	copyX := *x
-	copyX.Anchors = nil
-	copyX.Signals = nil
-	copyX.AnchorPrefixes = nil
+	copyX.ObjectIDPrefixes = nil
 	copyX.Cues = cueContent(x.Cues)
 	for i := range copyX.Cues {
 		for j, ref := range copyX.Cues[i].EvidenceRefs {
@@ -238,9 +215,6 @@ func experienceKey(x *Experience) string {
 	}
 
 	copyX.Evidence = append([]ExperienceEvidence(nil), x.Evidence...)
-	sort.Strings(copyX.Anchors)
-	sort.Strings(copyX.Signals)
-	sort.Strings(copyX.AnchorPrefixes)
 	for i := range copyX.Evidence {
 		copyX.Evidence[i].SHA256 = ""
 		if copyX.Evidence[i].Kind == "code" {
@@ -254,7 +228,6 @@ func experienceKey(x *Experience) string {
 func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (ExperienceReceipt, error) {
 	var result ExperienceReceipt
 	raw, _ := json.Marshal(in)
-	in.Experience.Signals = uniqueHumanSignals(in.Experience.Signals)
 	if err := validateExperience(&in.Experience); err != nil {
 		return result, err
 	}
@@ -307,8 +280,8 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 		e.SHA256 = actual
 	}
 	x := &in.Experience
-	body := fmt.Sprintf("触发特征：%s；%s\n易错推断：%s\n关键反例：%s\nBug影响：%s\n适用条件：%s\n边界与未知：%s",
-		strings.Join(x.Anchors, ", "), strings.Join(x.Signals, ", "), x.Pitfall, x.Counterexample, x.Impact, x.Applicability, x.Boundary)
+	body := fmt.Sprintf("易错推断：%s\n关键反例：%s\nBug影响：%s\n适用条件：%s\n边界与未知：%s",
+		x.Pitfall, x.Counterexample, x.Impact, x.Applicability, x.Boundary)
 	d := Draft{Kind: "case", Scope: in.Scope, Title: in.Title, Body: body, Origin: "model_inference", RequestID: in.RequestID,
 		SourceRef: x.Evidence[0].Reference, Profile: &Profile{Class: "long_term", FutureUse: x.Applicability, CounterCheck: "Recorded counterexample and concrete impact; ordinary recoverable facts are not admitted.", Applicability: x.Applicability, Boundary: x.Boundary, Experience: x}}
 	d.experienceValidated = true
@@ -329,20 +302,8 @@ func experienceReceipt(e Entry, reused bool) ExperienceReceipt {
 // Load only explicit compact experiences. Legacy prose is still searchable but
 // is never silently promoted into automatic intervention rules.
 func (s *Store) Experiences(ctx context.Context, scope string) ([]Entry, error) {
-	return s.experienceCandidates(ctx, scope, "")
-}
-
-func (s *Store) experienceCandidates(ctx context.Context, scope, clues string) ([]Entry, error) {
-	query := "SELECT " + columns + " FROM entries JOIN entry_profiles p ON p.entry_id=entries.id WHERE current=1 AND needs_review=0 AND scope=? AND (json_type(p.profile_json,'$.experience')='object' OR json_type(p.profile_json,'$.agreement')='object')"
-	args := []any{scope}
-	if clues != "" {
-		// Cheap SQL prefilter, followed by exact identifier/independent-signal
-		// matching in Go. Ordinary no-hit probes do not materialize every case.
-		query += " AND (EXISTS(SELECT 1 FROM experience_entrances a WHERE a.entry_id=entries.id AND instr(lower(replace(?,char(92),'/')),lower(replace(a.value,char(92),'/')))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.experience.anchors') anchor WHERE instr(lower(replace(?,char(92),'/')),lower(replace(anchor.value,char(92),'/')))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.experience.anchor_prefixes') anchor WHERE instr(lower(?),lower(anchor.value))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.agreement.anchors') anchor WHERE instr(lower(replace(?,char(92),'/')),lower(replace(anchor.value,char(92),'/')))>0) OR EXISTS(SELECT 1 FROM json_each(p.profile_json,'$.agreement.anchor_prefixes') anchor WHERE instr(lower(?),lower(anchor.value))>0))"
-		args = append(args, clues, clues, clues, clues, clues)
-	}
-	query += " ORDER BY created_at DESC,id DESC LIMIT 2001"
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	query := "SELECT " + columns + " FROM entries JOIN entry_profiles p ON p.entry_id=entries.id WHERE current=1 AND needs_review=0 AND scope=? AND (json_array_length(p.profile_json,'$.experience.cues')>0 OR json_array_length(p.profile_json,'$.agreement.cues')>0) ORDER BY created_at DESC,id DESC LIMIT 2001"
+	rows, err := s.db.QueryContext(ctx, query, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -379,14 +340,12 @@ func (s *Store) experienceCandidates(ctx context.Context, scope, clues string) (
 		}
 		if e.Profile.Experience != nil {
 			checked := *e.Profile.Experience
-			checked.Signals = uniqueHumanSignals(checked.Signals)
 			if err = validateExperience(&checked); err != nil {
 				continue
 			}
 		}
 		if e.Profile.Agreement != nil {
 			checked := *e.Profile.Agreement
-			checked.Signals = uniqueHumanSignals(checked.Signals)
 			if err = validateAgreement(&checked); err != nil {
 				continue
 			}
@@ -396,13 +355,13 @@ func (s *Store) experienceCandidates(ctx context.Context, scope, clues string) (
 	return out, nil
 }
 
-func LocateExperience(ctx context.Context, project string, x *Experience) []AnchorLocation {
-	var out []AnchorLocation
+func LocateExperience(ctx context.Context, project string, x *Experience) []EvidenceLocation {
+	var out []EvidenceLocation
 	for _, e := range x.Evidence {
 		if ctx.Err() != nil {
 			break
 		}
-		item := AnchorLocation{Reference: e.Reference, Path: e.Path, Symbol: e.Symbol, Status: "external_reference_not_revalidated"}
+		item := EvidenceLocation{Reference: e.Reference, Path: e.Path, Symbol: e.Symbol, Status: "external_reference_not_revalidated"}
 		if e.Kind != "code" && e.Path == "" {
 			out = append(out, item)
 			continue

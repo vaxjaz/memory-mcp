@@ -57,8 +57,7 @@ CREATE TABLE IF NOT EXISTS experience_cue_deliveries(consumer TEXT NOT NULL,root
 CREATE TABLE IF NOT EXISTS experience_response_receipts(id TEXT PRIMARY KEY,scope TEXT NOT NULL,project TEXT NOT NULL,challenge_id TEXT NOT NULL,items_digest TEXT NOT NULL,items_json TEXT NOT NULL,observed_consumer TEXT NOT NULL DEFAULT '',call_id TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS experience_lookup_calls(host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,call_id TEXT NOT NULL,tool TEXT NOT NULL,project TEXT NOT NULL,generation TEXT NOT NULL,consumer TEXT NOT NULL,challenge_id TEXT NOT NULL,receipt_id TEXT NOT NULL DEFAULT '',PRIMARY KEY(host,scope,session,call_id));
 CREATE TABLE IF NOT EXISTS experience_entrances(entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,cue_id TEXT NOT NULL,kind TEXT NOT NULL,value TEXT NOT NULL,match_key TEXT NOT NULL,scope TEXT NOT NULL,PRIMARY KEY(entry_id,cue_id,kind,value));
-INSERT INTO experience_delivery_protocol VALUES(1,1) ON CONFLICT(id)DO NOTHING;
-PRAGMA user_version=5;`); err != nil {
+INSERT INTO experience_delivery_protocol VALUES(1,1) ON CONFLICT(id)DO NOTHING;`); err != nil {
 		return err
 	}
 	return tx.Commit()

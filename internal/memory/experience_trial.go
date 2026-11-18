@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
-	"sort"
 	"strings"
 	"time"
 )
@@ -114,8 +113,7 @@ type ExperienceMatch struct {
 	Trigger  string   `json:"trigger,omitempty"`
 	ID       string   `json:"id"`
 	RootID   string   `json:"root_id"`
-	Anchor   string   `json:"anchor"`
-	Signal   string   `json:"signal"`
+	Entrance string   `json:"entrance"`
 	Objects  []string `json:"objects,omitempty"`
 	entry    *Entry
 }
@@ -135,85 +133,6 @@ func literalExperienceMatch(text, term string) bool {
 		return identifierMatch(text, term)
 	}
 	return strings.Contains(strings.ToLower(text), strings.ToLower(term))
-}
-
-func (s *Store) matchLegacyExperiences(ctx context.Context, scope, clues string) ([]ExperienceMatch, error) {
-	items, err := s.experienceCandidates(ctx, scope, clues)
-	if err != nil {
-		return nil, err
-	}
-	if len(items) == 0 {
-		return nil, nil
-	}
-	humanText := newHumanSignalText(clues)
-	type ranked struct {
-		match ExperienceMatch
-		score int
-	}
-	var rankedMatches []ranked
-	for itemIndex := range items {
-		if items[itemIndex].Profile.Experience != nil && len(items[itemIndex].Profile.Experience.Cues) > 0 {
-			continue
-		}
-		item := items[itemIndex]
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		anchors, signals, prefixes := recognitionFeatures(item)
-		var anchor, signal string
-		strong := false
-		score := 0
-		for _, a := range anchors {
-			if literalExperienceMatch(clues, a) {
-				value := 100 + len(a)
-				if strings.ContainsAny(a, "/\\") {
-					value += 300
-				}
-				if value > score {
-					anchor = a
-					score = value
-				}
-				if specificEvidenceAnchor(item, a) {
-					strong = true
-				}
-			}
-		}
-		for _, p := range prefixes {
-			if identifierPrefixMatch(clues, p) && 100+len(p) > score {
-				anchor = p
-				score = 100 + len(p)
-			}
-		}
-		if anchor == "" {
-			continue
-		}
-		for _, c := range signals {
-			if humanSignalKey(c) != humanSignalKey(anchor) && humanText.matches(c) {
-				if signal == "" {
-					signal = c
-				}
-			}
-		}
-		if signal != "" {
-			score += 10
-		}
-		// Task wording is commonly absent during symbol-chain investigation.
-		// A concrete evidence-backed locator is sufficient; broad anchors still
-		// need an independent human signal. Alias count adds no confidence.
-		trigger := "anchor_and_signal"
-		if strong {
-			trigger = "specific_code_anchor"
-		}
-		if signal != "" || strong {
-			rankedMatches = append(rankedMatches, ranked{ExperienceMatch{ID: item.ID, RootID: item.RootID, CueID: "legacy_primary", Anchor: anchor, Signal: signal, Trigger: trigger, entry: &items[itemIndex]}, score})
-		}
-	}
-	sort.SliceStable(rankedMatches, func(i, j int) bool { return rankedMatches[i].score > rankedMatches[j].score })
-	var matches []ExperienceMatch
-	for _, item := range rankedMatches {
-		matches = append(matches, item.match)
-	}
-	return matches, nil
 }
 
 type ExperienceChallenge struct {

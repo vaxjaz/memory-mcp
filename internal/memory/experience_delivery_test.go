@@ -15,8 +15,6 @@ import (
 // Every fact in this fixture is synthetic and stays in t.TempDir().
 func deliveryFixture(t *testing.T) (*Store, string, ExperienceWrite) {
 	s, p, in := experienceFixture(t)
-	in.Experience.Anchors = nil
-	in.Experience.Signals = nil
 	in.Experience.Counterexample = "隔离实验中备注更新后日志仍取旧文本；另一取值入口读取独立参数。"
 	in.Experience.Evidence = []ExperienceEvidence{{Kind: "business", Reference: "fixture:counterexample", Observation: "合成实验只验证投递协议，不是真实业务事故"}}
 	in.Experience.Cues = []ExperienceCue{
@@ -479,8 +477,8 @@ func TestDeliveryA21A24A28A39Atomic(t *testing.T) {
 		t.Fatal("failed index retired body")
 	}
 	// Pure business experience required no source file/class and is searchable.
-	if len(in.Experience.Anchors) != 0 || len(in.Experience.Signals) != 0 {
-		t.Fatal("A24 fixture requires code")
+	if in.Experience.Evidence[0].Path != "" || in.Experience.Cues[0].Entrances[0].Kind == "" {
+		t.Fatal("A24 fixture requires code or omitted its entrance")
 	}
 }
 
@@ -537,7 +535,7 @@ func TestDeliveryA32MigrationAndRollback(t *testing.T) {
 	}
 	dir := s.Dir
 	s.Close()
-	upgraded, e := Open(dir)
+	upgraded, e := openStore(dir, 10000, filepath.Join(t.TempDir(), "migration.db"))
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -553,7 +551,7 @@ func TestDeliveryA32MigrationAndRollback(t *testing.T) {
 		t.Fatal("old generated receipt promoted")
 	}
 	m, e := upgraded.MatchExperiences(ctx, in.Scope, "LYN 创建准入")
-	if e != nil || len(m) != 1 || m[0].CueID != "legacy_primary" {
+	if e != nil || len(m) != 1 || m[0].CueID != "admission" {
 		t.Fatal("A32 legacy disabled", m, e)
 	}
 	restored := t.TempDir()

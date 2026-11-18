@@ -190,7 +190,7 @@ def main():
                     assert "PostToolUseFailure" not in current_events, current_events
                 draft = dict(scope=scope, project=str(project), title="Synthetic multi-entry risk",
                              request_id="experience-once",
-                             experience=dict(anchors=["LYN", "canDispatchLynOrder"], signals=["创建准入"], cues=[dict(cue_id="admission",label="入口准入",text="合成多入口实验中本地调用未覆盖另一入口的准入条件。",evidence_refs=["isolated fixture"],entrances=[dict(kind="code_symbol",value="canDispatchLynOrder"),dict(kind="business_signal",value="LYN 创建准入")])],
+                             experience=dict(cues=[dict(cue_id="admission",label="入口准入",text="合成多入口实验中本地调用未覆盖另一入口的准入条件。",evidence_refs=["isolated fixture"],entrances=[dict(kind="code_symbol",value="canDispatchLynOrder"),dict(kind="business_signal",value="LYN 创建准入")])],
                                              pitfall="A local caller is assumed to cover every entry",
                                              counterexample="An explicitly synthetic isolated counterexample, not a real business rule",
                                              impact="One entry may miss a required admission check",

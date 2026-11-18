@@ -20,7 +20,7 @@ import (
 	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
 
-const SchemaVersion = 5
+const SchemaVersion = 6
 
 // Entry bodies are free text. These fields track provenance, not semantic truth.
 type Entry struct {
@@ -110,16 +110,16 @@ func DefaultDir() (string, error) {
 }
 
 func Open(dir string) (*Store, error) {
-	return openStore(dir, 10000)
+	return openStore(dir, 10000, "")
 }
 
 // Hooks are advisory and must fail open instead of waiting ten seconds on a
 // writer lock. Normal writes/maintenance retain the original durability policy.
 func OpenForHook(dir string) (*Store, error) {
-	return openStore(dir, 200)
+	return openStore(dir, 200, "")
 }
 
-func openStore(dir string, busyMS int) (*Store, error) {
+func openStore(dir string, busyMS int, migrationBackup string) (*Store, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -137,6 +137,28 @@ func openStore(dir string, busyMS int) (*Store, error) {
 	}
 	// Initialize EVERY physical connection, including replacements opened by database/sql.
 	db, err := driver.Open(filepath.Join(abs, "memory.db"), func(conn *sqlite3.Conn) error {
+		if migrationBackup == "" {
+			stmt, _, err := conn.Prepare("PRAGMA user_version")
+			if err != nil {
+				return err
+			}
+			if stmt.Step() {
+				version := stmt.ColumnInt(0)
+				_ = stmt.Close()
+				if version != 0 && version < SchemaVersion {
+					return fmt.Errorf("database schema %d requires explicit cue migration to %d; run memory-mcp migrate --data-dir %q to inspect", version, SchemaVersion, abs)
+				}
+				if version > SchemaVersion {
+					return fmt.Errorf("database version %d is newer than supported %d", version, SchemaVersion)
+				}
+			} else {
+				err := stmt.Err()
+				_ = stmt.Close()
+				if err != nil {
+					return err
+				}
+			}
+		}
 		// Independent hook processes may race the first WAL transition. SQLite
 		// can report BUSY for that PRAGMA before its busy handler can wait.
 		deadline := time.Now().Add(time.Duration(busyMS) * time.Millisecond)
@@ -157,7 +179,7 @@ PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;`, bus
 	}
 	db.SetMaxOpenConns(1)
 	s := &Store{db: db, Dir: abs}
-	if err := s.init(); err != nil {
+	if err := s.init(migrationBackup); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -182,7 +204,7 @@ PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA secure_delete=ON;`, bus
 
 func (s *Store) Close() error { return s.db.Close() }
 
-func (s *Store) init() error {
+func (s *Store) init(migrationBackup string) error {
 	var version int
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
@@ -192,6 +214,14 @@ func (s *Store) init() error {
 	}
 	if version == SchemaVersion {
 		return nil
+	}
+	if version != 0 {
+		if migrationBackup == "" {
+			return fmt.Errorf("database schema %d requires explicit cue migration to %d; run memory-mcp migrate --data-dir %q to inspect", version, SchemaVersion, s.Dir)
+		}
+		if err := s.Backup(context.Background(), migrationBackup); err != nil {
+			return err
+		}
 	}
 	tx, err := s.db.BeginTx(context.Background(), &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -204,6 +234,12 @@ func (s *Store) init() error {
 	}
 	if version > SchemaVersion {
 		return fmt.Errorf("database version %d is newer than supported %d", version, SchemaVersion)
+	}
+	if version == SchemaVersion {
+		return tx.Commit()
+	}
+	if version != 0 && migrationBackup == "" {
+		return fmt.Errorf("database schema %d requires cue migration before opening", version)
 	}
 	_, err = tx.Exec(`
 CREATE TABLE IF NOT EXISTS entries (
@@ -235,7 +271,15 @@ PRAGMA user_version=2;`)
 	if err = migrateGovernance(tx); err != nil {
 		return err
 	}
+	if version != 0 {
+		if err = migrateCueProfiles(tx, version); err != nil {
+			return err
+		}
+	}
 	if err = migrateRecall(tx); err != nil {
+		return err
+	}
+	if _, err = tx.Exec("PRAGMA user_version=6"); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -392,16 +436,19 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 				if previousID != "" && e.RootID != root {
 					return Entry{}, fmt.Errorf("equivalent experience already exists: %s; inspect before merging lineages", old.ID)
 				}
+				// Keep the original evidence while refreshing entry selectors.
 				if d.experienceValidated {
-					// Preserve historical facts/hashes while replacing recognition aliases.
 					old.Profile.Experience = recognitionUpdate(old.Profile.Experience, d.Profile.Experience)
-					profile, _ := json.Marshal(old.Profile)
-					if _, re = tx.ExecContext(ctx, "UPDATE entry_profiles SET profile_json=? WHERE entry_id=?", string(profile), old.ID); re != nil {
-						return Entry{}, re
-					}
-					if re = indexRecallEntry(ctx, tx, old); re != nil {
-						return Entry{}, re
-					}
+				} else {
+					old.Profile.Agreement.Cues = d.Profile.Agreement.Cues
+					old.Profile.Agreement.ObjectIDPrefixes = d.Profile.Agreement.ObjectIDPrefixes
+				}
+				profile, _ := json.Marshal(old.Profile)
+				if _, re = tx.ExecContext(ctx, "UPDATE entry_profiles SET profile_json=? WHERE entry_id=?", string(profile), old.ID); re != nil {
+					return Entry{}, re
+				}
+				if re = indexRecallEntry(ctx, tx, old); re != nil {
+					return Entry{}, re
 				}
 				old.Links, re = loadLinks(ctx, tx, old.ID)
 				if re != nil {

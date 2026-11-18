@@ -47,6 +47,8 @@ Usage:
   memory-mcp serve [--data-dir DIR]           MCP over stdin/stdout
   memory-mcp status [--data-dir DIR]          Show path and record count
   memory-mcp export --out FILE [--data-dir DIR]
+  memory-mcp migrate [--data-dir DIR]         Preview the cue schema upgrade
+  memory-mcp migrate --apply --backup FILE [--data-dir DIR]
   memory-mcp backup --out FILE [--data-dir DIR]  Consistent standalone SQLite snapshot
   memory-mcp forget --id ID --yes [--data-dir DIR]
   memory-mcp setup --host HOST --project DIR --scope project:ID
@@ -110,14 +112,19 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 		return hooks.Run(context.Background(), args)
 	}
 	switch cmd {
-	case "serve", "status", "export", "backup", "forget":
+	case "serve", "status", "export", "backup", "forget", "migrate":
 	default:
 		return fmt.Errorf("unknown command %q; run memory-mcp help", cmd)
 	}
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	dir := fs.String("data-dir", "", "local data directory")
 	var out, id string
-	var yes bool
+	var yes, applyMigration bool
+	var migrationBackup string
+	if cmd == "migrate" {
+		fs.BoolVar(&applyMigration, "apply", false, "upgrade the inspected library and retain a backup")
+		fs.StringVar(&migrationBackup, "backup", "", "new backup file for the original SQLite library")
+	}
 	if cmd == "export" || cmd == "backup" {
 		fs.StringVar(&out, "out", "", "new output file (will not overwrite)")
 	}
@@ -146,6 +153,23 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 			return err
 		}
 		*dir = p
+	}
+	if cmd == "migrate" {
+		ctx := context.Background()
+		var report memory.MigrationReport
+		var err error
+		if applyMigration {
+			report, err = memory.ApplyCueMigration(ctx, *dir, migrationBackup)
+		} else {
+			if migrationBackup != "" {
+				return errors.New("--backup is only used with --apply")
+			}
+			report, err = memory.InspectCueMigration(ctx, *dir)
+		}
+		if err != nil {
+			return err
+		}
+		return json.NewEncoder(os.Stdout).Encode(report)
 	}
 	store, err := memory.Open(*dir)
 	if err != nil {

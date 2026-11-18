@@ -100,7 +100,7 @@ func TestCustomProbeDispatchAndScope(t *testing.T) {
 	_, err = store.RecordExperience(testCtx, memory.ExperienceWrite{
 		Scope: "project:other", Project: other, Title: "Other scope test",
 		Experience: memory.Experience{
-			Anchors: []string{"LYN"}, Signals: []string{"创建准入"}, Pitfall: "Fixture inference", Counterexample: "Fixture counterexample",
+			Cues: []memory.ExperienceCue{{ID: "admission", Label: "准入覆盖", Text: "Fixture counterexample", EvidenceRefs: []string{"other-scope"}, Entrances: []memory.CueEntrance{{Kind: "business_signal", Value: "LYN 创建准入"}}}}, Pitfall: "Fixture inference", Counterexample: "Fixture counterexample",
 			Impact: "Fixture risk", Applicability: "Synthetic scope regression", Boundary: "Fixture only",
 			Evidence: []memory.ExperienceEvidence{{Kind: "runtime", Reference: "other-scope", Observation: "Isolated fixture"}},
 		},

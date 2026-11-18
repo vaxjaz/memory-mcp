@@ -50,7 +50,7 @@ func TestReviewInputReplayPreservesCurrentObservationAndDelivery(t *testing.T) {
 	for _, nativeTurn := range []bool{false, true} {
 		t.Run(map[bool]string{false: "event-only", true: "native-turn"}[nativeTurn], func(t *testing.T) {
 			s, p, in := deliveryFixture(t)
-			in.Experience.AnchorPrefixes = []string{"WXN"}
+			in.Experience.ObjectIDPrefixes = []string{"WXN"}
 			if _, err := s.RecordExperience(ctx, in); err != nil {
 				t.Fatal(err)
 			}
@@ -118,7 +118,7 @@ func TestReviewInputReplayPreservesCurrentObservationAndDelivery(t *testing.T) {
 
 func TestReviewUnknownInputIdentityExpiresOnlyTemporaryObservation(t *testing.T) {
 	s, p, in := deliveryFixture(t)
-	in.Experience.AnchorPrefixes = []string{"WXN"}
+	in.Experience.ObjectIDPrefixes = []string{"WXN"}
 	if _, err := s.RecordExperience(ctx, in); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestReviewUnknownInputIdentityExpiresOnlyTemporaryObservation(t *testing.T)
 
 func TestReviewObservedCueDoesNotSurviveMaterialRevision(t *testing.T) {
 	s, _, in := deliveryFixture(t)
-	in.Experience.AnchorPrefixes = []string{"WXN"}
+	in.Experience.ObjectIDPrefixes = []string{"WXN"}
 	saved, err := s.RecordExperience(ctx, in)
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestReviewObservedCueDoesNotSurviveMaterialRevision(t *testing.T) {
 
 func TestReviewAmbiguousFreeTextCannotAssociateMultipleObjects(t *testing.T) {
 	s, _, in := deliveryFixture(t)
-	in.Experience.AnchorPrefixes = []string{"WXN"}
+	in.Experience.ObjectIDPrefixes = []string{"WXN"}
 	if _, err := s.RecordExperience(ctx, in); err != nil {
 		t.Fatal(err)
 	}

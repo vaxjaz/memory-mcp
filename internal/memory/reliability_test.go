@@ -228,7 +228,7 @@ func TestVersionOneMigrationAndConsistentBackup(t *testing.T) {
 	if err = s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s, err = Open(dir)
+	s, err = openStore(dir, 10000, filepath.Join(t.TempDir(), "migration.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

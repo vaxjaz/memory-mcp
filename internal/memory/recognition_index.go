@@ -21,8 +21,7 @@ func matchedRecallTokens(term string, present map[string]float64) ([]string, boo
 	return nil, false
 }
 
-// Schema 5 retains source history. Derived postings are rebuilt once
-// for whitespace-equivalent human signals; source entries/history are untouched.
+// Derived postings are rebuilt without rewriting source entries or history.
 // A hook never pays for a full rebuild: setup/serve performs it before use.
 func (s *Store) initRecognitionRecallIndex(allowRebuild bool) error {
 	if !allowRebuild {
@@ -33,7 +32,7 @@ func (s *Store) initRecognitionRecallIndex(allowRebuild bool) error {
 	}
 	var version int
 	err := s.db.QueryRow("SELECT version FROM recall_index_version WHERE id=1").Scan(&version)
-	if err == nil && version >= 3 {
+	if err == nil && version >= 4 {
 		return nil
 	}
 	if err != nil && err != sql.ErrNoRows {
@@ -45,7 +44,7 @@ func (s *Store) initRecognitionRecallIndex(allowRebuild bool) error {
 	}
 	defer tx.Rollback()
 	err = tx.QueryRow("SELECT version FROM recall_index_version WHERE id=1").Scan(&version)
-	if err == nil && version >= 3 {
+	if err == nil && version >= 4 {
 		return tx.Commit()
 	}
 	if err != nil && err != sql.ErrNoRows {

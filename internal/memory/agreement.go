@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -20,9 +19,8 @@ import (
 // A compact pointer to an existing, explicitly confirmed agreement. It is not
 // manufactured failure evidence, a document manual, or new operational authority.
 type Agreement struct {
-	Anchors               []string             `json:"anchors" jsonschema:"1-12 verified direct/indirect identifiers, symbols or paths; retain relationship evidence."`
-	AnchorPrefixes        []string             `json:"anchor_prefixes,omitempty" jsonschema:"Confirmed ASCII identifier prefixes, not guesses or regexes."`
-	Signals               []string             `json:"signals" jsonschema:"1-16 local human expressions/abbreviations; case and whitespace are automatic."`
+	Cues                  []ExperienceCue      `json:"cues" jsonschema:"Evidence-backed applicability cues for the already-confirmed requirement."`
+	ObjectIDPrefixes      []string             `json:"object_id_prefixes,omitempty" jsonschema:"Object identifier prefixes for same-input result association."`
 	Requirement           string               `json:"requirement" jsonschema:"Compact already-confirmed agreement; not a manual or new rule."`
 	Applicability         string               `json:"applicability" jsonschema:"Actual scope, conditions and environment."`
 	Boundary              string               `json:"boundary" jsonschema:"Exceptions and unknowns; retrieval grants no permission."`
@@ -46,7 +44,7 @@ func validatePrefixes(prefixes []string) error {
 	}
 	seen := map[string]bool{}
 	for _, p := range prefixes {
-		if len(p) < 3 || len(p) > 40 || strings.TrimSpace(p) != p || genericExperienceAnchor[strings.ToLower(p)] {
+		if len(p) < 3 || len(p) > 40 || strings.TrimSpace(p) != p || genericEntranceValue[strings.ToLower(p)] {
 			return errors.New("identifier prefixes need 3-40 specific ASCII characters")
 		}
 		for i, r := range p {
@@ -67,31 +65,11 @@ func validateAgreement(a *Agreement) error {
 	if a == nil {
 		return errors.New("agreement required")
 	}
-	if err := validatePrefixes(a.AnchorPrefixes); err != nil {
+	if err := validatePrefixes(a.ObjectIDPrefixes); err != nil {
 		return err
 	}
-	for name, terms := range map[string][]string{"anchors": a.Anchors, "signals": a.Signals} {
-		limit := 12
-		if name == "signals" {
-			limit = 16
-		}
-		if len(terms) < 1 || len(terms) > limit {
-			return fmt.Errorf("agreement.%s needs 1-%d specific grounded features", name, limit)
-		}
-		seen := map[string]bool{}
-		for _, v := range terms {
-			k := strings.ToLower(strings.TrimSpace(v))
-			if name == "signals" {
-				k = humanSignalKey(v)
-			}
-			if k == "" || utf8.RuneCountInString(v) < 2 || utf8.RuneCountInString(v) > 80 || genericExperienceAnchor[k] || seen[k] {
-				return errors.New("invalid, generic or duplicate agreement feature")
-			}
-			if err := textguard.Check("agreement.feature", v, false); err != nil {
-				return err
-			}
-			seen[k] = true
-		}
+	if err := validateCues(a.Cues, a.Evidence); err != nil {
+		return err
 	}
 	for name, v := range map[string]string{"requirement": a.Requirement, "applicability": a.Applicability, "boundary": a.Boundary, "authority": a.Authority, "confirmation_reference": a.ConfirmationReference} {
 		if strings.TrimSpace(v) == "" || utf8.RuneCountInString(v) > 240 {
@@ -101,15 +79,10 @@ func validateAgreement(a *Agreement) error {
 			return err
 		}
 	}
-	if len(a.Evidence) < 1 || len(a.Evidence) > 3 {
-		return errors.New("agreement needs 1-3 actual evidence locators")
-	}
-	// Reuse evidence admission without asserting a historical failure occurred.
-	probe := Experience{Anchors: a.Anchors, Signals: a.Signals, Pitfall: "validation", Counterexample: "validation", Impact: "validation", Applicability: a.Applicability, Boundary: a.Boundary, Evidence: a.Evidence}
-	if err := validateExperience(&probe); err != nil {
+	if err := validateEvidence(a.Evidence); err != nil {
 		return err
 	}
-	b, _ := json.Marshal(a)
+	b, _ := json.Marshal(visibleAgreement(a))
 	if len(b) > 3000 {
 		return errors.New("agreement reference exceeds 3000 bytes; preserve conditions rather than copying source text")
 	}
@@ -119,7 +92,6 @@ func validateAgreement(a *Agreement) error {
 func (s *Store) RecordAgreement(ctx context.Context, in AgreementWrite) (ExperienceReceipt, error) {
 	var zero ExperienceReceipt
 	original, _ := json.Marshal(in)
-	in.Agreement.Signals = uniqueHumanSignals(in.Agreement.Signals)
 	if err := validateAgreement(&in.Agreement); err != nil {
 		return zero, err
 	}
@@ -170,23 +142,9 @@ func (s *Store) RecordAgreement(ctx context.Context, in AgreementWrite) (Experie
 		e.SHA256 = actual
 	}
 	a := in.Agreement
-	keys := a
-	keys.Anchors = append([]string(nil), a.Anchors...)
-	keys.Signals = append([]string(nil), a.Signals...)
-	keys.AnchorPrefixes = append([]string(nil), a.AnchorPrefixes...)
-	keys.Evidence = append([]ExperienceEvidence(nil), a.Evidence...)
-	for i := range keys.Evidence {
-		if keys.Evidence[i].Path != "" {
-			keys.Evidence[i].SHA256 = ""
-		}
-	}
-	sort.Strings(keys.Anchors)
-	sort.Strings(keys.Signals)
-	sort.Strings(keys.AnchorPrefixes)
-	b, _ := json.Marshal(keys)
-	d := Draft{Kind: "record", Scope: in.Scope, Title: in.Title, Body: fmt.Sprintf("识别特征：%s；%s\n已确认约定：%s\n适用条件：%s\n边界与未知：%s\n权威来源：%s", strings.Join(a.Anchors, ", "), strings.Join(a.Signals, ", "), a.Requirement, a.Applicability, a.Boundary, a.Authority), Origin: "user_supplied", SourceRef: a.ConfirmationReference, RequestID: in.RequestID, Profile: &Profile{Class: "long_term", FutureUse: a.Applicability, CounterCheck: "Pointer to an explicitly confirmed agreement; not inferred from an agent or a correction alone.", Applicability: a.Applicability, Boundary: a.Boundary, Agreement: &a}}
+	d := Draft{Kind: "record", Scope: in.Scope, Title: in.Title, Body: fmt.Sprintf("已确认约定：%s\n适用条件：%s\n边界与未知：%s\n权威来源：%s", a.Requirement, a.Applicability, a.Boundary, a.Authority), Origin: "user_supplied", SourceRef: a.ConfirmationReference, RequestID: in.RequestID, Profile: &Profile{Class: "long_term", FutureUse: a.Applicability, CounterCheck: "Pointer to an explicitly confirmed agreement.", Applicability: a.Applicability, Boundary: a.Boundary, Agreement: &a}}
 	d.referenceValidated = true
-	d.experienceKey = "agreement-v1:" + digestText(string(b))
+	d.experienceKey = agreementKey(&a)
 	d.requestFingerprint = fingerprint
 	e, err := s.Put(ctx, d, in.PreviousID)
 	if err != nil {
@@ -201,17 +159,68 @@ func agreementReceipt(e Entry, reused bool) ExperienceReceipt {
 	return r
 }
 
-func recognitionFeatures(e Entry) (anchors, signals, prefixes []string) {
-	if e.Profile == nil {
-		return
+// AgreementBody contains the confirmed material delivered to the host.
+type AgreementBody struct {
+	Requirement           string               `json:"requirement"`
+	Applicability         string               `json:"applicability"`
+	Boundary              string               `json:"boundary"`
+	Authority             string               `json:"authority"`
+	ConfirmationReference string               `json:"confirmation_reference"`
+	Evidence              []ExperienceEvidence `json:"evidence"`
+	RelatedFacts          []string             `json:"related_facts,omitempty"`
+}
+
+func visibleAgreement(a *Agreement) *AgreementBody {
+	body := &AgreementBody{
+		Requirement: a.Requirement, Applicability: a.Applicability, Boundary: a.Boundary,
+		Authority: a.Authority, ConfirmationReference: a.ConfirmationReference,
+		Evidence: append([]ExperienceEvidence(nil), a.Evidence...),
 	}
-	if x := e.Profile.Experience; x != nil {
-		return x.Anchors, x.Signals, x.AnchorPrefixes
+	for i := range body.Evidence {
+		body.Evidence[i].SHA256 = ""
 	}
-	if x := e.Profile.Agreement; x != nil {
-		return x.Anchors, x.Signals, x.AnchorPrefixes
+	for _, cue := range a.Cues {
+		if !strings.Contains(a.Requirement+a.Applicability+a.Boundary, cue.Text) {
+			body.RelatedFacts = append(body.RelatedFacts, cue.Text)
+		}
 	}
-	return
+	return body
+}
+
+func agreementKey(a *Agreement) string {
+	copyA := *a
+	copyA.ObjectIDPrefixes = nil
+	copyA.Cues = cueContent(a.Cues)
+	copyA.Evidence = append([]ExperienceEvidence(nil), a.Evidence...)
+	for i := range copyA.Evidence {
+		copyA.Evidence[i].SHA256 = ""
+	}
+	raw, _ := json.Marshal(copyA)
+	return "agreement-v2:" + digestText(string(raw))
+}
+
+func entryCues(e Entry) []ExperienceCue {
+	if e.Profile != nil {
+		if e.Profile.Experience != nil {
+			return e.Profile.Experience.Cues
+		}
+		if e.Profile.Agreement != nil {
+			return e.Profile.Agreement.Cues
+		}
+	}
+	return nil
+}
+
+func entryObjectPrefixes(e Entry) []string {
+	if e.Profile != nil {
+		if e.Profile.Experience != nil {
+			return e.Profile.Experience.ObjectIDPrefixes
+		}
+		if e.Profile.Agreement != nil {
+			return e.Profile.Agreement.ObjectIDPrefixes
+		}
+	}
+	return nil
 }
 
 func profileExpired(p *Profile) bool {

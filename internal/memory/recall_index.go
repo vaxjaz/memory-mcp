@@ -70,37 +70,19 @@ func indexRecallEntry(ctx context.Context, tx *sql.Tx, e Entry) error {
 		}
 	}
 	add(e.Title, 3)
-	add(e.Body, 1)
-	addSignals := func(signals []string) {
-		for _, signal := range uniqueHumanSignals(signals) {
-			add(signal, 5)
-			compact := humanSignalKey(signal)
-			if compact != strings.ToLower(signal) {
-				add(compact, 5)
-			}
-		}
+	if len(entryCues(e)) == 0 {
+		add(e.Body, 1)
 	}
 	if e.Profile != nil {
 		if x := e.Profile.Experience; x != nil {
-			add(strings.Join(x.Anchors, " "), 8)
-			add(strings.Join(x.AnchorPrefixes, " "), 8)
-			addSignals(x.Signals)
 			add(x.Applicability, 3)
 			add(x.Pitfall, 2)
 			add(x.Counterexample, 2)
 			add(x.Impact, 2)
 			add(x.Boundary, 1)
-			for _, c := range x.Cues {
-				add(c.Text, 2)
-				for _, a := range c.Entrances {
-					add(a.Value, 8)
-				}
-			}
 		} else if x := e.Profile.Agreement; x != nil {
-			add(strings.Join(x.Anchors, " "), 8)
-			add(strings.Join(x.AnchorPrefixes, " "), 8)
-			addSignals(x.Signals)
 			add(x.Requirement, 3)
+			add(x.Authority, 1)
 			add(x.Applicability, 3)
 			add(x.Boundary, 1)
 		} else {
@@ -108,6 +90,16 @@ func indexRecallEntry(ctx context.Context, tx *sql.Tx, e Entry) error {
 			add(e.Profile.Applicability, 2)
 			add(e.Profile.Boundary, 1)
 			add(strings.Join(e.Profile.SearchHints, " "), 3)
+		}
+	}
+	for _, c := range entryCues(e) {
+		add(c.Text, 2)
+		for _, entrance := range c.Entrances {
+			add(entrance.Value, 8)
+			compact := humanSignalKey(entrance.Value)
+			if entrance.Kind == "business_signal" && compact != strings.ToLower(entrance.Value) {
+				add(compact, 8)
+			}
 		}
 	}
 	length := 0.0
@@ -143,7 +135,10 @@ func migrateRecall(tx *sql.Tx) error {
  `); err != nil {
 		return err
 	}
-	// Derived indexes only: preserve all entry IDs, bodies, profiles and histories.
+	// Rebuild derived data so removed selectors cannot survive migration.
+	if _, err := tx.Exec("DELETE FROM experience_keys; DELETE FROM experience_entrances;"); err != nil {
+		return err
+	}
 	after := ""
 	for {
 		rows, err := tx.Query("SELECT "+qualifiedEntryColumns("e")+",coalesce(p.profile_json,'') FROM entries e LEFT JOIN entry_profiles p ON p.entry_id=e.id WHERE e.id>? ORDER BY e.id LIMIT 64", after)
@@ -181,7 +176,7 @@ func migrateRecall(tx *sql.Tx) error {
 			break
 		}
 	}
-	_, err := tx.Exec("INSERT INTO recall_index_version(id,version)VALUES(1,3) ON CONFLICT(id)DO UPDATE SET version=excluded.version; PRAGMA user_version=5")
+	_, err := tx.Exec("INSERT INTO recall_index_version(id,version)VALUES(1,4) ON CONFLICT(id)DO UPDATE SET version=excluded.version")
 	return err
 }
 
@@ -387,8 +382,12 @@ func (s *Store) rankedRecall(ctx context.Context, scope string, queries []Recall
 		if !e.Current || e.State.State != "active" || profileExpired(e.Profile) {
 			continue
 		}
-		anchors, _, prefixes := recognitionFeatures(e)
-		anchors = append(append([]string{}, anchors...), prefixes...)
+		var entrances []string
+		for _, cue := range entryCues(e) {
+			for _, entrance := range cue.Entrances {
+				entrances = append(entrances, entrance.Value)
+			}
+		}
 		uniq := map[string]bool{}
 		r.Terms = nil
 		for _, qi := range r.Queries {
@@ -397,7 +396,7 @@ func (s *Store) rankedRecall(ctx context.Context, scope string, queries []Recall
 				if complete && !uniq[term] {
 					uniq[term] = true
 					r.Terms = append(r.Terms, term)
-					for _, a := range anchors {
+					for _, a := range entrances {
 						if strings.EqualFold(a, term) {
 							r.Exact++
 						}

@@ -8,7 +8,7 @@ import (
 // Synthetic review fixtures; every database is created by t.TempDir().
 func TestReviewObservedBusinessNewCueRetainsMaterial(t *testing.T) {
 	s, p, in := deliveryFixture(t)
-	in.Experience.AnchorPrefixes = []string{"WXN"}
+	in.Experience.ObjectIDPrefixes = []string{"WXN"}
 	if _, err := s.RecordExperience(ctx, in); err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestReviewObservedBusinessNewCueRetainsMaterial(t *testing.T) {
 
 func TestReviewBusinessObservationExpiresWithoutNativeTurnID(t *testing.T) {
 	s, _, in := deliveryFixture(t)
-	in.Experience.AnchorPrefixes = []string{"WXN"}
+	in.Experience.ObjectIDPrefixes = []string{"WXN"}
 	if _, err := s.RecordExperience(ctx, in); err != nil {
 		t.Fatal(err)
 	}

@@ -34,7 +34,7 @@ def rpc_write_fixture(binary, data, project, business=False):
         {'cue_id':'remark','label':'备注变化','text':'合成实验中备注更新后日志仍保留旧文本。','evidence_refs':['fixture:local-only'],'entrances':[{'kind':'file','value':'RemarkInput.java'},{'kind':'code_symbol','value':'WorkOrder.remark'}]},
         {'cue_id':'log_input','label':'取值入口','text':'合成实验中日志生成读取独立旧参数，备注更新未传入。','evidence_refs':['fixture:local-only'],'entrances':[{'kind':'file','value':'FeedbackLogBuilder.java'},{'kind':'code_symbol','value':'FeedbackLogBuilder.build'}]}]}
     if business:
-        experience['anchor_prefixes']=['WXN']
+        experience['object_id_prefixes']=['WXN']
         experience['cues'][1]['entrances'].append({'kind':'business_signal','value':'生成回馈日志'})
     result = call({'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':'memory_experience_record','arguments':{'scope':'project:delivery-fixture','project':str(project),'title':'isolated delivery fixture','experience':experience}}})
     if result.get('error') or result.get('result',{}).get('isError'): raise RuntimeError(result)

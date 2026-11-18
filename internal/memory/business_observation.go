@@ -99,7 +99,7 @@ func (s *Store) ObserveBusinessRecords(ctx context.Context, host, scope, session
 			if er != nil {
 				return er
 			}
-			_, _, prefixes := recognitionFeatures(e.Entry)
+			prefixes := entryObjectPrefixes(e.Entry)
 			m.Objects = observedObjects(clues, prefixes)
 			if len(m.Objects) != 1 {
 				continue
@@ -159,25 +159,20 @@ func (s *Store) ObservedBusinessMatches(ctx context.Context, host, scope, sessio
 		// Cue material is deliberately absent from the serialized observation.
 		// Restore it from this exact still-current version, never a title, stale
 		// cached sentence or a newer revision with a superficially equal cue ID.
-		x := e.Entry.Profile.Experience
-		if x != nil && len(x.Cues) > 0 {
-			found := false
-			for _, cue := range x.Cues {
-				if cue.ID == m.CueID {
-					m.CueLabel = cue.Label
-					m.CueText = cue.Text
-					found = true
-					break
-				}
+		found := false
+		for _, cue := range entryCues(e.Entry) {
+			if cue.ID == m.CueID {
+				m.CueLabel = cue.Label
+				m.CueText = cue.Text
+				found = true
+				break
 			}
-			if !found {
-				continue
-			}
-		} else if m.CueID != "legacy_primary" {
+		}
+		if !found {
 			continue
 		}
 		m.entry = &e.Entry
-		_, _, prefixes := recognitionFeatures(e.Entry)
+		prefixes := entryObjectPrefixes(e.Entry)
 		objects := observedObjects(clues, prefixes)
 		same := false
 		for _, a := range m.Objects {

@@ -16,7 +16,7 @@ import (
 type ExperienceCue struct {
 	ID           string        `json:"cue_id" jsonschema:"Stable within this experience; multiple entrance aliases share one cue."`
 	Label        string        `json:"label" jsonschema:"Compact association label, at most 24 Unicode characters."`
-	Text         string        `json:"text" jsonschema:"A complete historical counterexample sentence with conditions, at most 160 Unicode characters. Only facts already in this version's body; new risks require a material revision or new experience."`
+	Text         string        `json:"text" jsonschema:"A complete evidence-backed reminder stating the applicable fact, at most 160 Unicode characters. Only facts already in this version's body; new risks require a material revision or new experience."`
 	EvidenceRefs []string      `json:"evidence_refs" jsonschema:"Actual references from this experience's evidence, not invented identifiers."`
 	Entrances    []CueEntrance `json:"entrances" jsonschema:"1-12 directly evidenced code symbols, files, configuration keys or business actions. Never expand a dependency graph."`
 }
@@ -28,16 +28,16 @@ type CueEntrance struct {
 
 var cueIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
 
-func validateCues(x *Experience) error {
-	if len(x.Cues) > 12 {
-		return errors.New("at most 12 distinct evidenced associations; merge aliases")
+func validateCues(cues []ExperienceCue, evidence []ExperienceEvidence) error {
+	if len(cues) == 0 || len(cues) > 12 {
+		return errors.New("provide 1-12 evidenced cues")
 	}
 	refs := map[string]bool{}
-	for _, e := range x.Evidence {
+	for _, e := range evidence {
 		refs[e.Reference] = true
 	}
 	ids, entrances := map[string]bool{}, map[string]bool{}
-	for _, c := range x.Cues {
+	for _, c := range cues {
 		if !cueIDPattern.MatchString(c.ID) || ids[c.ID] {
 			return errors.New("invalid or duplicate stable cue_id")
 		}
@@ -69,7 +69,7 @@ func validateCues(x *Experience) error {
 			if a.Kind != "code_symbol" && a.Kind != "file" && a.Kind != "config" && a.Kind != "business_signal" {
 				return errors.New("unknown entrance kind")
 			}
-			if utf8.RuneCountInString(a.Value) < 2 || utf8.RuneCountInString(a.Value) > 160 || genericExperienceAnchor[strings.ToLower(a.Value)] {
+			if utf8.RuneCountInString(a.Value) < 2 || utf8.RuneCountInString(a.Value) > 160 || genericEntranceValue[strings.ToLower(a.Value)] {
 				return errors.New("entrance must be specific and compact")
 			}
 			if a.Kind == "file" && (!strings.Contains(a.Value, ".") || strings.HasSuffix(a.Value, "/")) {
@@ -132,9 +132,7 @@ func visibleExperience(x *Experience) *ExperienceBody {
 // code reference must not leave a cue pointing outside its preserved evidence.
 func recognitionUpdate(old, submitted *Experience) *Experience {
 	x := *old
-	x.Anchors = submitted.Anchors
-	x.Signals = submitted.Signals
-	x.AnchorPrefixes = submitted.AnchorPrefixes
+	x.ObjectIDPrefixes = submitted.ObjectIDPrefixes
 	x.Cues = append([]ExperienceCue(nil), submitted.Cues...)
 	for i := range x.Cues {
 		x.Cues[i].EvidenceRefs = append([]string(nil), x.Cues[i].EvidenceRefs...)

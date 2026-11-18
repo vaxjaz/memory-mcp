@@ -22,7 +22,6 @@ func TestRecallSearchesEvidenceAndFusesIndependentHostQueries(t *testing.T) {
 		d := in
 		d.Experience.Counterexample = fmt.Sprintf("isolated unrelated counterexample %d", i)
 		d.Experience.Applicability = "仅测试另一种业务条件"
-		d.Experience.Signals = []string{fmt.Sprintf("其他条件%d", i)}
 		if _, err = s.RecordExperience(ctx, d); err != nil {
 			t.Fatal(err)
 		}
@@ -134,8 +133,9 @@ func TestAgreementIsNotAFabricatedExperienceAndRevalidatesSource(t *testing.T) {
 	source := "Only a synthetic confirmed convention for isolated tests."
 	os.WriteFile(filepath.Join(project, "agreement.txt"), []byte(source), 0600)
 	a := AgreementWrite{Scope: in.Scope, Project: project, Title: "隔离业务约定", RequestID: "reference-once", Agreement: Agreement{
-		Anchors: []string{"WXN", "工单"}, AnchorPrefixes: []string{"WXN"}, Signals: []string{"取消"},
-		Requirement: "先核验实际数据再形成附件，仅为隔离测试", Applicability: "测试业务范围内的工单处理", Boundary: "不覆盖审批撤回，也不授予数据库权限",
+		ObjectIDPrefixes: []string{"WXN"},
+		Cues:             []ExperienceCue{{ID: "cancel", Label: "取消前核验", Text: "先核验实际数据再形成附件，仅为隔离测试", EvidenceRefs: []string{"fixture:explicit-owner-agreement"}, Entrances: []CueEntrance{{Kind: "business_signal", Value: "WXN-001 取消"}}}},
+		Requirement:      "先核验实际数据再形成附件，仅为隔离测试", Applicability: "测试业务范围内的工单处理", Boundary: "不覆盖审批撤回，也不授予数据库权限",
 		Authority: "isolated fixture owner", ConfirmationReference: "fixture:explicit-owner-agreement",
 		Evidence: []ExperienceEvidence{{Kind: "business", Reference: "fixture:explicit-owner-agreement", Path: "agreement.txt", Observation: "synthetic agreement source exists"}},
 	}}
@@ -209,7 +209,7 @@ func TestSchemaThreeIndexMigrationPreservesSourceAndHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
-	upgraded, err := Open(dir)
+	upgraded, err := openStore(dir, 10000, filepath.Join(t.TempDir(), "migration.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,6 +231,7 @@ func TestChallengeCanReturnLargeRequiredCasesAcrossBoundedPages(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		in.Experience.Evidence = append(in.Experience.Evidence, ExperienceEvidence{Kind: "runtime", Reference: fmt.Sprintf("fixture:%d:%s", i, strings.Repeat("锚", 180)), Observation: "仅为隔离测试来源，不是真实事故"})
 	}
+	in.Experience.Cues[0].EvidenceRefs = []string{in.Experience.Evidence[0].Reference}
 	for i := 0; i < 2; i++ {
 		d := in
 		d.Experience.Counterexample = fmt.Sprintf("隔离测试中不同的反例分支%d", i)

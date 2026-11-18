@@ -31,8 +31,7 @@ def main():
         try:
             draft = dict(scope=scope, project=str(project), title="Synthetic failure recognition",
                          request_id="fixture-experience", experience=dict(
-                             anchors=["ObjectType"], anchor_prefixes=["OBJ"],
-                             signals=["取消"],
+                             object_id_prefixes=["OBJ"],
                              cues=[dict(cue_id="cancellation",label="状态约束",text="合成取消实验中本地状态未覆盖关联影响限制。",evidence_refs=["fixture:runtime"],entrances=[dict(kind="business_signal",value="取消 OBJ-001")])],
                              pitfall="An isolated task assumes a local status represents every condition",
                              counterexample="Synthetic observation: 取消受状态约束与关联影响限制",
@@ -41,18 +40,28 @@ def main():
                              boundary="Approval withdrawal and inspection alone are different tasks",
                              evidence=[dict(kind="runtime", reference="fixture:runtime",
                                             observation="Only a protocol fixture; not a real incident")]))
+            obsolete = json.loads(json.dumps(draft))
+            obsolete["experience"]["anchors"] = ["ObjectType"]
+            host.tool("memory_experience_record", obsolete, expect_error=True)
             saved = host.tool("memory_experience_record", draft)
             assert saved["indexed"]
             assert host.tool("memory_experience_record", draft)["id"] == saved["id"]
             reference = dict(scope=scope, project=str(project), title="Synthetic confirmed convention",
                              request_id="fixture-agreement", agreement=dict(
-                                 anchors=["ObjectType"], anchor_prefixes=["OBJ"], signals=["取消"],
+                                 object_id_prefixes=["OBJ"],
+                                 cues=[dict(cue_id="confirm", label="确认要求",
+                                            text="Synthetic agreement: obtain current evidence before preparing an attachment",
+                                            evidence_refs=["fixture:owner-confirmed"],
+                                            entrances=[dict(kind="business_signal", value="取消 OBJ-001")])],
                                  requirement="Synthetic agreement: obtain current evidence before preparing an attachment",
                                  applicability="Only the isolated example business scope",
                                  boundary="No database access permission and no approval withdrawal",
                                  authority="isolated fixture owner", confirmation_reference="fixture:owner-confirmed",
                                  evidence=[dict(kind="business", reference="fixture:owner-confirmed",
                                                 path="agreement.txt", observation="Synthetic existing agreement")]))
+            obsolete = json.loads(json.dumps(reference))
+            obsolete["agreement"]["signals"] = ["取消"]
+            host.tool("memory_reference_record", obsolete, expect_error=True)
             agreement = host.tool("memory_reference_record", reference)
             assert agreement["indexed"]
             query = dict(scope=scope, project=str(project), task="Compare the current cancellation scenario",
