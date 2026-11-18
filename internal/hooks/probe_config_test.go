@@ -3,8 +3,10 @@ package hooks
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -140,12 +142,26 @@ func TestCustomProbeConfigValidationAndPath(t *testing.T) {
 	if got := probePath(canonical, root, filepath.Join("new dir", "report.sql")); got != "new dir/report.sql" {
 		t.Fatal(got)
 	}
-	t.Run("external symlink", func(t *testing.T) {
-		if err := os.Symlink(t.TempDir(), filepath.Join(root, "external")); err != nil {
+	t.Run("external redirect", func(t *testing.T) {
+		outside := t.TempDir()
+		link := filepath.Join(root, "external")
+		if runtime.GOOS == "windows" {
+			cmd := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+				"New-Item -ItemType Junction -Path $env:MEMORY_MCP_TEST_LINK -Target $env:MEMORY_MCP_TEST_TARGET -ErrorAction Stop | Out-Null")
+			cmd.Env = append(os.Environ(), "MEMORY_MCP_TEST_LINK="+link, "MEMORY_MCP_TEST_TARGET="+outside)
+			if output, err := cmd.CombinedOutput(); err != nil {
+				t.Skipf("junction not available: %v %s", err, output)
+			}
+		} else if err := os.Symlink(outside, link); err != nil {
 			t.Skipf("symlink not available: %v", err)
 		}
+		t.Cleanup(func() {
+			if err := os.Remove(link); err != nil {
+				t.Error(err)
+			}
+		})
 		if got := probePath(canonical, root, filepath.Join("external", "missing.sql")); got != "" {
-			t.Fatal("symlink outside project contributed clues", got)
+			t.Fatal("redirect outside project contributed clues", got)
 		}
 	})
 }

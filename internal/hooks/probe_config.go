@@ -243,6 +243,20 @@ func probePath(root, cwd, path string) string {
 	if err != nil || relative == "." || !filepath.IsLocal(relative) {
 		return ""
 	}
+	// EvalSymlinks does not identify all Windows reparse points as links.
+	// Root.Stat checks traversal from the project directory's actual handle.
+	known, err := filepath.Rel(root, resolved)
+	if err != nil || !filepath.IsLocal(known) {
+		return ""
+	}
+	project, err := os.OpenRoot(root)
+	if err != nil {
+		return ""
+	}
+	defer project.Close()
+	if _, err := project.Stat(known); err != nil {
+		return ""
+	}
 	return filepath.ToSlash(relative)
 }
 
