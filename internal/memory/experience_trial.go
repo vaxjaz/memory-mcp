@@ -68,12 +68,40 @@ func (s *Store) ExperienceStartTurn(ctx context.Context, host, scope, session, n
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	if current != nativeTurn {
+	// Native turn identity takes precedence. Some adapters provide only an input
+	// event ID; retain its hash as an opaque observation boundary, never prompt
+	// text. Remember seen identities so late replays cannot clear a newer input.
+	boundary := nativeTurn
+	key := ""
+	if nativeTurn != "" {
+		key = digestText("turn\x00" + nativeTurn)
+	} else if eventID != "" {
+		key = digestText("event\x00" + eventID)
+		boundary = "event:" + key
+	} else {
+		// Without either native identity, replay cannot be distinguished from a
+		// new input. Conservatively expire only temporary business observations.
+		boundary = "unknown:" + experienceNonce()
+	}
+	if key != "" {
+		result, e := tx.ExecContext(ctx, "INSERT OR IGNORE INTO experience_input_events VALUES(?,?,?,?)", host, scope, session, key)
+		if e != nil {
+			return e
+		}
+		count, e := result.RowsAffected()
+		if e != nil {
+			return e
+		}
+		if count == 0 {
+			return tx.Commit()
+		}
+	}
+	if current != boundary {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM business_observations WHERE host=? AND scope=? AND session=?", host, scope, session); err != nil {
 			return err
 		}
 	}
-	if _, err = tx.ExecContext(ctx, "INSERT INTO experience_epochs VALUES(?,?,?,?,?) ON CONFLICT(host,scope,session)DO UPDATE SET native_turn=excluded.native_turn", host, scope, session, experienceNonce(), nativeTurn); err != nil {
+	if _, err = tx.ExecContext(ctx, "INSERT INTO experience_epochs VALUES(?,?,?,?,?) ON CONFLICT(host,scope,session)DO UPDATE SET native_turn=excluded.native_turn", host, scope, session, experienceNonce(), boundary); err != nil {
 		return err
 	}
 	return tx.Commit()

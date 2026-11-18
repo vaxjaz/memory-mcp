@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS experience_keys(scope TEXT NOT NULL,fingerprint TEXT 
 CREATE TABLE IF NOT EXISTS experience_policy(scope TEXT PRIMARY KEY,enabled INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS experience_epochs(host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,generation TEXT NOT NULL,native_turn TEXT NOT NULL,PRIMARY KEY(host,scope,session));
 CREATE TABLE IF NOT EXISTS experience_context_events(host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,event_id TEXT NOT NULL,PRIMARY KEY(host,scope,session,event_id));
+CREATE TABLE IF NOT EXISTS experience_input_events(host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,input_key TEXT NOT NULL,PRIMARY KEY(host,scope,session,input_key));
 CREATE TABLE IF NOT EXISTS experience_challenges(id TEXT PRIMARY KEY,consumer TEXT NOT NULL,host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,generation TEXT NOT NULL,project TEXT NOT NULL,candidate_key TEXT NOT NULL,ids_json TEXT NOT NULL,created_at TEXT NOT NULL,completed INTEGER NOT NULL DEFAULT 0,faulted INTEGER NOT NULL DEFAULT 0,UNIQUE(consumer,candidate_key));
 CREATE TABLE IF NOT EXISTS business_observations(host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,generation TEXT NOT NULL,matches_json TEXT NOT NULL,PRIMARY KEY(host,scope,session));
 CREATE TABLE IF NOT EXISTS experience_body_deliveries(consumer TEXT NOT NULL,root_id TEXT NOT NULL,entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,receipt_id TEXT NOT NULL,PRIMARY KEY(consumer,entry_id));

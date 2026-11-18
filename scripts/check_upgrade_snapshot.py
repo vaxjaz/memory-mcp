@@ -43,6 +43,7 @@ def main():
             version_before = db.execute("PRAGMA user_version").fetchone()[0]
             tables = [row[0] for row in db.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
+            delivered_before = db.execute("SELECT count(*) FROM experience_body_deliveries").fetchone()[0] if "experience_body_deliveries" in tables else 0
             # Only these obsolete/derived runtime/index tables may change. Every
             # other preexisting table, including unknown historical tables,
             # must preserve its logical rows exactly.
@@ -66,7 +67,10 @@ def main():
             assert before == after and counts == after_counts, "original source tables changed"
             assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             indexed = db.execute("SELECT count(*) FROM recall_documents").fetchone()[0]
-            assert db.execute("SELECT count(*) FROM experience_body_deliveries").fetchone()[0] == 0
+            delivered_after = db.execute("SELECT count(*) FROM experience_body_deliveries").fetchone()[0]
+            assert delivered_after == delivered_before, "upgrade reset or invented body delivery"
+            input_events_available = db.execute("SELECT count(*) FROM sqlite_master WHERE type='table' AND name='experience_input_events'").fetchone()[0] == 1
+            assert input_events_available
             legacy = db.execute("SELECT count(*) FROM entry_profiles WHERE profile_json LIKE '%experience%'").fetchone()[0]
         assert status["schema_version"] == 5
         restored = False
@@ -83,6 +87,8 @@ def main():
                               schema_after=status["schema_version"], source_tables_unchanged=True,
                               source_table_counts=counts, logical_sha256=after,
                               indexed_documents=indexed, structured_profiles=legacy,
+                              body_delivery_count_preserved=delivered_after,
+                              input_event_table_available=input_events_available,
                               old_binary_backup_restore_verified=restored,
                               migration_ms=round(elapsed, 1))
         if args.out:

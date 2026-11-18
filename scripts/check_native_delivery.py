@@ -18,7 +18,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 
-def rpc_write_fixture(binary, data, project):
+def rpc_write_fixture(binary, data, project, business=False):
     process = subprocess.Popen([binary, 'serve', '--data-dir', str(data)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
     def call(msg):
         process.stdin.write(json.dumps(msg, ensure_ascii=False)+'\n'); process.stdin.flush()
@@ -33,6 +33,9 @@ def rpc_write_fixture(binary, data, project):
     experience = {'anchors':[], 'signals':[], 'pitfall':'合成实验误以为备注变化自动影响日志', 'counterexample':'合成实验中业务备注已更新，日志仍读取独立旧参数。', 'impact':'合成日志可能保留旧文本', 'applicability':'同一合成回馈业务', 'boundary':'条件不同或已修复时可以直接继续，无需修改或登记拒绝', 'evidence':[{'kind':'business','reference':'fixture:local-only','observation':'合成反例，不是真实事故'}], 'cues':[
         {'cue_id':'remark','label':'备注变化','text':'合成实验中备注更新后日志仍保留旧文本。','evidence_refs':['fixture:local-only'],'entrances':[{'kind':'file','value':'RemarkInput.java'},{'kind':'code_symbol','value':'WorkOrder.remark'}]},
         {'cue_id':'log_input','label':'取值入口','text':'合成实验中日志生成读取独立旧参数，备注更新未传入。','evidence_refs':['fixture:local-only'],'entrances':[{'kind':'file','value':'FeedbackLogBuilder.java'},{'kind':'code_symbol','value':'FeedbackLogBuilder.build'}]}]}
+    if business:
+        experience['anchor_prefixes']=['WXN']
+        experience['cues'][1]['entrances'].append({'kind':'business_signal','value':'生成回馈日志'})
     result = call({'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':'memory_experience_record','arguments':{'scope':'project:delivery-fixture','project':str(project),'title':'isolated delivery fixture','experience':experience}}})
     if result.get('error') or result.get('result',{}).get('isError'): raise RuntimeError(result)
     process.stdin.close();process.wait(timeout=10)
@@ -40,7 +43,8 @@ def rpc_write_fixture(binary, data, project):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--scenario',choices=['success','iserror','lifecycle'],default='success');parser.add_argument('--codex',required=True);parser.add_argument('--binary',required=True);parser.add_argument('--out',required=True)
+    parser.add_argument('--scenario',choices=['success','iserror','lifecycle','business'],default='success');parser.add_argument('--codex',required=True);parser.add_argument('--binary',required=True);parser.add_argument('--out',required=True)
+    parser.add_argument('--business-envelope',choices=['json-text','structured'],default='json-text')
     args=parser.parse_args();binary=str(Path(args.binary).resolve());start=time.monotonic()
     with tempfile.TemporaryDirectory(prefix='memory-native-delivery-') as temp:
         root=Path(temp);project=root/'project';project.mkdir();home=root/'home';home.mkdir();data=root/'data'
@@ -48,7 +52,7 @@ def main():
         (project/'FeedbackLogBuilder.java').write_text('// isolated fixture FeedbackLogBuilder.build\n',encoding='utf-8')
         setup=subprocess.run([binary,'setup','--host','codex','--config',str(home/'config.toml'),'--data-dir',str(data),'--project',str(project),'--scope','project:delivery-fixture','--server-name','delivery-fixture'],capture_output=True,text=True,encoding='utf-8')
         if setup.returncode: raise RuntimeError(setup.stderr)
-        rpc_write_fixture(binary,data,project)
+        rpc_write_fixture(binary,data,project,args.scenario=='business')
         if args.scenario=='iserror':
             # Generate a real receipt, then simulate an MCP error before the
             # native host sees the result. No generated receipt may be credited.
@@ -64,22 +68,9 @@ def main():
         # A real read-only MCP fixture avoids depending on nested shell sandbox
         # capabilities. It cannot read outside the two synthetic file names.
         reader=root/'fixture_reader.py'
-        reader.write_text("""import json,sys
-from pathlib import Path
-root=Path(sys.argv[1])
-for line in sys.stdin:
- r=json.loads(line);method=r.get('method');p=r.get('params',{});result={}
- if 'id' not in r:continue
- if method=='initialize':result={'protocolVersion':'2025-11-25','capabilities':{'tools':{}},'serverInfo':{'name':'fixture-files','version':'1'}}
- elif method=='tools/list':result={'tools':[{'name':'read_file','description':'Read one of two isolated synthetic files','annotations':{'readOnlyHint':True,'destructiveHint':False,'openWorldHint':False},'inputSchema':{'type':'object','properties':{'path':{'type':'string'}},'required':['path']}}]}
- elif method=='tools/call':
-  name=p['arguments']['path']
-  if name not in ('RemarkInput.java','FeedbackLogBuilder.java'):raise ValueError('outside fixture')
-  result={'content':[{'type':'text','text':(root/name).read_text()}]}
- print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':result}),flush=True)
-""",encoding='utf-8')
+        reader.write_text('import json,sys\nfrom pathlib import Path\nroot=Path(sys.argv[1]);envelope=sys.argv[2]\nannotations={\'readOnlyHint\':True,\'destructiveHint\':False,\'openWorldHint\':False}\nfor line in sys.stdin:\n r=json.loads(line);method=r.get(\'method\');p=r.get(\'params\',{});result={}\n if \'id\' not in r:continue\n if method==\'initialize\':result={\'protocolVersion\':\'2025-11-25\',\'capabilities\':{\'tools\':{}},\'serverInfo\':{\'name\':\'fixture-files\',\'version\':\'1\'}}\n elif method==\'tools/list\':result={\'tools\':[{\'name\':\'read_file\',\'description\':\'Read one of two isolated synthetic files\',\'annotations\':annotations,\'inputSchema\':{\'type\':\'object\',\'properties\':{\'path\':{\'type\':\'string\'}},\'required\':[\'path\']}},{\'name\':\'query_orders\',\'description\':\'Return three constant synthetic records; no external data access\',\'annotations\':annotations,\'inputSchema\':{\'type\':\'object\',\'properties\':{}}},{\'name\':\'query\',\'description\':\'Inspect a synthetic fixture object by a constant local query; no SQL execution\',\'annotations\':annotations,\'inputSchema\':{\'type\':\'object\',\'properties\':{\'sql\':{\'type\':\'string\'}},\'required\':[\'sql\']}}]}\n elif method==\'tools/call\':\n  name=p[\'name\']\n  if name==\'read_file\':\n   file=p[\'arguments\'][\'path\']\n   if file not in (\'RemarkInput.java\',\'FeedbackLogBuilder.java\'):raise ValueError(\'outside fixture\')\n   result={\'content\':[{\'type\':\'text\',\'text\':(root/file).read_text()}]}\n  elif name==\'query_orders\':\n   rows={\'rows\':[{\'order_no\':\'WXN-001\',\'action\':\'生成回馈日志\'},{\'order_no\':\'WXN-002\',\'action\':\'普通查询\'},{\'order_no\':\'WXN-003\',\'action\':\'生成回馈日志\'}]}\n   result={\'content\':[{\'type\':\'text\',\'text\':json.dumps(rows)}]}\n   if envelope==\'structured\':result[\'structuredContent\']=rows;result[\'content\']=[{\'type\':\'text\',\'text\':\'生成回馈日志 WXN-002\'}]\n  elif name==\'query\':\n   sql=p[\'arguments\'][\'sql\'];object=\'WXN-001\' if "WXN-001" in sql else \'WXN-002\'\n   result={\'content\':[{\'type\':\'text\',\'text\':json.dumps({\'fixture_query_result\':object})}]}\n  else:raise ValueError(\'unknown fixture tool\')\n print(json.dumps({\'jsonrpc\':\'2.0\',\'id\':r[\'id\'],\'result\':result}),flush=True)\n',encoding='utf-8')
         with (home/'config.toml').open('a',encoding='utf-8') as f:
-            f.write('\n[mcp_servers.fixture-files]\ncommand='+json.dumps(sys.executable)+'\nargs='+json.dumps([str(reader),str(project)])+'\n')
+            f.write('\n[mcp_servers.fixture-files]\ncommand='+json.dumps(sys.executable)+'\nargs='+json.dumps([str(reader),str(project),args.business_envelope])+'\n')
 
         state={'requests':0,'stage':0,'tools':[], 'checks':[], 'challenge':None,'body_seen':False,'cue_seen':False,'material_bytes_by_stage':[]}
         class Handler(BaseHTTPRequestHandler):
@@ -130,6 +121,8 @@ for line in sys.stdin:
                 stage=state['stage'];state['stage']+=1
                 lookup=next((n for n in names if n.endswith('memory_experience_lookup')),None)
                 read=next((n for n in names if n.endswith('.read_file')),None)
+                business_source=next((n for n in names if n.endswith('.query_orders')),None)
+                business_query=next((n for n in names if n.endswith('.query')),None)
                 if stage==0 or stage==2: target='RemarkInput.java';operation='A' if stage==0 else 'repeat_A'
                 elif stage==3 or stage==4: target='FeedbackLogBuilder.java';operation='B' if stage==3 else 'repeat_B'
                 else:target=None;operation='lookup' if stage==1 else 'done'
@@ -137,12 +130,20 @@ for line in sys.stdin:
                     target='RemarkInput.java' if stage in (6,8,10) else None
                     operation='continued_A' if stage==6 else ('post_compact_A' if stage==8 else ('post_compact_lookup' if stage==9 else ('post_compact_retry' if stage==10 else 'done')))
                 if args.scenario=='iserror' and stage>=3:target=None;operation='done'
+                if args.scenario=='business' and stage>=3:
+                    target=None;operation={3:'business_source',4:'ordinary_object',5:'observed_B',6:'repeat_observed_B'}.get(stage,'done')
                 if operation in ('lookup','post_compact_lookup') and state['challenge'] and lookup:
                     name=lookup;arguments={'scope':'project:delivery-fixture','project':str(project),'task':'隔离投递实验中定位备注和日志入口','questions':'合成历史反例与当前入口的条件是否相同','queries':[{'terms':['备注'],'match':'all'}],'challenge_id':state['challenge']}
+                elif operation=='business_source' and business_source:
+                    name=business_source;arguments={}
+                elif operation in ('ordinary_object','observed_B','repeat_observed_B') and business_query:
+                    object='WXN-002' if operation=='ordinary_object' else 'WXN-001'
+                    alias='WorkOrder.remark' if operation=='observed_B' else ('FeedbackLogBuilder.build' if operation=='repeat_observed_B' else '')
+                    name=business_query;arguments={'sql':"select status from fixture where order_no='"+object+"' /* "+alias+" */"}
                 elif target and read:
                     name=read;arguments={'path':target}
                 else:name=None;arguments=None
-                state['checks'].append({'stage':stage,'operation':operation,'native_challenge_seen':bool(state['challenge']),'body_seen':state['body_seen'],'cue_seen':state['cue_seen']})
+                state['checks'].append({'stage':stage,'operation':operation,'native_challenge_seen':bool(state['challenge']),'body_seen':state['body_seen'],'cue_seen':state['cue_seen'],'block_count':state['block_count'],'cue_context_count':state['cue_context_count']})
                 self.send_response(200);self.send_header('Content-Type','text/event-stream');self.end_headers()
                 def emit(event):self.wfile.write(('data: '+json.dumps(event,ensure_ascii=False)+'\n\n').encode());self.wfile.flush()
                 response={'id':f'resp_{stage}','object':'response','status':'in_progress','model':'fixture','output':[]}
@@ -253,6 +254,10 @@ for line in sys.stdin:
             state['native_transport_pass']=bool(state.get('exit_code')==0 and state['stage']==4 and state['generated_receipts']==1 and state['native_body_receipts']==0 and state['native_cue_records']==0)
             state['failure_boundary']='No false delivery credit. This Codex build emits no matching failure event; the technical deadline, not immediate event release, is the fallback.'
         if args.scenario=='lifecycle':state['native_transport_pass']=bool(state.get('exit_code')==0 and state.get('continued_block_count')==1 and state.get('native_compact_generation_changed') and state['native_body_receipts']==2 and state['stage']==12)
+        if args.scenario=='business':
+            state['business_envelope']=args.business_envelope
+            state['repeat_observed_B_added_memory_bytes']=sizes[7]-sizes[6] if len(sizes)>7 else None
+            state['native_transport_pass']=bool(state.get('exit_code')==0 and state['stage']==8 and state['checks'][5]['cue_context_count']==0 and state['checks'][6]['cue_context_count']==1 and state['block_count']==1 and state['native_body_receipts']==1 and state['native_cue_records']==2 and state['repeat_observed_B_added_memory_bytes']==0)
         Path(args.out).write_text(json.dumps(state,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
         print(json.dumps(state,ensure_ascii=False,indent=2))
         if not state['native_transport_pass']:raise SystemExit(1)

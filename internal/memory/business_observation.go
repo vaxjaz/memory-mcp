@@ -69,6 +69,13 @@ func observedObjects(clues string, prefixes []string) []string {
 }
 
 func (s *Store) ObserveBusiness(ctx context.Context, host, scope, session, nativeTurn, clues string) error {
+	return s.ObserveBusinessRecords(ctx, host, scope, session, nativeTurn, []string{clues})
+}
+
+// Each record must contain its own action and a single unambiguous object for
+// this experience. Never combine an action in one result row with another row's
+// identifier. The persisted cache contains only indexed IDs and object hashes.
+func (s *Store) ObserveBusinessRecords(ctx context.Context, host, scope, session, nativeTurn string, records []string) error {
 	var generation, current string
 	err := s.db.QueryRowContext(ctx, "SELECT generation,native_turn FROM experience_epochs WHERE host=? AND scope=? AND session=?", host, scope, session).Scan(&generation, &current)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -80,27 +87,48 @@ func (s *Store) ObserveBusiness(ctx context.Context, host, scope, session, nativ
 	if nativeTurn != "" && nativeTurn != current {
 		return nil
 	}
-	matches, err := s.MatchExperiences(ctx, scope, clues)
-	if err != nil {
-		return err
-	}
 	kept := []ExperienceMatch{}
-	for _, m := range matches {
-		e, er := s.Read(ctx, m.ID)
-		if er != nil {
-			return er
+	positions := map[[2]string]int{}
+	for _, clues := range records {
+		matches, err := s.MatchExperiences(ctx, scope, clues)
+		if err != nil {
+			return err
 		}
-		_, _, prefixes := recognitionFeatures(e.Entry)
-		m.Objects = observedObjects(clues, prefixes)
-		if len(m.Objects) > 0 {
-			kept = append(kept, m)
+		for _, m := range matches {
+			e, er := s.Read(ctx, m.ID)
+			if er != nil {
+				return er
+			}
+			_, _, prefixes := recognitionFeatures(e.Entry)
+			m.Objects = observedObjects(clues, prefixes)
+			if len(m.Objects) != 1 {
+				continue
+			}
+			key := [2]string{m.ID, m.CueID}
+			if at, exists := positions[key]; exists {
+				found := false
+				for _, object := range kept[at].Objects {
+					if object == m.Objects[0] {
+						found = true
+						break
+					}
+				}
+				if !found {
+					kept[at].Objects = append(kept[at].Objects, m.Objects[0])
+				}
+			} else {
+				positions[key] = len(kept)
+				kept = append(kept, m)
+			}
 		}
 	}
 	if len(kept) == 0 {
 		return nil
 	}
 	b, _ := json.Marshal(kept)
-	_, err = s.db.ExecContext(ctx, `INSERT INTO business_observations VALUES(?,?,?,?,?) ON CONFLICT(host,scope,session) DO UPDATE SET generation=excluded.generation,matches_json=excluded.matches_json`, host, scope, session, generation, string(b))
+	// The input may change while matching. A compare-and-write prevents an old
+	// in-flight observation from being inserted after the new input cleared it.
+	_, err = s.db.ExecContext(ctx, `INSERT INTO business_observations SELECT ?,?,?,?,? WHERE EXISTS(SELECT 1 FROM experience_epochs WHERE host=? AND scope=? AND session=? AND generation=? AND native_turn=?) ON CONFLICT(host,scope,session) DO UPDATE SET generation=excluded.generation,matches_json=excluded.matches_json`, host, scope, session, generation, string(b), host, scope, session, generation, current)
 	return err
 }
 
@@ -125,9 +153,30 @@ func (s *Store) ObservedBusinessMatches(ctx context.Context, host, scope, sessio
 		if er != nil {
 			continue
 		}
-		if !e.Entry.Current || e.Entry.NeedsReview || e.Entry.State.State != "active" || e.Entry.Profile == nil || profileExpired(e.Entry.Profile) {
+		if e.Entry.Scope != scope || e.Entry.RootID != m.RootID || !e.Entry.Current || e.Entry.NeedsReview || e.Entry.State.State != "active" || e.Entry.Profile == nil || profileExpired(e.Entry.Profile) {
 			continue
 		}
+		// Cue material is deliberately absent from the serialized observation.
+		// Restore it from this exact still-current version, never a title, stale
+		// cached sentence or a newer revision with a superficially equal cue ID.
+		x := e.Entry.Profile.Experience
+		if x != nil && len(x.Cues) > 0 {
+			found := false
+			for _, cue := range x.Cues {
+				if cue.ID == m.CueID {
+					m.CueLabel = cue.Label
+					m.CueText = cue.Text
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		} else if m.CueID != "legacy_primary" {
+			continue
+		}
+		m.entry = &e.Entry
 		_, _, prefixes := recognitionFeatures(e.Entry)
 		objects := observedObjects(clues, prefixes)
 		same := false

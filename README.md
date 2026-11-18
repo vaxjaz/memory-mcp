@@ -1,4 +1,4 @@
-# memory-mcp 0.6.0-delivery.1
+# memory-mcp 0.6.1-delivery.1
 
 Local verified-experience memory. The host understands the current task, constructs queries and judges applicability. MCP stores compact counterexamples and performs local retrieval; it never calls another model.
 

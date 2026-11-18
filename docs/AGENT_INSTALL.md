@@ -1,4 +1,4 @@
-# Install 0.6.0-delivery.1
+# Install 0.6.1-delivery.1
 
 When the user requests installation/upgrade, identify the actual host and execution OS, service name, original data_dir, real project directory and stable scope from configuration. This document does not grant permission by itself. Never guess from the model name or create a replacement empty library.
 

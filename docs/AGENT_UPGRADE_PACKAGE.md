@@ -1,4 +1,4 @@
-# 0.6.0-delivery.1 standalone upgrade
+# 0.6.1-delivery.1 standalone upgrade
 
 This bundle contains five-platform executables, exact-commit source, checksums and SOURCE_COMMIT. It does not automatically merge main or publish a formal Release.
 

@@ -1,6 +1,6 @@
 # 经验正文与关联点增量提醒：实施方案
 
-状态：已按本方案实现 0.6.0-delivery.1。本文保留原始方案与基线快照；实际验证、限制和安装状态见 DELIVERY_ACCEPTANCE.md，不以方案中的目标代替实测结果。
+状态：已按本方案实现 0.6.1-delivery.1。本文保留原始方案与基线快照；实际验证、限制和安装状态见 DELIVERY_ACCEPTANCE.md，不以方案中的目标代替实测结果。
 
 编写日期：2026-11-17；最终校核：2026-11-18。目标代码库：`memory-mcp-upgrade`；经验 scope：`project:vaxjaz/vax-plan`。
 

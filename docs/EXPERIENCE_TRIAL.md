@@ -27,3 +27,13 @@ MCP calls no model. Hook process startup, SQLite, tool round trips and appended 
 Schema 5 adds derived entrances, delivery ledgers and call/response association, replacing old generated-receipt/challenge/cooldown tables. Original entries/profiles, revisions, IDs, evidence, bindings, policies and maintenance survive. Stop ALL sharing writers and independently back up the complete data directory and client configuration BEFORE any new DB-opening command. Restore pre-upgrade library/config/binary together for rollback. Never point an old executable at the upgraded library.
 
 See DELIVERY_ACCEPTANCE.md for actual measurements and unverified native/model boundaries. Deterministic replay is not evidence that an autonomous model used a counterexample.
+
+## Business observation corrections in 0.6.1
+
+Observed candidates restore the fixed cue label/text from the exact current, active version/cue; missing, retired or revised cues are not promoted. Direct and same-object observed candidates are always combined and deduplicated by version/cue, so a delivered direct match cannot hide another experience or association.
+
+Selected business output is split into bounded records before matching: arrays/rows and MCP content JSON text retain row boundaries; native structuredContent is preferred over its narrative copy. No parent/sibling action is inherited. At most 128 records and 32 KiB of allowed fields are probed. Each record needs one unambiguous identifier for the experience's explicitly registered prefixes; multiple positive records may retain several object hashes for the same cue. Mixed free text containing several recognized objects is not assigned by co-occurrence. Nested formats without observable object/action ownership remain uncovered. No arbitrary tool scanning, source text logging or extra model is added.
+
+Normal input boundaries expire only temporary business observations. Native turn IDs take precedence; when absent, a hashed event ID identifies a new input and its replays. Seen identities prevent late replay from deleting a later input's observation. When both IDs are absent, each prompt conservatively expires temporary observations; replay cannot be distinguished. A tool result with neither an input identity nor an equivalent pre-bound native association cannot be proven to belong to an earlier input after it arrives late. No prompt text/hash is used to fabricate identity. Body/cue delivery and context generation remain unchanged.
+
+Schema remains 5: an additive derived experience_input_events table records only input identity hashes. Upgrading an existing schema-5 library preserves its body/cue deliveries, history, bindings and policies; pre-upgrade complete backup and all-client version consistency remain required.

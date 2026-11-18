@@ -1,0 +1,108 @@
+{
+  "requests": 8,
+  "stage": 8,
+  "checks": [
+    {
+      "stage": 0,
+      "operation": "A",
+      "native_challenge_seen": false,
+      "body_seen": false,
+      "cue_seen": false,
+      "block_count": 0,
+      "cue_context_count": 0
+    },
+    {
+      "stage": 1,
+      "operation": "lookup",
+      "native_challenge_seen": true,
+      "body_seen": false,
+      "cue_seen": false,
+      "block_count": 1,
+      "cue_context_count": 0
+    },
+    {
+      "stage": 2,
+      "operation": "repeat_A",
+      "native_challenge_seen": true,
+      "body_seen": true,
+      "cue_seen": false,
+      "block_count": 1,
+      "cue_context_count": 0
+    },
+    {
+      "stage": 3,
+      "operation": "business_source",
+      "native_challenge_seen": true,
+      "body_seen": true,
+      "cue_seen": false,
+      "block_count": 1,
+      "cue_context_count": 0
+    },
+    {
+      "stage": 4,
+      "operation": "ordinary_object",
+      "native_challenge_seen": true,
+      "body_seen": true,
+      "cue_seen": false,
+      "block_count": 1,
+      "cue_context_count": 0
+    },
+    {
+      "stage": 5,
+      "operation": "observed_B",
+      "native_challenge_seen": true,
+      "body_seen": true,
+      "cue_seen": false,
+      "block_count": 1,
+      "cue_context_count": 0
+    },
+    {
+      "stage": 6,
+      "operation": "repeat_observed_B",
+      "native_challenge_seen": true,
+      "body_seen": true,
+      "cue_seen": true,
+      "block_count": 1,
+      "cue_context_count": 1
+    },
+    {
+      "stage": 7,
+      "operation": "done",
+      "native_challenge_seen": true,
+      "body_seen": true,
+      "cue_seen": true,
+      "block_count": 1,
+      "cue_context_count": 1
+    }
+  ],
+  "body_seen": true,
+  "cue_seen": true,
+  "material_bytes_by_stage": [
+    0,
+    479,
+    2244,
+    2244,
+    2244,
+    2244,
+    2542,
+    2542
+  ],
+  "block_count": 1,
+  "body_result_count": 1,
+  "file_results": 1,
+  "cue_context_count": 1,
+  "cue_context_bytes": 298,
+  "lookup_result_bytes": 1765,
+  "elapsed_seconds": 15.094,
+  "exit_code": 0,
+  "native_body_receipts": 1,
+  "generated_receipts": 1,
+  "faulted_challenges": 0,
+  "native_cue_records": 2,
+  "scenario": "business",
+  "repeat_A_added_memory_bytes": 0,
+  "repeat_B_added_memory_bytes": 0,
+  "native_transport_pass": true,
+  "business_envelope": "structured",
+  "repeat_observed_B_added_memory_bytes": 0
+}

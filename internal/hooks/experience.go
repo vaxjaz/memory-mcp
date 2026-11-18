@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/vaxjaz/memory-mcp/internal/memory"
 )
 
 // Filter before spawning a hook process. Native aliases are explicit; broad
@@ -138,11 +140,13 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		if err != nil {
 			return empty, err
 		} // Run() fails open; never records completion.
-		if len(matches) == 0 && isBusinessTool(e.Tool) {
-			matches, err = r.Store.ObservedBusinessMatches(probe, r.host(), scope, e.Session, e.TurnID, clues)
+		if isBusinessTool(e.Tool) {
+			observed, lookupErr := r.Store.ObservedBusinessMatches(probe, r.host(), scope, e.Session, e.TurnID, clues)
+			err = lookupErr
 			if err != nil {
 				return empty, err
 			}
+			matches = mergeExperienceMatches(matches, observed)
 		}
 		if len(matches) == 0 {
 			return empty, nil
@@ -184,17 +188,32 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		if err != nil || !enabled {
 			return empty, err
 		}
-		clues := businessClues(e, true)
-		if clues == "" {
+		records := businessObservationRecords(e)
+		if len(records) == 0 {
 			return empty, nil
 		}
 		probe, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 		defer cancel()
 		// The source read has already occurred. Observe only; never fabricate a
 		// denial, credit delivery, or inject an unsolicited case body.
-		return empty, r.Store.ObserveBusiness(probe, r.host(), scope, e.Session, e.TurnID, clues)
+		return empty, r.Store.ObserveBusinessRecords(probe, r.host(), scope, e.Session, e.TurnID, records)
 	}
 	return empty, nil
+}
+
+func mergeExperienceMatches(direct, observed []memory.ExperienceMatch) []memory.ExperienceMatch {
+	out := make([]memory.ExperienceMatch, 0, len(direct)+len(observed))
+	seen := map[[2]string]bool{}
+	for _, group := range [][]memory.ExperienceMatch{direct, observed} {
+		for _, match := range group {
+			key := [2]string{match.ID, match.CueID}
+			if !seen[key] {
+				seen[key] = true
+				out = append(out, match)
+			}
+		}
+	}
+	return out
 }
 
 // Only this configured service's lookup gets receipt hooks. Host canonical

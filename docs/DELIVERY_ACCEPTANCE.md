@@ -1,6 +1,20 @@
 # 首次正文与关联点增量交付：实施与验收
 
-版本 0.6.0-delivery.1，integration protocol 6，schema 5。基线 387d44ddf81d75e4367f8513e9ad3543597a7834。保留已有识别归一化草稿，移除未提交的冷却草稿及旧整轮豁免；原草稿在本机 /tmp/memory-delivery-before.tgz 与 patch 留存。目标是嵌套 memory-mcp 的本地宿主组件，不涉及父项目 VPS。
+当前版本 0.6.1-delivery.1，integration protocol 6，schema 5。初次实现基线为 387d44ddf81d75e4367f8513e9ad3543597a7834；本次独立复查修复基线为 48327ce4f4363bde3f9147d19639f17b2e89aa1d。保留已有识别归一化草稿，移除未提交的冷却草稿及旧整轮豁免；原草稿在本机 /tmp/memory-delivery-before.tgz 与 patch 留存。目标是嵌套 memory-mcp 的本地宿主组件，不涉及父项目 VPS。
+
+## 2026-11-18 独立复查与修复（0.6.1）
+
+独立审查增加的三份回归文件均保留。基线四项失败已实际复现：观察落库后 B 的 CueText 丢失导致 silent；已交付 E1 直接命中掩盖未交付 E2；无 turn_id 的 input-a→input-b 复用旧观察；批量取消动作串到普通查询对象。旧版 A25 的单对象测试不足以证明批量和包装格式不会串单，本节补齐此覆盖，不把旧结论外推。
+
+修复从当前仍有效的精确经验版本/cue 恢复固定文本；合并直接和观察候选并去重；以 native turn 或 event ID 哈希识别新输入与重复/晚到重放，只失效临时业务观察，保持正文/cue 账本和 context generation；输出按记录拆分，MCP JSON text 仅在本次事件解析，structuredContent 优先于文本副本。多对象混合自由文本不凭共现建立关系；同一 cue 的多个明确正向记录均保留。
+
+全部 TestReview 回归、组合/反向用例及 Windows 编译测试通过。覆盖当前/旧输入事件重放、两种原生身份、完全无身份的保守失效、历史版本不借新 cue 释放、已有 schema-5 账本升级、两条正确记录保留而普通对象不误触发、6 种结果包装、私密字段排除、探测上限及原有 A→重复 A→B→重复 B。直接与观察同时命中同 cue 后重复 100 次追加为 0；已交付 E1 仍不能释放新 E2。
+
+真实 Windows Codex 0.169.0-alpha.11.1 新增业务场景：先由 A 取得正文，批量来源返回 B 与普通对象，再执行普通对象查询、含已交付 A 入口的 B 对象查询及 B 重试。MCP [JSON text](validation/review-native-business-json.json) 与 [structuredContent](validation/review-native-business-structured.json) 两种包装均通过；后者还包含指向普通对象的冲突叙述副本，未用于推断。两次均实际 block 1、lookup/正文收据 1、A/B cue 记录共 2，普通对象新增 cue 0，B 的具体反例进入后续模型请求，B 重试新增记忆 0 字节；端到端分别 14.672 / 15.094 秒。这是临时库和本地确定性模型的原生传输验收，不是实际 OA 系统或自主语义质量验收。
+
+真实原库只读副本已通过 [schema-5 增量升级与旧包恢复](validation/review-migration.json)：28 条 entries、14 条 profiles、全部源表逻辑哈希一致，副本迁移 327.5 ms；已有非零正文/cue 账本另以隔离回归验证保持不变。
+
+当前仍未验证真实 ZCode/Qoder 原生回执、缺少两类身份的重放识别，以及无可靠输入绑定的旧工具结果晚到归属。未知格式/对象歧义保守不建立观察；可能降低覆盖。MCP isError 没有原生失败事件时的技术超时限制保持不变。下文数字是 0.6.0 首次验收快照，最终安装产物结果另见 DELIVERY_INSTALLATION.json。
 
 ## 已实现
 
