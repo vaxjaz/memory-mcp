@@ -16,21 +16,18 @@ import (
 )
 
 const ManagedID = "decision-memory-hooks-v1"
+const legacyExperienceHooksFlag = "experience-hooks"
 
 func managedHookArgs(o SetupOptions, name string) []any {
-	args := []any{"hook", "--host", o.Host, "--data-dir", o.DataDir, "--managed-id", ManagedID + "|" + name, "--server-name", name}
-	if o.ExperienceHooks {
-		args = append(args, "--experience-hooks")
-	}
-	return args
+	return []any{"hook", "--host", o.Host, "--data-dir", o.DataDir, "--managed-id", ManagedID + "|" + name, "--server-name", name}
 }
 
 type SetupOptions struct {
-	EnableWakeup, DisableWakeup, ExperienceHooks bool
-	Host                                         string
-	Config, DataDir, Project, Scope, Binary      string
-	ServerName                                   string
-	DryRun                                       bool
+	EnableWakeup, DisableWakeup             bool
+	Host                                    string
+	Config, DataDir, Project, Scope, Binary string
+	ServerName                              string
+	DryRun                                  bool
 }
 
 func object(m map[string]any, key string) (map[string]any, error) {
@@ -361,6 +358,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	}
 	var store *memory.Store
 	var databaseBackup string
+	var installExperienceHooks bool
 	desiredTrial := !o.DisableWakeup
 	if !o.DryRun {
 		store, err = memory.Open(o.DataDir)
@@ -392,14 +390,17 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		if er != nil {
 			return nil, er
 		}
-		o.ExperienceHooks = other || desiredTrial
+		installExperienceHooks = other || desiredTrial
 	} else {
-		o.ExperienceHooks = desiredTrial
+		installExperienceHooks = desiredTrial
 	}
 	args := managedHookArgs(o, name)
 	installedEvents := []string{"SessionStart", "UserPromptSubmit"}
-	if o.ExperienceHooks {
+	if installExperienceHooks {
 		installedEvents = append(installedEvents, "PreToolUse", "PostToolUse")
+		if o.Host == "zcode" {
+			installedEvents = append(installedEvents, "PostToolUseFailure")
+		}
 	}
 	for _, event := range installedEvents {
 		group := map[string]any{"hooks": []any{map[string]any{"type": "process", "command": o.Binary, "args": args, "enabled": true, "timeoutMs": 10000}}}
@@ -407,10 +408,13 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 			group["hooks"] = []any{map[string]any{"type": "command", "command": nativeCommand(o, name), "timeout": 10}}
 		}
 		if event == "PreToolUse" {
-			group["matcher"] = "(" + experienceToolMatcher + ")|(" + lookupToolMatcher(name) + ")"
+			group["matcher"] = "(" + experienceToolMatcher + ")|(" + businessToolMatcher + ")|(" + lookupToolMatcher(name) + ")"
 		}
 		if event == "PostToolUse" {
 			group["matcher"] = "(" + businessToolMatcher + ")|(" + lookupToolMatcher(name) + ")"
+		}
+		if event == "PostToolUseFailure" {
+			group["matcher"] = lookupToolMatcher(name)
 		}
 		existing, _ := events[event].([]any)
 		events[event] = append(existing, group)
@@ -424,7 +428,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 		entry["enabled"] = true
 	}
 	servers[name] = entry
-	report := map[string]any{"config": o.Config, "workflow": "verified_experience", "data_dir": o.DataDir, "project": o.Project, "scope": o.Scope, "mcp_server": name, "host_event_verified": false, "restart_required": true, "dry_run": o.DryRun, "wakeup_enabled": desiredTrial, "experience_hooks_installed": o.ExperienceHooks}
+	report := map[string]any{"config": o.Config, "workflow": "verified_experience", "data_dir": o.DataDir, "project": o.Project, "scope": o.Scope, "mcp_server": name, "host_event_verified": false, "restart_required": true, "dry_run": o.DryRun, "wakeup_enabled": desiredTrial, "experience_hooks_installed": installExperienceHooks}
 	report["host"] = o.Host
 	report["hook_trust_required"] = adapter.RequiresTrust
 	report["hooks_config"] = adapter.DefaultHooks(o.Config)

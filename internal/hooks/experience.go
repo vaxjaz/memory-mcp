@@ -15,7 +15,7 @@ import (
 // Filter before spawning a hook process. Native aliases are explicit; broad
 // MCP matching would charge every memory/browser/edit call for a code probe.
 // Regex name filters are documented by all four supported adapters.
-const experienceToolMatcher = "^([Gg]rep|[Gg]lob|[Rr]ead|[Bb]ash|exec_command|run_command|run_in_terminal|terminal|read_file|grep_code|search_file|search_files|code_search|mcp__.+__(read_file|search_files|grep|glob|code_search|get_ticket|read_ticket|search_tickets|get_order|query_order|query_orders|search_orders|query|read_query|execute_query|execute_sql|run_sql|query_database))$"
+const experienceToolMatcher = "^([Gg]rep|[Gg]lob|[Rr]ead|[Bb]ash|exec_command|run_command|run_in_terminal|terminal|read_file|grep_code|search_file|search_files|code_search|mcp__.+__(read_file|search_files|grep|glob|code_search))$"
 
 // Only observable literal arguments are used. This is not a shell parser or a
 // semantic task detector. Unknown/compound wrappers may have no usable clues.
@@ -127,10 +127,17 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 				return empty, nil
 			}
 			err := r.Store.BeginExperienceLookup(ctx, r.host(), scope, e.Session, e.CWD, e.ToolUseID, e.Tool, challenge)
+			if err == nil {
+				_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "lookup_call_bound", e.Tool)
+			}
 			return empty, err // fail-open; no context and never an experience gate
 		}
+		business := isBusinessTool(e.Tool)
 		clues := experienceClues(e)
 		if clues == "" {
+			if business {
+				_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "business_probe_no_clues", e.Tool)
+			}
 			return empty, nil
 		}
 		start := time.Now()
@@ -140,7 +147,7 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		if err != nil {
 			return empty, err
 		} // Run() fails open; never records completion.
-		if isBusinessTool(e.Tool) {
+		if business {
 			observed, lookupErr := r.Store.ObservedBusinessMatches(probe, r.host(), scope, e.Session, e.TurnID, clues)
 			err = lookupErr
 			if err != nil {
@@ -149,13 +156,16 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 			matches = mergeExperienceMatches(matches, observed)
 		}
 		if len(matches) == 0 {
+			if business {
+				_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "business_probe_no_match", e.Tool)
+			}
 			return empty, nil
 		}
 		challenge, err := r.Store.ChallengeExperience(probe, r.host(), scope, e.Session, e.TurnID, e.CWD, matches)
 		if err != nil {
 			return empty, err
 		}
-		info, _ := json.Marshal(map[string]any{"candidate_ids": matches, "outcome": challenge.Outcome, "probe_ms": time.Since(start).Milliseconds()})
+		info, _ := json.Marshal(map[string]any{"tool": e.Tool, "candidate_ids": matches, "outcome": challenge.Outcome, "probe_ms": time.Since(start).Milliseconds()})
 		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "experience_probe", string(info))
 		if challenge.Context != "" {
 			out := contextOutput(e.Name, challenge.Context)
@@ -168,6 +178,12 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		reason := fmt.Sprintf("当前操作命中经验入口。请结合完整任务和当前疑问调用 %s.memory_experience_lookup(scope=%q, task=当前任务, questions=当前疑问, queries=自主检索式, challenge_id=%q)，再重试。", r.serverName(), scope, challenge.ID)
 		return map[string]any{"decision": "block", "reason": reason}, nil
 
+	case "PostToolUseFailure":
+		if !r.isLookup(e.Tool) {
+			return empty, nil
+		}
+		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "lookup_failed_native", e.Tool)
+		return empty, r.Store.FailExperienceLookup(ctx, r.host(), scope, e.Session, e.ToolUseID)
 	case "PostToolUse":
 		if r.isLookup(e.Tool) {
 			result, err := lookupResult(e)
@@ -178,6 +194,8 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 			err = r.Store.ObserveExperienceLookup(ctx, r.host(), scope, e.Session, e.ToolUseID, e.Tool, result)
 			if err != nil {
 				_ = r.Store.FailExperienceLookup(ctx, r.host(), scope, e.Session, e.ToolUseID)
+			} else {
+				_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "lookup_result_observed", e.Tool)
 			}
 			return empty, err
 		}

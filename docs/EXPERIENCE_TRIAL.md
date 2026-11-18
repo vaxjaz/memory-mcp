@@ -20,6 +20,12 @@ A delivered body's unseen cue allows the operation with a fixed fact, grouped by
 
 Two minutes is only a technical stuck-challenge fail-open deadline, never a reminder interval. Failure does not credit a body/cue or schedule compensation. There is no global turn permit, time/count-based reminding, model acknowledgement, skip/complete requirement or Stop continuation. Another experience requires its own first body. A current revision cannot be released by an old receipt. Active voluntary lookup/read is never suppressed.
 
+### MySQL probe and ZCode diagnostics
+
+For recognized database tools, the pre-hook selects bounded fields such as sql, query, and statement. Both bare mysql_query and mcp__<server>__mysql_query use the same probe, independent of the registered server name. SQL must still meet the current entry's cue or legacy anchor-and-signal conditions. A query without a relevant match proceeds normally. Unknown MCP tools and fields such as command/password on a database tool are outside this probe.
+
+ZCode sends turnId and a native call ID. The adapter accepts those fields and its native PostToolUseFailure event for the configured lookup only. Diagnostics in hook_runs distinguish executed business probes with no usable fields or no matches from lookup calls whose successful Post result was verified. Older versions did not log successful Post observations there. For prior data, experience_lookup_calls.receipt_id is the recorded success association. The diagnostic rows contain tool metadata, without SQL or result bodies.
+
 ## Costs and migration
 
 MCP calls no model. Hook process startup, SQLite, tool round trips and appended context cost time/tokens; there is no overwriteable memory slot. Narrow business observations preserve only identifier hashes and candidate IDs, and are invalidated independently on new inputs/context changes. Unknown tools, missing native IDs, absent hooks and unreported pruning remain gaps.

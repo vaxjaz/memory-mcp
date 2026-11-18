@@ -233,37 +233,6 @@ func (s *Store) HookStartForHost(ctx context.Context, host, scope, session, cwd,
 	}
 	return s.HookTurn(ctx, e.ID)
 }
-func (s *Store) HookAttachAnswer(ctx context.Context, t HookTurn, answer string) (HookTurn, error) {
-	if answer == "" || t.AnswerID != "" {
-		return t, nil
-	}
-	source, err := s.Read(ctx, t.SourceID)
-	if err != nil {
-		return t, err
-	}
-	host := source.Entry.Host
-	e, err := s.Put(ctx, Draft{Kind: "record", Scope: t.Scope, Title: "本轮业务答复原文（宿主交付）", Body: answer, Origin: "host_quote", Host: host, Session: t.Session, SourceRef: HookSourcePrefix + host + ":assistant", RequestID: "hook-answer:" + t.SourceID, Links: []Link{{TargetID: t.SourceID, Relation: "context"}}, AllowReplacementCharacters: true}, "")
-	if err != nil {
-		return t, err
-	}
-	_, err = s.db.ExecContext(ctx, `UPDATE hook_turns SET answer_id=? WHERE source_id=? AND answer_id=''`, e.ID, t.SourceID)
-	if err != nil {
-		return t, err
-	}
-	return s.HookTurn(ctx, t.SourceID)
-}
-func (s *Store) HookClaimReview(ctx context.Context, id string) (bool, error) {
-	r, err := s.db.ExecContext(ctx, `UPDATE hook_turns SET attempts=1,status='review_requested' WHERE source_id=? AND attempts=0 AND status='pending'`, id)
-	if err != nil {
-		return false, err
-	}
-	n, err := r.RowsAffected()
-	return n == 1, err
-}
-func (s *Store) HookSetRecall(ctx context.Context, id, fingerprint string) error {
-	_, err := s.db.ExecContext(ctx, `UPDATE hook_turns SET recall=? WHERE source_id=?`, fingerprint, id)
-	return err
-}
 
 type ReviewInput struct {
 	ResponseMode               string   `json:"response_mode,omitempty" jsonschema:"compact: short review receipt with note integrity metadata; full or omitted: legacy response"`

@@ -13,7 +13,7 @@ import (
 
 func TestAdapterWireContracts(t *testing.T) {
 	a, _ := AdapterFor("codex")
-	if _, e := a.Decode([]byte(`{"hook_event_name":"Stop","cwd":"/p","session_id":"s"}`)); e == nil {
+	if _, e := a.Decode([]byte(`{"hook_event_name":"PreToolUse","cwd":"/p","session_id":"s","tool_name":"Grep"}`)); e == nil {
 		t.Fatal("missing native turn accepted")
 	}
 	if _, e := AdapterFor("unknown"); e == nil {

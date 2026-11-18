@@ -96,6 +96,45 @@ def main():
                 assert "compact_experiences" in boot["features"]
                 assert boot["workflow"] == "verified_experience"
                 assert host.tool("memory_read", {"id": "legacy-source"})["entry"]["body"] == "Historical source must survive the workflow change"
+                if adapter == "zcode":
+                    assert "--experience-hooks" not in handler["args"], handler
+                    sql_tool = "mcp__mysql-test__mysql_query"
+                    assert re.search(matcher, sql_tool)
+                    assert re.search(matcher, "mcp__another-service__mysql_query")
+                    assert not re.search(matcher, "mcp__some_service__arbitrary_sql")
+                    failure = current_events["PostToolUseFailure"][0]["matcher"]
+                    assert re.search(failure, "mcp__decision-memory__memory_experience_lookup")
+                    assert not re.search(failure, sql_tool)
+                    sql_case = dict(scope=scope, project=str(project), title="Synthetic SQL metadata rule",
+                                    experience=dict(pitfall="A lookup uses an unverified column name",
+                                                    counterexample="Fixture requires a prior metadata query",
+                                                    impact="An unsuitable query can fail",
+                                                    applicability="Synthetic metadata lookups",
+                                                    boundary="Only this disposable fixture",
+                                                    evidence=[dict(kind="runtime", reference="synthetic-sql",
+                                                                   observation="Isolated Hook replay marker")],
+                                                    cues=[dict(cue_id="metadata", label="Metadata",
+                                                               text="Fixture requires a prior metadata query",
+                                                               evidence_refs=["synthetic-sql"],
+                                                               entrances=[dict(kind="code_symbol", value="information_schema")])]))
+                    host.tool("memory_experience_record", sql_case)
+                    sql = "SELECT PRIVATE_SQL_MARKER FROM information_schema.columns"
+                    for i, (tool, args, expected) in enumerate((
+                            ("Bash", {"command": "grep information_schema fixture.sql"}, True),
+                            (sql_tool, {"sql": sql}, True),
+                            (sql_tool, {"command": sql}, False),
+                            ("mysql_query", {"query": sql}, True),
+                            (sql_tool, {"sql": "SELECT 1", "password": sql}, False),
+                            ("mcp__unrelated__arbitrary_sql", {"sql": sql}, False))):
+                        output = hook("PreToolUse", turn=f"sql-probe-{i}", tool_name=tool, tool_input=args)[1]
+                        assert (output.get("decision") == "block") == expected, (tool, i, output)
+                    with closing(sqlite3.connect(data / "memory.db")) as db:
+                        runs = list(db.execute("SELECT result, detail FROM hook_runs"))
+                    assert any(r == "business_probe_no_clues" and d == sql_tool for r, d in runs), runs
+                    assert any(r == "business_probe_no_match" and d == sql_tool for r, d in runs), runs
+                    assert not any("PRIVATE_SQL_MARKER" in d for _, d in runs), runs
+                else:
+                    assert "PostToolUseFailure" not in current_events, current_events
                 draft = dict(scope=scope, project=str(project), title="Synthetic multi-entry risk",
                              request_id="experience-once",
                              experience=dict(anchors=["LYN", "canDispatchLynOrder"], signals=["创建准入"], cues=[dict(cue_id="admission",label="入口准入",text="合成多入口实验中本地调用未覆盖另一入口的准入条件。",evidence_refs=["isolated fixture"],entrances=[dict(kind="code_symbol",value="canDispatchLynOrder"),dict(kind="business_signal",value="LYN 创建准入")])],
@@ -108,7 +147,8 @@ def main():
                                                             observation="Literal candidate method only",
                                                             path="Policy.java", symbol="canDispatchLynOrder")]))
                 saved = host.tool("memory_experience_record", draft)
-                assert cli("doctor", *options)["experience_index"]["eligible_cases"] == 1
+                case_count = 2 if adapter == "zcode" else 1
+                assert cli("doctor", *options)["experience_index"]["eligible_cases"] == case_count
                 assert host.tool("memory_experience_record", draft)["id"] == saved["id"]
                 assert hook("UserPromptSubmit", prompt="PRIVATE_PROMPT_DO_NOT_COPY")[1] == {}
                 for _ in range(5):
@@ -145,8 +185,11 @@ def main():
                 assert hook("PreToolUse", **payload)[1] == {}
                 assert hook("Stop", last_assistant_message="Do not start an extra model round")[1] == {}
                 with closing(sqlite3.connect(data / "memory.db")) as db:
-                    assert db.execute("select count(*) from entries").fetchone()[0] == 2
+                    assert db.execute("select count(*) from entries").fetchone()[0] == case_count + 1
                     assert "PRIVATE_PROMPT_DO_NOT_COPY" not in json.dumps(list(db.execute("select * from entries")))
+                    assert db.execute(
+                        "select count(*) from hook_runs where event='PostToolUse' and result='lookup_result_observed'"
+                    ).fetchone()[0] == 1
                 assert (project / "AGENTS.md").read_bytes() == rules
                 # A new native input preserves body/cue delivery.
                 hook("UserPromptSubmit", turn="turn-2", prompt="Second isolated request")

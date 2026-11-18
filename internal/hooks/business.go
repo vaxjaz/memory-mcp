@@ -9,7 +9,7 @@ import (
 
 // Tool integration, never business vocabulary or a prescribed workflow. Unknown
 // adapters remain uncovered rather than treating every tool as a semantic probe.
-const businessToolMatcher = "^mcp__.+__(get_ticket|read_ticket|search_tickets|get_order|query_order|query_orders|search_orders|query|read_query|execute_query|execute_sql|run_sql|query_database)$"
+const businessToolMatcher = "^(mysql_query|mcp__.+__(get_ticket|read_ticket|search_tickets|get_order|query_order|query_orders|search_orders|query|mysql_query|read_query|execute_query|execute_sql|run_sql|query_database))$"
 
 var businessTools = regexp.MustCompile(businessToolMatcher)
 

@@ -35,13 +35,14 @@ func inspectManagedWorkflow(report, c map[string]any, services []map[string]any,
 		o := SetupOptions{Host: host, Config: config, Binary: binary, DataDir: data}
 		path := launcherPath(o, name)
 		actual, err := os.ReadFile(path)
-		o.ExperienceHooks = bytes.Contains(actual, []byte("--experience-hooks"))
-		matched := err == nil && bytes.Equal(actual, launcher(o, managedHookArgs(o, name)))
+		args := managedHookArgs(o, name)
+		matched := err == nil && (bytes.Equal(actual, launcher(o, args)) ||
+			bytes.Equal(actual, launcher(o, append(args, "--"+legacyExperienceHooksFlag))))
 		valid[name] = matched && service["matches_opened_data_dir"] == true
 		if !valid[name] {
 			consistent = false
 		}
-		launchers = append(launchers, map[string]any{"server": name, "path": path, "exists": err == nil, "matches_managed_definition": matched, "experience_hooks": o.ExperienceHooks, "uses_opened_data_dir": service["matches_opened_data_dir"], "note": "configuration only; native execution needs separate verification"})
+		launchers = append(launchers, map[string]any{"server": name, "path": path, "exists": err == nil, "matches_managed_definition": matched, "uses_opened_data_dir": service["matches_opened_data_dir"], "note": "configuration only; native execution needs separate verification"})
 	}
 	count := 0
 	obsolete := 0

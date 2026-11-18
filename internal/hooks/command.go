@@ -32,9 +32,11 @@ func Run(ctx context.Context, args []string) error {
 	project := fs.String("project", "", "project directory to bind without modifying it")
 	scope := fs.String("scope", "", "project:<stable identifier>")
 	serverName := fs.String("server-name", "", "explicit MCP server name (use a distinct name and data directory for isolated acceptance)")
-	enableWakeup := fs.Bool("enable-wakeup", false, "enable selective code-query wakeup for this project")
+	enableWakeup := fs.Bool("enable-wakeup", false, "enable selective experience wakeup for this project")
 	disableWakeup := fs.Bool("disable-wakeup", false, "disable selective wakeup without activating an alternative workflow")
-	_ = fs.Bool("experience-hooks", false, "managed launcher capability marker")
+	if cmd == "hook" {
+		_ = fs.Bool(legacyExperienceHooksFlag, false, "accepted for older installed launchers")
+	}
 	reviews := fs.Bool("reviews", false, "doctor: include paginated current needs_review entries for --scope")
 	dry := fs.Bool("dry-run", false, "show setup targets without writing config or opening the database")
 	checkText := fs.Bool("check-text", false, "doctor: scan stored text for invalid UTF-8/U+FFFD without changing it")

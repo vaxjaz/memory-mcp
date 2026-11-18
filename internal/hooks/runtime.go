@@ -9,6 +9,7 @@ import (
 type Event struct {
 	ToolUseID      string         `json:"tool_use_id"`
 	ToolUseIDAlias string         `json:"toolUseId"`
+	ToolCallID     string         `json:"toolCallId"`
 	IsError        bool           `json:"is_error"`
 	Error          any            `json:"error"`
 	Source         string         `json:"source"`
@@ -21,6 +22,7 @@ type Event struct {
 	Prompt         string         `json:"prompt"`
 	EventID        string         `json:"event_id"`
 	TurnID         string         `json:"turn_id"`
+	TurnIDAlias    string         `json:"turnId"`
 	Tool           string         `json:"tool_name"`
 	ToolAlias      string         `json:"toolName"`
 	Input          map[string]any `json:"tool_input"`
@@ -32,6 +34,12 @@ type Event struct {
 func (e *Event) normalize() {
 	if e.ToolUseID == "" {
 		e.ToolUseID = e.ToolUseIDAlias
+	}
+	if e.ToolUseID == "" {
+		e.ToolUseID = e.ToolCallID
+	}
+	if e.TurnID == "" {
+		e.TurnID = e.TurnIDAlias
 	}
 	if e.Name == "" {
 		e.Name = e.NameAlias
@@ -63,7 +71,7 @@ func (r Runtime) Handle(ctx context.Context, e Event) (map[string]any, error) {
 		e.Session = string(identity)
 	}
 	empty := map[string]any{}
-	if e.Name != "SessionStart" && e.Name != "UserPromptSubmit" && e.Name != "PreToolUse" && e.Name != "PostToolUse" {
+	if e.Name != "SessionStart" && e.Name != "UserPromptSubmit" && e.Name != "PreToolUse" && e.Name != "PostToolUse" && !(r.host() == "zcode" && e.Name == "PostToolUseFailure") {
 		return empty, nil
 	}
 	scope, err := r.Store.HookResolve(ctx, e.CWD)
