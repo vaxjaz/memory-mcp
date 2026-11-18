@@ -1,23 +1,20 @@
 package memory
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 	"sort"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
 
 // Cues are evidenced associations with the SAME historical counterexample.
 // Entrances are aliases, not independent risks or model-authored read receipts.
 type ExperienceCue struct {
-	ID           string        `json:"cue_id" jsonschema:"Stable within this experience; multiple entrance aliases share one cue."`
+	ID           string        `json:"cue_id" jsonschema:"Stable within the record. Start with a lowercase ASCII letter; use up to 48 lowercase letters, digits or underscores in total."`
 	Label        string        `json:"label" jsonschema:"Compact association label, at most 24 Unicode characters."`
 	Text         string        `json:"text" jsonschema:"A complete evidence-backed reminder stating the applicable fact, at most 160 Unicode characters. Only facts already in this version's body; new risks require a material revision or new experience."`
-	EvidenceRefs []string      `json:"evidence_refs" jsonschema:"Actual references from this experience's evidence, not invented identifiers."`
+	EvidenceRefs []string      `json:"evidence_refs" jsonschema:"1-3 exact evidence[].reference values from this submitted body. When removing evidence, update all cues that cite it."`
 	Entrances    []CueEntrance `json:"entrances" jsonschema:"1-12 directly evidenced code symbols, files, configuration keys or business actions. Never expand a dependency graph."`
 }
 
@@ -28,64 +25,49 @@ type CueEntrance struct {
 
 var cueIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
 
-func validateCues(cues []ExperienceCue, evidence []ExperienceEvidence) error {
-	if len(cues) == 0 || len(cues) > 12 {
-		return errors.New("provide 1-12 evidenced cues")
-	}
+func (v *recordValidation) cues(root string, cues []ExperienceCue, evidence []ExperienceEvidence) {
+	field := root + ".cues"
+	v.count(field, len(cues), 1, 12, "evidenced cues")
 	refs := map[string]bool{}
 	for _, e := range evidence {
 		refs[e.Reference] = true
 	}
 	ids, entrances := map[string]bool{}, map[string]bool{}
-	for _, c := range cues {
+	for i, c := range cues {
+		row := fmt.Sprintf("%s[%d]", field, i)
 		if !cueIDPattern.MatchString(c.ID) || ids[c.ID] {
-			return errors.New("invalid or duplicate stable cue_id")
+			v.add(row+".cue_id", "must be unique and match [a-z][a-z0-9_]{0,47}")
 		}
 		ids[c.ID] = true
-		for name, v := range map[string]string{"label": c.Label, "text": c.Text} {
-			max := 160
-			if name == "label" {
-				max = 24
-			}
-			if strings.TrimSpace(v) == "" || utf8.RuneCountInString(v) > max {
-				return fmt.Errorf("cue %s needs 1-%d Unicode characters; no truncation", name, max)
-			}
-			if err := textguard.Check("cue."+name, v, false); err != nil {
-				return err
-			}
-		}
-		if len(c.EvidenceRefs) < 1 || len(c.EvidenceRefs) > 3 {
-			return errors.New("cue needs 1-3 existing evidence references")
-		}
-		for _, ref := range c.EvidenceRefs {
+		v.shortText(row+".label", c.Label, 24)
+		v.shortText(row+".text", c.Text, 160)
+		v.count(row+".evidence_refs", len(c.EvidenceRefs), 1, 3, "existing evidence references")
+		for j, ref := range c.EvidenceRefs {
 			if !refs[ref] {
-				return errors.New("cue references evidence absent from this body")
+				v.add(fmt.Sprintf("%s.evidence_refs[%d]", row, j), "does not match any "+root+".evidence[].reference; copy the exact value or revise the cue to use supporting evidence")
 			}
 		}
-		if len(c.Entrances) < 1 || len(c.Entrances) > 12 {
-			return errors.New("cue needs 1-12 evidenced entrances")
-		}
-		for _, a := range c.Entrances {
+		v.count(row+".entrances", len(c.Entrances), 1, 12, "evidenced entrances")
+		for j, a := range c.Entrances {
+			entrance := fmt.Sprintf("%s.entrances[%d]", row, j)
 			if a.Kind != "code_symbol" && a.Kind != "file" && a.Kind != "config" && a.Kind != "business_signal" {
-				return errors.New("unknown entrance kind")
+				v.add(entrance+".kind", "must be code_symbol, file, config or business_signal")
 			}
-			if utf8.RuneCountInString(a.Value) < 2 || utf8.RuneCountInString(a.Value) > 160 || genericEntranceValue[strings.ToLower(a.Value)] {
-				return errors.New("entrance must be specific and compact")
+			v.count(entrance+".value", utf8.RuneCountInString(a.Value), 2, 160, "Unicode characters")
+			if genericEntranceValue[strings.ToLower(a.Value)] {
+				v.add(entrance+".value", "must identify a specific entrance")
 			}
 			if a.Kind == "file" && (!strings.Contains(a.Value, ".") || strings.HasSuffix(a.Value, "/")) {
-				return errors.New("file entrance must name a file, not a directory")
+				v.add(entrance+".value", "must name a file")
 			}
-			if err := textguard.Check("entrance", a.Value, false); err != nil {
-				return err
-			}
+			v.checkText(entrance+".value", a.Value)
 			key := a.Kind + ":" + humanSignalKey(a.Value)
 			if entrances[key] {
-				return errors.New("one entrance cannot manufacture multiple cues")
+				v.add(entrance+".value", "duplicates another entrance in this record")
 			}
 			entrances[key] = true
 		}
 	}
-	return nil
 }
 
 // Content identity intentionally excludes entrance aliases, code hashes and

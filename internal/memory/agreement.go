@@ -11,9 +11,6 @@ import (
 	"os"
 	"strings"
 	"time"
-	"unicode/utf8"
-
-	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
 
 // A compact pointer to an existing, explicitly confirmed agreement. It is not
@@ -34,7 +31,7 @@ type AgreementWrite struct {
 	Project    string    `json:"project"`
 	Title      string    `json:"title"`
 	Agreement  Agreement `json:"agreement"`
-	PreviousID string    `json:"previous_id,omitempty"`
+	PreviousID string    `json:"previous_id,omitempty" jsonschema:"Full current agreement revision ID. Send the complete revised agreement, including evidence and cue references."`
 	RequestID  string    `json:"request_id,omitempty"`
 }
 
@@ -65,28 +62,22 @@ func validateAgreement(a *Agreement) error {
 	if a == nil {
 		return errors.New("agreement required")
 	}
+	var validation recordValidation
 	if err := validatePrefixes(a.ObjectIDPrefixes); err != nil {
-		return err
+		validation.add("agreement.object_id_prefixes", err.Error())
 	}
-	if err := validateCues(a.Cues, a.Evidence); err != nil {
-		return err
-	}
-	for name, v := range map[string]string{"requirement": a.Requirement, "applicability": a.Applicability, "boundary": a.Boundary, "authority": a.Authority, "confirmation_reference": a.ConfirmationReference} {
-		if strings.TrimSpace(v) == "" || utf8.RuneCountInString(v) > 240 {
-			return fmt.Errorf("agreement.%s needs 1-240 characters", name)
-		}
-		if err := textguard.Check(name, v, false); err != nil {
-			return err
-		}
-	}
-	if err := validateEvidence(a.Evidence); err != nil {
-		return err
-	}
+	validation.shortText("agreement.requirement", a.Requirement, 240)
+	validation.shortText("agreement.applicability", a.Applicability, 240)
+	validation.shortText("agreement.boundary", a.Boundary, 240)
+	validation.shortText("agreement.authority", a.Authority, 240)
+	validation.shortText("agreement.confirmation_reference", a.ConfirmationReference, 240)
+	validation.evidence("agreement", a.Evidence)
+	validation.cues("agreement", a.Cues, a.Evidence)
 	b, _ := json.Marshal(visibleAgreement(a))
 	if len(b) > 3000 {
-		return errors.New("agreement reference exceeds 3000 bytes; preserve conditions rather than copying source text")
+		validation.add("agreement", fmt.Sprintf("body budget is 3000 UTF-8 bytes, got %d; condense prose and preserve conditions", len(b)))
 	}
-	return nil
+	return validation.err()
 }
 
 func (s *Store) RecordAgreement(ctx context.Context, in AgreementWrite) (ExperienceReceipt, error) {

@@ -13,9 +13,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
-
-	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
 
 // Experience is an observed failure pattern, never a prescribed implementation.
@@ -23,18 +20,18 @@ import (
 type Experience struct {
 	Cues             []ExperienceCue      `json:"cues" jsonschema:"Evidenced stable associations; provide with the synchronous write. New facts require a revision. Entrances are aliases, not separate risks."`
 	ObjectIDPrefixes []string             `json:"object_id_prefixes,omitempty" jsonschema:"Prefixes of object identifiers for same-input business result association only; no effect on direct matching or search."`
-	Pitfall          string               `json:"pitfall" jsonschema:"The fallible inference that this incident challenged, not a correct destination or instruction"`
-	Counterexample   string               `json:"counterexample" jsonschema:"Observed code/runtime/business evidence that challenges that inference; distinguish observation from explanation"`
-	Impact           string               `json:"impact" jsonschema:"Concrete possible bug, affected behavior or wrong decision if this condition is missed; do not invent an incident"`
-	Applicability    string               `json:"applicability" jsonschema:"Conditions in which this failure pattern is worth investigating"`
-	Boundary         string               `json:"boundary" jsonschema:"Exceptions, different environments and unknowns; no universally correct implementation"`
+	Pitfall          string               `json:"pitfall" jsonschema:"1-240 Unicode characters. The fallible inference that this incident challenged."`
+	Counterexample   string               `json:"counterexample" jsonschema:"1-240 Unicode characters. Summarize the observation that challenges the inference and separate it from the explanation."`
+	Impact           string               `json:"impact" jsonschema:"1-240 Unicode characters. Concrete possible bug, affected behavior or wrong decision if this condition is missed."`
+	Applicability    string               `json:"applicability" jsonschema:"1-240 Unicode characters. Conditions in which this failure pattern is worth investigating."`
+	Boundary         string               `json:"boundary" jsonschema:"1-240 Unicode characters. Exceptions, different environments and unknowns."`
 	Evidence         []ExperienceEvidence `json:"evidence" jsonschema:"1-3 actual evidence locators; no entire conversations or source files"`
 }
 
 type ExperienceEvidence struct {
 	Kind        string `json:"kind" jsonschema:"code/runtime/business; host verifies truth."`
-	Reference   string `json:"reference" jsonschema:"Actual commit, trace or confirmed-agreement locator."`
-	Observation string `json:"observation" jsonschema:"Verified observation; no raw source or assumed cause."`
+	Reference   string `json:"reference" jsonschema:"1-240 Unicode characters. Actual commit, trace or confirmed-agreement locator. Cue references copy this exact value."`
+	Observation string `json:"observation" jsonschema:"1-180 Unicode characters. Compact verified observation; no raw source or assumed cause."`
 	Path        string `json:"path,omitempty" jsonschema:"Existing file within bound workspace; required for code."`
 	Symbol      string `json:"symbol,omitempty" jsonschema:"Literal locator, not semantic proof."`
 	SHA256      string `json:"sha256,omitempty" jsonschema:"Optional expected SHA256; rejects local source drift."`
@@ -45,7 +42,7 @@ type ExperienceWrite struct {
 	Project    string     `json:"project" jsonschema:"Actual bound project directory; not inferred from a model name or another machine"`
 	Title      string     `json:"title"`
 	Experience Experience `json:"experience"`
-	PreviousID string     `json:"previous_id,omitempty" jsonschema:"Current case revision for a material correction; omit to create/deduplicate"`
+	PreviousID string     `json:"previous_id,omitempty" jsonschema:"Full current case revision ID for a material correction. Send the complete revised experience, including evidence and cue references. Omit to create/deduplicate."`
 	RequestID  string     `json:"request_id,omitempty" jsonschema:"Reuse only when retrying the exact same submitted write"`
 }
 
@@ -93,61 +90,25 @@ func validateExperience(x *Experience) error {
 	if x == nil {
 		return errors.New("experience required")
 	}
+	var validation recordValidation
 	if err := validatePrefixes(x.ObjectIDPrefixes); err != nil {
-		return err
+		validation.add("experience.object_id_prefixes", err.Error())
 	}
-	for name, value := range map[string]string{
-		"pitfall": x.Pitfall, "counterexample": x.Counterexample, "impact": x.Impact,
-		"applicability": x.Applicability, "boundary": x.Boundary,
-	} {
-		if strings.TrimSpace(value) == "" || utf8.RuneCountInString(value) > 240 {
-			return fmt.Errorf("experience.%s needs 1-240 characters; preserve essential conditions, not a transcript", name)
-		}
-		if err := textguard.Check(name, value, false); err != nil {
-			return err
-		}
-	}
-	if err := validateEvidence(x.Evidence); err != nil {
-		return err
-	}
-	if err := validateCues(x.Cues, x.Evidence); err != nil {
-		return err
-	}
+	validation.shortText("experience.pitfall", x.Pitfall, 240)
+	validation.shortText("experience.counterexample", x.Counterexample, 240)
+	validation.shortText("experience.impact", x.Impact, 240)
+	validation.shortText("experience.applicability", x.Applicability, 240)
+	validation.shortText("experience.boundary", x.Boundary, 240)
+	validation.evidence("experience", x.Evidence)
+	validation.cues("experience", x.Cues, x.Evidence)
 	body, _ := json.Marshal(visibleExperience(x))
 	if len(body) > 3000 {
-		return errors.New("experience exceeds 3000-byte feature budget; split independent mechanisms, never drop conditions")
+		validation.add("experience", fmt.Sprintf("body budget is 3000 UTF-8 bytes, got %d; condense prose and preserve conditions", len(body)))
 	}
-	return nil
+	return validation.err()
 }
 
 // Resolve symlinks before reading; memory content never authorizes external reads.
-func validateEvidence(evidence []ExperienceEvidence) error {
-	if len(evidence) < 1 || len(evidence) > 3 {
-		return errors.New("experience needs 1-3 actual evidence locators")
-	}
-	for _, e := range evidence {
-		if e.Kind != "code" && e.Kind != "runtime" && e.Kind != "business" {
-			return errors.New("evidence.kind must be code/runtime/business")
-		}
-		if strings.TrimSpace(e.Reference) == "" || strings.TrimSpace(e.Observation) == "" ||
-			utf8.RuneCountInString(e.Reference) > 240 || utf8.RuneCountInString(e.Observation) > 180 {
-			return errors.New("evidence requires compact reference and verified observation")
-		}
-		if e.Kind == "code" && e.Path == "" {
-			return errors.New("code evidence requires a project-relative path")
-		}
-		if len(e.Path) > 512 || len(e.Symbol) > 160 {
-			return errors.New("evidence path/symbol too long")
-		}
-		for _, v := range []string{e.Reference, e.Observation, e.Path, e.Symbol} {
-			if err := textguard.Check("evidence", v, false); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
 func experienceFile(project, relative string) (string, error) {
 	if relative == "" || filepath.IsAbs(relative) || strings.Contains(relative, "\\") && filepath.Separator != '\\' {
 		return "", errors.New("code path must be project-relative")

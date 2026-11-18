@@ -6,6 +6,8 @@ After a correction or autonomous discovery is verified, synchronously memory_exp
 
 A new risk, changed condition or boundary is a material previous_id revision (or an independent new experience), not a short-only alias. Alias/line/hash relocation preserves the existing version and delivery records. Body, cues and index commit atomically. request_id retries the same submission; indexed is only a storage receipt.
 
+For a revision, use the full current ID and send the complete revised body. Copy each cue reference exactly from the submitted evidence[].reference values. If evidence is removed, review the cues that cited it in the same submission. Resolve the listed field errors together before resubmitting.
+
 Use memory_reference_record for compact pointers to existing explicitly confirmed agreements. Include authority, confirmation locator, scope, exceptions and evidence-backed cues. Indexing creates no authority. Changes of meaning/scope require the relevant authorization.
 
 Use cues[].entrances for distinctive trigger phrases and identifiers. Optional object_id_prefixes belongs to the same-input business-result association only. A newer client can inspect an older library with memory-mcp migrate. When the migration report lists a record without cues, read its evidence, verify applicability, then submit a new cue with previous_id to activate the revised record.

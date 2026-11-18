@@ -96,7 +96,9 @@ def main():
             no_authority = json.loads(json.dumps(reference))
             no_authority["request_id"] = "unconfirmed"
             no_authority["agreement"]["authority"] = ""
-            host.tool("memory_reference_record", no_authority, expect_error=True)
+            no_authority["agreement"]["cues"][0]["evidence_refs"] = ["missing-agreement-reference"]
+            errors = host.tool("memory_reference_record", no_authority, expect_error=True)["content"][0]["text"]
+            assert "agreement.authority" in errors and "agreement.cues[0].evidence_refs[0]" in errors, errors
             # Run the configured executable hook, not only the store methods.
             events = json.loads(config.read_text())["hooks"]["events"]
             handler = events["PreToolUse"][0]["hooks"][0]
@@ -130,6 +132,44 @@ def main():
                         tool_input={"sql":"select status from t where object_no='OBJ-001'"}) == {}
             assert not host.tool("memory_search", dict(scope=scope, query="PRIVATE_PROMPT_SENTINEL PRIVATE_RESULT_SENTINEL",
                                                       include_events=True))["results"]
+            revision = json.loads(json.dumps(draft))
+            revision.update(previous_id=saved["id"], request_id="fixture-revision")
+            body = revision["experience"]
+            original_evidence = body["evidence"][:]
+            body["counterexample"] = "例" * 241
+            body["evidence"] += [
+                dict(kind="runtime", reference="fixture:second", observation="A second fixture observation"),
+                dict(kind="runtime", reference="fixture:third", observation="A third fixture observation"),
+                dict(kind="business", reference="fixture:fourth", observation="述" * 181),
+            ]
+            body["cues"][0]["evidence_refs"] = ["misspelled-fixture-reference"]
+            rejected = host.tool("memory_experience_record", revision, expect_error=True)["content"][0]["text"]
+            assert "no write performed" in rejected, rejected
+            for issue in (
+                "experience.counterexample: needs 1-240 Unicode characters, got 241",
+                "experience.evidence: needs 1-3 actual evidence locators, got 4",
+                "experience.evidence[3].observation: needs 1-180 Unicode characters, got 181",
+                "experience.cues[0].evidence_refs[0]: does not match any experience.evidence[].reference",
+            ):
+                assert issue in rejected, rejected
+            assert "misspelled-fixture-reference" not in rejected, rejected
+            assert host.tool("memory_read", {"id": saved["id"]})["entry"]["current"]
+
+            body["counterexample"] = "An independent synthetic condition also affects cancellation."
+            body["evidence"] = original_evidence
+            body["cues"][0]["evidence_refs"] = ["fixture:fourth"]
+            dangling = host.tool("memory_experience_record", revision, expect_error=True)["content"][0]["text"]
+            assert "experience.cues[0].evidence_refs[0]" in dangling, dangling
+
+            body["cues"][0]["evidence_refs"] = [original_evidence[0]["reference"]]
+            typo = json.loads(json.dumps(revision))
+            typo["experience"]["pitfall "] = typo["experience"].pop("pitfall")
+            typo_error = host.tool("memory_experience_record", typo, expect_error=True)["content"][0]["text"]
+            assert '"pitfall "' in typo_error, typo_error
+            replacement = host.tool("memory_experience_record", revision)
+            assert replacement["id"] != saved["id"] and replacement["root_id"] == saved["root_id"], replacement
+            assert not host.tool("memory_read", {"id": saved["id"]})["entry"]["current"]
+            assert host.tool("memory_read", {"id": replacement["id"]})["entry"]["previous_id"] == saved["id"]
         finally:
             host.close()
         print(json.dumps(dict(result="PASS", coverage="actual executable MCP: indexed writes, multi-query recall, source identity, paging, drift and admission",

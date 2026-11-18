@@ -55,9 +55,6 @@ func New(store *memory.Store, version string) *mcp.Server {
 		return experienceTextResult(BootstrapOutput{Workflow: "verified_experience", Version: version, ProtocolVersion: "7", DataDir: store.Dir, Storage: "Local SQLite inverted full-text index; no outbound network, translation, embedding or model calls", Guide: Guide, SchemaVersion: memory.SchemaVersion, Features: []string{"compact_experiences", "synchronous_experience_writes", "agreement_references", "atomic_recall_index", "host_generated_multi_query", "ranked_full_text_recall", "recall_pagination", "selective_code_wakeup", "selective_business_wakeup", "current_evidence_locations", "request_id", "historical_read_access", "user_approved_cleanup", "cleanup_schedule", "backup_and_undo", "strict_text_integrity", "single_copy_json", "native_lookup_receipts", "context_delivery_ledger", "evidenced_cues"}}, nil)
 	})
 	mcp.AddTool(s, &mcp.Tool{Name: "memory_experience_record", Description: "Synchronously save verified recognition features after a user correction or autonomous discovery challenges an inference. Include the counterexample, impact, conditions, boundaries, evidence and stable cues with grounded entrances. Multiple entrances may share a cue. Cue facts enter the first body; alias-only changes preserve its version. Corrections are signals, not truth. Ordinary facts/progress do not qualify. No transcript or prescribed destination. Locators/hashes check mechanics, not semantics. Repeats deduplicate; previous_id makes a material correction or converts a verified historical case.", Annotations: wr}, func(ctx context.Context, req *mcp.CallToolRequest, in memory.ExperienceWrite) (*mcp.CallToolResult, any, error) {
-		if len(in.Experience.Cues) == 0 {
-			return experienceTextResult(nil, errors.New("provide evidenced cues with this synchronous write"))
-		}
 		o, e := store.RecordExperience(ctx, in)
 		return experienceTextResult(o, toolError("memory_experience_record", store, e))
 	})
