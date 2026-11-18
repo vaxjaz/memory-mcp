@@ -21,4 +21,39 @@ memory_experience_record saves verified failure features; memory_reference_recor
 
 Version 0.6.2 uses schema 5 and integration protocol 6. Existing schema-5 history and delivery records carry forward. Upgrades from schemas 3/4 rebuild derived state, including context-scoped delivery records and cue entrances, while preserving source history. The pre-upgrade backup MUST precede every database-opening command. Older schema-3/4 executables cannot open the upgraded library. Index migration preserves original IDs, bodies, profiles and history without promoting legacy prose into trigger rules.
 
+## Customize tool probes
+
+Available starting with the 0.6.3 development build. Create a UTF-8 file named tool-probes.json in the **original memory data directory**. Use the same project scope as setup. The example adds two ZCode file-tool probes for SQL and one MCP tool whose server name may differ by installation.
+
+```json
+{
+  "projects": {
+    "project:example/team-repo": [
+      {
+        "tool": "Write",
+        "path_field": "file_path",
+        "text_fields": ["content"],
+        "extensions": [".sql"]
+      },
+      {
+        "tool": "Edit",
+        "path_field": "file_path",
+        "text_fields": ["new_string"],
+        "extensions": [".sql"]
+      },
+      {
+        "mcp_tool": "warehouse_query",
+        "text_fields": ["arguments.statement"]
+      }
+    ]
+  }
+}
+```
+
+- Use tool for an exact, case-sensitive name in the client's tool event. Use mcp_tool for a bare MCP tool name such as warehouse_query. It matches names of the form mcp__<server>__warehouse_query across server names. An exact rule takes priority over an overlapping MCP rule.
+- The default mode, append, adds the selected fields to the built-in probe. Use "mode": "replace" to use only your rule for the selected tool in this project. For example, a replace rule for Grep with "text_fields": ["pattern"] scans only pattern. Removing a rule restores the built-in behavior.
+- Field names follow the client's actual tool_input payload. Dots access nested objects. Only the specified strings are scanned. A path_field selects and checks a project file path. Relative paths use the event working directory within the bound project. When extensions is present, it limits the probe to those file suffixes.
+- After adding, renaming or removing a tool selector, rerun setup with the original host, MCP service name, project, scope and data directory, then restart the client. Field-only edits apply to subsequent events for already dispatched tools. Use doctor to check probe_config_valid, custom_probe_rules and probe_matcher_mismatches. An invalid file is rejected by setup. Running hooks keep their built-in probes when an edited file is invalid.
+- The same rule format works with the ZCode, Codex, Qoder CLI and Qoder IDE adapters. Tool names and payload fields can vary among hosts. Check the native event shape when reusing a rule. The probes use the existing experience entries and delivery rules. Adding a tool or field alone does not create a reason to block.
+
 Rollback: stop all new writers and restore the old program/configuration and the complete pre-upgrade library together. Merely pointing the old binary at a post-upgrade library is not a tested rollback.

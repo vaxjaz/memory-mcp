@@ -1,4 +1,6 @@
-# memory-mcp 0.6.2
+# memory-mcp
+
+Stable release 0.6.2. The 0.6.3 development build adds [project-specific tool probes](docs/AGENT_INSTALL.md#customize-tool-probes).
 
 Local verified-experience memory. The host understands the current task, constructs queries and judges applicability. MCP stores compact counterexamples and performs local retrieval; it never calls another model.
 

@@ -14,7 +14,7 @@ func configuredWorkflow(args []string) string {
 	}
 	return "verified_experience"
 }
-func inspectManagedWorkflow(report, c map[string]any, services []map[string]any, host, config, serverName string) {
+func inspectManagedWorkflow(report, c map[string]any, services []map[string]any, host, config, serverName string, probes probeConfig) {
 	launchers := []map[string]any{}
 	valid := map[string]bool{}
 	consistent := true
@@ -46,6 +46,7 @@ func inspectManagedWorkflow(report, c map[string]any, services []map[string]any,
 	}
 	count := 0
 	obsolete := 0
+	mismatchedMatchers := 0
 	if h, ok := c["hooks"].(map[string]any); ok {
 		if events, ok := h["events"].(map[string]any); ok {
 			for event, v := range events {
@@ -70,6 +71,9 @@ func inspectManagedWorkflow(report, c map[string]any, services []map[string]any,
 							}
 							if event == "PreToolUse" && valid[name] {
 								count++
+								if service["matches_opened_data_dir"] == true && g["matcher"] != probes.matcher(name) {
+									mismatchedMatchers++
+								}
 							}
 						}
 					}
@@ -81,5 +85,6 @@ func inspectManagedWorkflow(report, c map[string]any, services []map[string]any,
 	report["managed_launchers"] = launchers
 	report["obsolete_handlers"] = obsolete
 	report["experience_hooks_installed"] = count > 0
-	report["configuration_consistent"] = consistent
+	report["probe_matcher_mismatches"] = mismatchedMatchers
+	report["configuration_consistent"] = consistent && mismatchedMatchers == 0
 }

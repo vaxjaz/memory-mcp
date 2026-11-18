@@ -200,6 +200,39 @@ def main():
                                                             observation="Literal candidate method only",
                                                             path="Policy.java", symbol="canDispatchLynOrder")]))
                 saved = host.tool("memory_experience_record", draft)
+                # Exercise the actual managed matcher and runtime using the same
+                # user config across all adapters. Default behavior remains opt-in.
+                probes = data / "tool-probes.json"
+                probes.write_text(json.dumps({"projects": {scope: [
+                    {"tool": "Write", "path_field": "file_path", "text_fields": ["content"], "extensions": [".sql"]},
+                    {"mcp_tool": "custom_query", "text_fields": ["payload.statement"]},
+                ]}}), encoding="utf-8")
+                stale = cli("doctor", *options)
+                assert stale["probe_config_valid"] and stale["probe_matcher_mismatches"] == 1, stale
+                configured = cli("setup", *options)
+                assert configured["custom_probe_rules"] == 2, configured
+                checked = cli("doctor", *options)
+                assert checked["custom_probe_rules"] == 2 and checked["configuration_consistent"], checked
+                updated_cfg = json.loads(hooks_file.read_text(encoding="utf-8"))
+                updated_events = updated_cfg["hooks"]["events"] if adapter == "zcode" else updated_cfg["hooks"]
+                pre = updated_events["PreToolUse"][0]["matcher"]
+                post = updated_events["PostToolUse"][0]["matcher"]
+                assert re.search(pre, "Write") and re.search(pre, "mcp__custom-server__custom_query"), pre
+                assert not re.search(pre, "TodoWrite") and not re.search(post, "Write"), (pre, post)
+                for tool, args in (
+                        ("Write", {"file_path": "nested/new.sql", "content": "LYN 创建准入"}),
+                        ("mcp__custom-server__custom_query", {"payload": {"statement": "LYN 创建准入"}})):
+                    code, output, _, _ = hook("PreToolUse", session=f"custom-probe-{tool}", tool_name=tool, tool_input=args)
+                    assert code == 2 or output.get("decision") == "block", (adapter, tool, output)
+                probes.write_text('{"projects": {}, "unknown": true}', encoding="utf-8")
+                before = hooks_file.read_bytes()
+                rejected = subprocess.run([binary, "setup", *options], capture_output=True, encoding="utf-8", timeout=30)
+                assert rejected.returncode != 0 and hooks_file.read_bytes() == before
+                assert not cli("doctor", *options)["probe_config_valid"]
+                probes.unlink()
+                assert cli("doctor", *options)["probe_matcher_mismatches"] == 1
+                cli("setup", *options)
+                assert cli("doctor", *options)["configuration_consistent"]
                 case_count = 2 if adapter == "zcode" else 1
                 assert cli("doctor", *options)["experience_index"]["eligible_cases"] == case_count
                 assert host.tool("memory_experience_record", draft)["id"] == saved["id"]

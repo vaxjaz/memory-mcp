@@ -30,6 +30,10 @@ Bash contributes input text only for recognized search/read commands such as gre
 
 ZCode sends turnId and a native call ID. The adapter accepts those fields and its native PostToolUseFailure event for the configured lookup only. Diagnostics in hook_runs distinguish executed business probes with no usable fields or no matches from lookup calls whose successful Post result was verified. A Post lookup event without tool_response logs lookup_result_missing, emits empty output, and releases only the pending challenge bound to that call, without crediting delivery. The serve-side receipt indicates response generation. A verified native Post associates it with the actual call. Older versions did not log successful Post observations there. For prior data, experience_lookup_calls.receipt_id is the recorded success association. The diagnostic rows contain tool metadata, without SQL or result bodies.
 
+### User-configured pre-tool probes in 0.6.3
+
+Use tool-probes.json in the original memory data directory to select literal tool names and string input fields per project. Setup merges the tool selectors into the managed PreToolUse matcher. Runtime selects rules only for the project's bound scope. Custom rules share the same experience matching, challenge, receipt and deduplication logic. PostToolUse handling stays scoped to existing lookup and business observers. See [the configuration guide](AGENT_INSTALL.md#customize-tool-probes) for examples.
+
 ## Costs and migration
 
 MCP calls no model. Hook process startup, SQLite, tool round trips and appended context cost time/tokens; there is no overwriteable memory slot. Narrow business observations preserve only identifier hashes and candidate IDs, and are invalidated independently on new inputs/context changes. Unknown tools, missing native IDs, absent hooks and unreported pruning remain gaps.

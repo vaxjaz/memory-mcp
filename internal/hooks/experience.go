@@ -17,6 +17,8 @@ import (
 // Regex name filters are documented by all four supported adapters.
 const experienceToolMatcher = "^([Gg]rep|[Gg]lob|[Rr]ead|[Bb]ash|exec_command|run_command|run_in_terminal|terminal|read_file|grep_code|search_file|search_files|code_search|mcp__.+__(read_file|search_files|grep|glob|code_search))$"
 
+var experienceTools = regexp.MustCompile(experienceToolMatcher)
+
 // Only observable literal arguments are used. This is not a shell parser or a
 // semantic task detector. Unknown/compound wrappers may have no usable clues.
 func experienceClues(e Event) string {
@@ -28,14 +30,7 @@ func experienceClues(e Event) string {
 		strings.Contains(name, "web") || strings.Contains(name, "browser") {
 		return ""
 	}
-	known := false
-	for _, kind := range []string{"grep", "glob", "read", "search_file", "code_search", "bash", "exec_command", "run_command", "terminal"} {
-		if strings.Contains(name, kind) {
-			known = true
-			break
-		}
-	}
-	if !known {
+	if !experienceTools.MatchString(e.Tool) {
 		return ""
 	}
 	var clues []string
@@ -78,6 +73,31 @@ func experienceClues(e Event) string {
 		}
 	}
 	return result
+}
+
+func (r Runtime) configuredClues(ctx context.Context, e Event, scope string) (string, bool, error) {
+	config, err := loadProbeConfig(r.Store.Dir)
+	if err != nil {
+		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_config_invalid", probeConfigName)
+		return experienceClues(e), false, nil
+	}
+	rule, configured := config.ruleFor(scope, e.Tool)
+	if !configured {
+		return experienceClues(e), false, nil
+	}
+	var root string
+	if rule.PathField != "" {
+		root, err = r.Store.ExperienceProjectBinding(ctx, e.CWD, scope)
+		if err != nil {
+			return "", true, err
+		}
+	}
+	custom := rule.clues(e, root)
+	if rule.Mode == "replace" {
+		return custom, true, nil
+	}
+	base := experienceClues(e)
+	return strings.TrimSpace(base + " " + custom), true, nil
 }
 
 func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[string]any, error) {
@@ -133,9 +153,14 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 			return empty, err // fail-open; no context and never an experience gate
 		}
 		business := isBusinessTool(e.Tool)
-		clues := experienceClues(e)
+		clues, configured, err := r.configuredClues(ctx, e, scope)
+		if err != nil {
+			return empty, err
+		}
 		if clues == "" {
-			if business {
+			if configured {
+				_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "custom_probe_no_clues", e.Tool)
+			} else if business {
 				_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "business_probe_no_clues", e.Tool)
 			}
 			return empty, nil
@@ -156,7 +181,9 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 			matches = mergeExperienceMatches(matches, observed)
 		}
 		if len(matches) == 0 {
-			if business {
+			if configured {
+				_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "custom_probe_no_match", e.Tool)
+			} else if business {
 				_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "business_probe_no_match", e.Tool)
 			}
 			return empty, nil

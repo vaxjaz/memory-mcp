@@ -62,6 +62,8 @@ Usage:
   memory-mcp build-info                     Print version and exact packaged source commit
 
 MEMORY_MCP_DATA_DIR overrides the platform default data directory.
+Use tool-probes.json there to customize per-project PreToolUse selectors.
+Setup updates native matchers. Doctor reports configuration drift.
 Read docs/AGENT_INSTALL.md to select the actual supported host; do not infer it from the model name.
 No model, account, network service, or runtime dependencies required.
 Export is plaintext JSON. Forget also removes revisions and dependents;

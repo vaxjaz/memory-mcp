@@ -155,7 +155,18 @@ func Run(ctx context.Context, args []string) error {
 			}
 		}
 		r["memory_services"] = services
-		inspectManagedWorkflow(r, c, services, *host, *config, *serverName)
+		probes, probeErr := loadProbeConfig(store.Dir)
+		r["probe_config_path"] = filepath.Join(store.Dir, probeConfigName)
+		r["probe_config_valid"] = probeErr == nil
+		if probeErr != nil {
+			r["probe_config_error"] = probeErr.Error()
+		} else if *scope != "" {
+			r["custom_probe_rules"] = len(probes.Projects[*scope])
+		}
+		inspectManagedWorkflow(r, c, services, *host, *config, *serverName, probes)
+		if probeErr != nil {
+			r["configuration_consistent"] = false
+		}
 		bindings, er := store.HookBindings(ctx)
 		if er != nil {
 			return er

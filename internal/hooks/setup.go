@@ -292,6 +292,10 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	probes, err := loadProbeConfig(o.DataDir)
+	if err != nil {
+		return nil, err
+	}
 	o.Binary, err = filepath.Abs(o.Binary)
 	if err != nil {
 		return nil, err
@@ -408,7 +412,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 			group["hooks"] = []any{map[string]any{"type": "command", "command": nativeCommand(o, name), "timeout": 10}}
 		}
 		if event == "PreToolUse" {
-			group["matcher"] = "(" + experienceToolMatcher + ")|(" + businessToolMatcher + ")|(" + lookupToolMatcher(name) + ")"
+			group["matcher"] = probes.matcher(name)
 		}
 		if event == "PostToolUse" {
 			group["matcher"] = "(" + businessToolMatcher + ")|(" + lookupToolMatcher(name) + ")"
@@ -433,6 +437,8 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	report["hook_trust_required"] = adapter.RequiresTrust
 	report["hooks_config"] = adapter.DefaultHooks(o.Config)
 	report["historical_projects_auto_bound"] = false
+	report["probe_config_path"] = filepath.Join(o.DataDir, probeConfigName)
+	report["custom_probe_rules"] = len(probes.Projects[o.Scope])
 	report["verification_command"] = fmt.Sprintf("doctor --host %s --config %q --data-dir %q --project %q --scope %q", o.Host, o.Config, o.DataDir, o.Project, o.Scope)
 	report["verification_argv"] = []string{o.Binary, "doctor", "--host", o.Host, "--config", o.Config, "--data-dir", o.DataDir, "--project", o.Project, "--scope", o.Scope, "--server-name", name}
 	plans, err := adapterFiles(adapter, o, c, raw, extra, name, args)
