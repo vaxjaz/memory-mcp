@@ -40,6 +40,10 @@ func Run(ctx context.Context, args []string) error {
 	reviews := fs.Bool("reviews", false, "doctor: include paginated current needs_review entries for --scope")
 	dry := fs.Bool("dry-run", false, "show setup targets without writing config or opening the database")
 	checkText := fs.Bool("check-text", false, "doctor: scan stored text for invalid UTF-8/U+FFFD without changing it")
+	var session string
+	if cmd == "doctor" {
+		fs.StringVar(&session, "session", "", "limit recent hook events to this exact session ID")
+	}
 	_ = fs.String("managed-id", "", "installer ownership marker")
 	if err = fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -110,7 +114,7 @@ func Run(ctx context.Context, args []string) error {
 	}
 	defer store.Close()
 	if cmd == "doctor" {
-		r, er := store.HookDiagnostics(ctx)
+		r, er := store.HookDiagnostics(ctx, session)
 		if er != nil {
 			return er
 		}

@@ -21,3 +21,24 @@ After body delivery, another entrance for the same cue is silent. A new associat
 You may judge an experience inapplicable, already repaired or consistent with correct current code, and continue without any refusal registration, forced investigation or write-back. Voluntary lookup/read is always available. A receipt never proves model understanding, current applicability, completed investigation or permission.
 
 Selected business results preserve record boundaries (including MCP JSON text and structuredContent) before matching. Direct and observed candidates are combined; ambiguous multi-object prose creates no inferred association. Only identifier hashes and matched candidate IDs are retained. No raw prompt, command or result is persisted. No per-turn experience reminder, time/count reminder, extra model, async write or Stop continuation. Existing explicit maintenance stays separate: preview a reversible plan and obtain actual fresh approval for that shown plan before confirm/apply; undo needs fresh approval. Preserve history and backups.
+
+## Custom tool probes
+
+Put tool-probes.json in the running service's data_dir. Replace the example scope with the exact bound scope. Each project maps to an array of rules.
+
+```json
+{
+  "projects": {
+    "project:example/team-repo": [
+      {"tool": "Write", "path_field": "file_path", "text_fields": ["content"], "extensions": [".sql"]},
+      {"mcp_tool": "warehouse_query", "text_fields": ["arguments.statement"]}
+    ]
+  }
+}
+```
+
+Use exactly one selector per rule. tool is the exact native event name. mcp_tool is the bare name matched across mcp__<server>__<tool>. Field names come from the actual tool_input. Dots select nested string fields. mode defaults to append. Use replace to scan only the configured fields for that tool.
+
+Run doctor with the active --host, --config, --data-dir, --project and --scope before replaying a hook. Check probe_config_valid and custom_probe_rules. A selector change requires setup and a client restart; probe_matcher_mismatches checks the on-disk dispatch configuration. A valid configuration alone cannot confirm native dispatch.
+
+Use doctor --session <event-session-id> with the same options to inspect recent_events for that session. probe_config_invalid means the file was rejected and the hook fell back to built-ins. custom_probe_no_clues means the rule supplied no usable input; custom_probe_no_match means no cue matched. experience_probe with outcome silent is a matched probe with no new delivery. Look for the recorded outcome before repeating with a fresh session.

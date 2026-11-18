@@ -174,6 +174,8 @@ def main():
             try:
                 boot = host.tool("memory_bootstrap", {})
                 assert "compact_experiences" in boot["features"]
+                assert "custom_tool_probes" in boot["features"]
+                assert subprocess.check_output([binary, "guide"], text=True, encoding="utf-8") == boot["guide"]
                 assert boot["workflow"] == "verified_experience"
                 assert host.tool("memory_read", {"id": "legacy-source"})["entry"]["body"] == "Historical source must survive the workflow change"
                 if adapter == "zcode":
@@ -201,12 +203,11 @@ def main():
                                                             path="Policy.java", symbol="canDispatchLynOrder")]))
                 saved = host.tool("memory_experience_record", draft)
                 # Exercise the actual managed matcher and runtime using the same
-                # user config across all adapters. Default behavior remains opt-in.
+                # bootstrap example across all adapters, with the actual scope.
                 probes = data / "tool-probes.json"
-                probes.write_text(json.dumps({"projects": {scope: [
-                    {"tool": "Write", "path_field": "file_path", "text_fields": ["content"], "extensions": [".sql"]},
-                    {"mcp_tool": "custom_query", "text_fields": ["payload.statement"]},
-                ]}}), encoding="utf-8")
+                template = json.loads(boot["guide"].split("```json\n", 1)[1].split("\n```", 1)[0])
+                probes.write_text(json.dumps({"projects": {scope: template["projects"]["project:example/team-repo"]}}),
+                                  encoding="utf-8")
                 stale = cli("doctor", *options)
                 assert stale["probe_config_valid"] and stale["probe_matcher_mismatches"] == 1, stale
                 configured = cli("setup", *options)
@@ -217,18 +218,30 @@ def main():
                 updated_events = updated_cfg["hooks"]["events"] if adapter == "zcode" else updated_cfg["hooks"]
                 pre = updated_events["PreToolUse"][0]["matcher"]
                 post = updated_events["PostToolUse"][0]["matcher"]
-                assert re.search(pre, "Write") and re.search(pre, "mcp__custom-server__custom_query"), pre
+                assert re.search(pre, "Write") and re.search(pre, "mcp__custom-server__warehouse_query"), pre
                 assert not re.search(pre, "TodoWrite") and not re.search(post, "Write"), (pre, post)
                 for tool, args in (
                         ("Write", {"file_path": "nested/new.sql", "content": "LYN 创建准入"}),
-                        ("mcp__custom-server__custom_query", {"payload": {"statement": "LYN 创建准入"}})):
+                        ("mcp__custom-server__warehouse_query", {"arguments": {"statement": "LYN 创建准入"}})):
                     code, output, _, _ = hook("PreToolUse", session=f"custom-probe-{tool}", tool_name=tool, tool_input=args)
                     assert code == 2 or output.get("decision") == "block", (adapter, tool, output)
                 probes.write_text('{"projects": {}, "unknown": true}', encoding="utf-8")
                 before = hooks_file.read_bytes()
                 rejected = subprocess.run([binary, "setup", *options], capture_output=True, encoding="utf-8", timeout=30)
                 assert rejected.returncode != 0 and hooks_file.read_bytes() == before
-                assert not cli("doctor", *options)["probe_config_valid"]
+                if adapter == "zcode":
+                    session = "custom-probe-Write"
+                    code, output, _, _ = hook("PreToolUse", session=session, tool_name="Write",
+                                              tool_input={"file_path": "nested/new.sql", "content": "LYN 创建准入"})
+                    assert code == 0 and output == {}, output
+                    diagnostic = cli("doctor", *options, "--session", session)
+                    assert not diagnostic["probe_config_valid"], diagnostic
+                    recent = diagnostic["recent_events"]
+                    assert all(row["session"] == session for row in recent), recent
+                    assert recent[0]["result"] == "probe_config_invalid", recent
+                    assert recent[1]["result"] == "experience_probe", recent
+                else:
+                    assert not cli("doctor", *options)["probe_config_valid"]
                 probes.unlink()
                 assert cli("doctor", *options)["probe_matcher_mismatches"] == 1
                 cli("setup", *options)
@@ -281,6 +294,14 @@ def main():
                 hook("UserPromptSubmit", turn="turn-2", prompt="Second isolated request")
                 gated = hook("PreToolUse", turn="turn-2", **payload)
                 assert gated[1] == {}, gated
+                if adapter == "zcode":
+                    diagnostic = cli("doctor", *options, "--session", "real-executable-fixture")
+                    assert diagnostic["probe_config_valid"], diagnostic
+                    recent = diagnostic["recent_events"]
+                    assert all(row["session"] == "real-executable-fixture" for row in recent), recent
+                    assert recent[0]["result"] == "experience_probe", recent
+                    assert json.loads(recent[0]["detail"])["outcome"] == "silent", recent
+                    assert cli("doctor", *options, "--session", "empty-session")["recent_events"] == []
                 disabled = cli("setup", *options, "--disable-wakeup")
                 assert not disabled["wakeup_enabled"] and not disabled["experience_hooks_installed"]
                 assert host.tool("memory_read", dict(id=saved["id"]))["entry"]["current"]

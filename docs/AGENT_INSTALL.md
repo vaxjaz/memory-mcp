@@ -40,6 +40,8 @@ Version 0.6.3 development builds use database schema 6 and integration protocol 
 
 Available starting with the 0.6.3 development build. Create a UTF-8 file named tool-probes.json in the **original memory data directory**. Use the same project scope as setup. The example adds two ZCode file-tool probes for SQL and one MCP tool whose server name may differ by installation.
 
+Use `memory-mcp guide` or `memory_bootstrap` to get a minimal example from the current executable. The bootstrap feature is `custom_tool_probes`.
+
 ```json
 {
   "projects": {
@@ -70,5 +72,7 @@ Available starting with the 0.6.3 development build. Create a UTF-8 file named t
 - Field names follow the client's actual tool_input payload. Dots access nested objects. Only the specified strings are scanned. A path_field selects and checks a project file path. Relative paths use the event working directory within the bound project. When extensions is present, it limits the probe to those file suffixes.
 - After adding, renaming or removing a tool selector, rerun setup with the original host, MCP service name, project, scope and data directory, then restart the client. Field-only edits apply to subsequent events for already dispatched tools. Use doctor to check probe_config_valid, custom_probe_rules and probe_matcher_mismatches. An invalid file is rejected by setup. Running hooks keep their built-in probes when an edited file is invalid.
 - The same rule format works with the ZCode, Codex, Qoder CLI and Qoder IDE adapters. Tool names and payload fields can vary among hosts. Check the native event shape when reusing a rule. The probes use the existing experience entries and delivery rules. Adding a tool or field alone does not create a reason to block.
+
+Check `doctor` before replaying a hook. If a probe allows the action, run `doctor --session <event-session-id>` using the same host, config, data directory, project and scope. In `recent_events`, `probe_config_invalid` records fallback to built-in probes. `custom_probe_no_clues` and `custom_probe_no_match` indicate where a configured probe stopped. An `experience_probe` with `outcome: "silent"` in its detail indicates a match with no new delivery. An empty list means there is no recorded event for that session.
 
 Rollback: stop all new writers and restore the old program/configuration and the complete pre-upgrade library together. Merely pointing the old binary at a post-upgrade library is not a tested rollback.

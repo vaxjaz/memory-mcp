@@ -54,18 +54,19 @@ Usage:
   memory-mcp setup --host HOST --project DIR --scope project:ID
                      [--enable-wakeup | --disable-wakeup]
   memory-mcp hook --host HOST [--data-dir DIR]    User-level event handler (not an MCP server)
-  memory-mcp doctor [--data-dir DIR]             Bindings, wakeup index and native event diagnostics
+  memory-mcp doctor [--data-dir DIR] [--session ID]
+                                             Bindings, probe configuration and recent hook events
   memory-mcp adapters                           List implemented host protocols and validation limits
   memory-mcp diagnose --data-dir DIR [--entry-id ID] [--probe-ids ID,ID] [--out FILE]
                                              Read-only metadata/link diagnostics; no migration or repair
-  memory-mcp guide     Print the verified-experience guide
+  memory-mcp guide                           Print the embedded guide and tool-probes.json example
   memory-mcp config                         Print generic MCP JSON configuration
   memory-mcp version                        Print version
   memory-mcp build-info                     Print version and exact packaged source commit
 
 MEMORY_MCP_DATA_DIR overrides the platform default data directory.
-Use tool-probes.json there to customize per-project PreToolUse selectors.
-Setup updates native matchers. Doctor reports configuration drift.
+Use 'memory-mcp guide' for the per-project tool-probes.json format.
+Doctor validates the file. Setup updates native matchers.
 Read docs/AGENT_INSTALL.md to select the actual supported host; do not infer it from the model name.
 No model, account, network service, or runtime dependencies required.
 Export is plaintext JSON. Forget also removes revisions and dependents;

@@ -64,7 +64,7 @@ func TestZCodeNamedMCPLookupRecordsSuccessfulPost(t *testing.T) {
 	if out := run("PreToolUse", "mysql_query", "db-retry", sql, nil); len(out) != 0 {
 		t.Fatalf("lookup receipt did not release original work: %v", out)
 	}
-	report, err := store.HookDiagnostics(testCtx)
+	report, err := store.HookDiagnostics(testCtx, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestZCodeNativeFailureDoesNotCountAsDelivered(t *testing.T) {
 	if out = run("PreToolUse", "mysql_query", "db-retry", input); len(out) != 0 {
 		t.Fatalf("scope-limited native failure did not fail open: %v", out)
 	}
-	report, err := store.HookDiagnostics(testCtx)
+	report, err := store.HookDiagnostics(testCtx, "")
 	if err != nil {
 		t.Fatal(err)
 	}

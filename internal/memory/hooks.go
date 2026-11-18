@@ -403,7 +403,7 @@ func (s *Store) HookLog(ctx context.Context, event, scope, session, result, deta
 	_, err := s.db.ExecContext(ctx, `INSERT INTO hook_runs(event,scope,session,result,detail,created_at)VALUES(?,?,?,?,?,?)`, event, scope, session, result, detail, time.Now().UTC().Format(time.RFC3339Nano))
 	return err
 }
-func (s *Store) HookDiagnostics(ctx context.Context) (map[string]any, error) {
+func (s *Store) HookDiagnostics(ctx context.Context, session string) (map[string]any, error) {
 	if err := s.InitHooks(ctx); err != nil {
 		return nil, err
 	}
@@ -411,7 +411,13 @@ func (s *Store) HookDiagnostics(ctx context.Context) (map[string]any, error) {
 	if err := s.db.QueryRowContext(ctx, `SELECT count(*) FROM memory_candidates WHERE state='pending'`).Scan(&pending); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT event,scope,session,result,detail,created_at FROM hook_runs ORDER BY id DESC LIMIT 20`)
+	query := `SELECT event,scope,session,result,detail,created_at FROM hook_runs`
+	var args []any
+	if session != "" {
+		query += ` WHERE session=?`
+		args = append(args, session)
+	}
+	rows, err := s.db.QueryContext(ctx, query+` ORDER BY id DESC LIMIT 20`, args...)
 	if err != nil {
 		return nil, err
 	}
