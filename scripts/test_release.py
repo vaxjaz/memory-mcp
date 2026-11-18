@@ -55,6 +55,11 @@ def build_fixture(directory):
 
 
 class ReleaseTests(unittest.TestCase):
+    def test_stable_release_includes_agent_upgrade_without_repairing_old_releases(self):
+        self.assertIn("memory-mcp-0.6.2-agent-upgrade.zip", asset_names("0.6.2"))
+        self.assertNotIn("memory-mcp-0.2.0-agent-upgrade.zip", asset_names("0.2.0"))
+        self.assertEqual(asset_names("0.6.2")[-1], "SHA256SUMS")
+
     def test_version_file_prepares_pinned_release_without_creating_tag_early(self):
         calls = []
         def cli(*args):

@@ -134,16 +134,20 @@ def main():
             if file.is_file() and relative.parts[0] in {"go.mod", "go.sum", "README.md", ".gitignore", ".github", "cmd", "internal", "docs", "scripts"} and "__pycache__" not in relative.parts:
                 z.write(file, Path(f"memory-mcp-{version}") / relative)
     artifacts.append(source)
-    (dist / "SHA256SUMS").write_text("".join(
-        f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in artifacts))
-    upgrade = dist / f"memory-mcp-{version}-agent-upgrade.zip"
-    with zipfile.ZipFile(upgrade, "w", zipfile.ZIP_DEFLATED) as z:
-        z.write(root / "docs/AGENT_UPGRADE_PACKAGE.md", "UPGRADE_AGENT.md")
-        z.writestr("SOURCE_COMMIT", source_commit + "\n")
-        z.write(dist / "SHA256SUMS", "SHA256SUMS")
-        for artifact in artifacts:
-            z.write(artifact, "packages/" + artifact.name)
-    print(f"Built {upgrade.name}", flush=True)
+    checksums = "".join(
+        f"{hashlib.sha256(p.read_bytes()).hexdigest()}  {p.name}\n" for p in artifacts)
+    upgrade_guide = root / "docs/AGENT_UPGRADE_PACKAGE.md"
+    if upgrade_guide.is_file():
+        upgrade = dist / f"memory-mcp-{version}-agent-upgrade.zip"
+        with zipfile.ZipFile(upgrade, "w", zipfile.ZIP_DEFLATED) as z:
+            z.write(upgrade_guide, "UPGRADE_AGENT.md")
+            z.writestr("SOURCE_COMMIT", source_commit + "\n")
+            z.writestr("SHA256SUMS", checksums)
+            for artifact in artifacts:
+                z.write(artifact, "packages/" + artifact.name)
+        checksums += f"{hashlib.sha256(upgrade.read_bytes()).hexdigest()}  {upgrade.name}\n"
+        print(f"Built {upgrade.name}", flush=True)
+    (dist / "SHA256SUMS").write_text(checksums)
 
 
 if __name__ == "__main__":

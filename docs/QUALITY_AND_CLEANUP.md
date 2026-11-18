@@ -1,6 +1,6 @@
 # Quality and confirmed maintenance
 
-New knowledge must challenge a concrete inference with observed evidence, a concrete bug impact and future recognition features. The sole write path is memory_experience_record. Syntax/locators/hashes do not certify causal truth. Preserve conditions and unknowns. Do not create cases for progress, rule repetition or usage bookkeeping.
+New knowledge must challenge a concrete inference with observed evidence, a concrete bug impact and future recognition features. Use memory_experience_record for evidenced failure patterns. Use memory_reference_record only for an explicitly confirmed agreement with an authority and source. Syntax/locators/hashes do not certify causal truth. Preserve conditions and unknowns. Do not create cases for progress, rule repetition or usage bookkeeping.
 
 memory_cleanup maintains a separate reversible ledger:
 

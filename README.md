@@ -1,4 +1,4 @@
-# memory-mcp 0.6.1-delivery.1
+# memory-mcp 0.6.2
 
 Local verified-experience memory. The host understands the current task, constructs queries and judges applicability. MCP stores compact counterexamples and performs local retrieval; it never calls another model.
 
@@ -8,6 +8,8 @@ Specific observed entrances map to stable, evidenced associations (cues). An und
 
 Lookup returns one JSON text copy of complete facts, conditions, exceptions and evidence within 8 KiB, with pagination. Index/entrance metadata stays out of the visible experience DTO. Voluntary lookup/read remains available. Delivery records describe system output, never understanding, applicability, authorization or an obligation to change code. Finding no current problem is a valid result.
 
-Schema 5 replaces obsolete generated-response/cooldown state with context-scoped delivery records. Stop all old writers and independently back up the COMPLETE library/configuration before any new binary opens it. Existing history, IDs, bindings and disabled policies survive. Rollback restores the old executable/configuration AND pre-upgrade library. Never mix versions.
+Version 0.6.2 uses integration protocol 6 and schema 5. Selected SQL tools, including ZCode's mysql_query, probe bounded sql/query/statement fields. Lookup delivery diagnostics distinguish generated, observed and missing results.
 
-Install: [AGENT_INSTALL](docs/AGENT_INSTALL.md). Protocol: [EXPERIENCE_TRIAL](docs/EXPERIENCE_TRIAL.md). Measured acceptance and limits: [DELIVERY_ACCEPTANCE](docs/DELIVERY_ACCEPTANCE.md). Upgrade bundle: [AGENT_UPGRADE_PACKAGE](docs/AGENT_UPGRADE_PACKAGE.md).
+Upgrades from older schemas rebuild derived indexes and workflow state. Stop all old writers and independently back up the COMPLETE library/configuration before any new binary opens it. Existing history, IDs, bindings and disabled policies survive. Rollback restores the old executable/configuration AND pre-upgrade library. Never mix versions.
+
+Start with the [release downloads](https://github.com/vaxjaz/memory-mcp/releases/tag/v0.6.2) and the [installation guide](docs/AGENT_INSTALL.md). See the [upgrade bundle contents](docs/AGENT_UPGRADE_PACKAGE.md), [experience protocol](docs/EXPERIENCE_TRIAL.md), and [acceptance results](docs/DELIVERY_ACCEPTANCE.md).

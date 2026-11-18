@@ -1,4 +1,6 @@
-# 0.6.0 first-body and incremental-cue protocol
+# Experience delivery in memory-mcp 0.6.2
+
+Integration protocol 6, database schema 5.
 
 ## Writes and identity
 

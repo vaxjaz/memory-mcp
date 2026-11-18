@@ -30,7 +30,10 @@ def asset_names(version):
     names = [f"memory-mcp-{version}-{target_os}-{arch}." +
              ("zip" if target_os == "windows" else "tar.gz")
              for target_os, arch in TARGETS]
-    return names + [f"memory-mcp-{version}-source.zip", "SHA256SUMS"]
+    names.append(f"memory-mcp-{version}-source.zip")
+    if core_version(version) >= (0, 6, 2):
+        names.append(f"memory-mcp-{version}-agent-upgrade.zip")
+    return names + ["SHA256SUMS"]
 
 
 def tag_commit(repo, tag, cli=gh):

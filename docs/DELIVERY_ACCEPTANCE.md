@@ -1,6 +1,14 @@
 # 首次正文与关联点增量交付：实施与验收
 
-当前版本 0.6.1-delivery.1，integration protocol 6，schema 5。初次实现基线为 387d44ddf81d75e4367f8513e9ad3543597a7834；本次独立复查修复基线为 48327ce4f4363bde3f9147d19639f17b2e89aa1d。保留已有识别归一化草稿，移除未提交的冷却草稿及旧整轮豁免；原草稿在本机 /tmp/memory-delivery-before.tgz 与 patch 留存。目标是嵌套 memory-mcp 的本地宿主组件，不涉及父项目 VPS。
+当前版本 0.6.2，integration protocol 6，schema 5。[安装指南](AGENT_INSTALL.md) 与 [升级包指南](AGENT_UPGRADE_PACKAGE.md) 适用于此版本。后续各节保留 0.6.1 和 0.6.0 验收快照。
+
+## 0.6.2 的 ZCode 与 SQL 验收
+
+Windows 原生 ZCode CLI 0.17.0 通过本机确定性模型和临时库验证。第一次 mysql_query 被暂停，memory_experience_lookup 的实际 PostToolUse 确认 1 条交付回执，重试后模拟 SQL 工具执行 1 次。用户另确认 0.6.2-dev.2 的 ZCode 回归通过。
+
+[scripts/check_experience_trial.py](../scripts/check_experience_trial.py) 覆盖 12 项探针矩阵及扩展对照，包含 MCP 服务名、SQL 字段、Bash/Grep/Read、显式 business_signal、SELECT 边界和缺失 tool_response。缺结果路径释放绑定的技术挑战，正文交付计数为 0。schema-5 原库的只读副本检查通过，保留源表内容和已有投递记录。
+
+已验证原生 ZCode 和历史快照中的 Codex 传输场景。Qoder CLI/IDE 仍为配置与协议回放覆盖。真实客户端场景使用合成模型响应来测传输，业务决策改善、误拦率和整体 token 成本仍缺少对照测量。
 
 ## 2026-11-18 独立复查与修复（0.6.1）
 
@@ -14,7 +22,7 @@
 
 真实原库只读副本已通过 [schema-5 增量升级与旧包恢复](validation/review-migration.json)：28 条 entries、14 条 profiles、全部源表逻辑哈希一致，副本迁移 327.5 ms；已有非零正文/cue 账本另以隔离回归验证保持不变。
 
-当前仍未验证真实 ZCode/Qoder 原生回执、缺少两类身份的重放识别，以及无可靠输入绑定的旧工具结果晚到归属。未知格式/对象歧义保守不建立观察；可能降低覆盖。MCP isError 没有原生失败事件时的技术超时限制保持不变。下文数字是 0.6.0 首次验收快照，最终安装产物结果另见 DELIVERY_INSTALLATION.json。
+此 0.6.1 快照尚未验证 ZCode/Qoder 的原生回执。缺少两类身份的重放识别以及无可靠输入绑定的旧工具结果晚到归属仍受限。未知格式/对象歧义保守不建立观察；可能降低覆盖。MCP isError 没有原生失败事件时的技术超时限制保持不变。下文数字是 0.6.0 首次验收快照，最终安装产物结果另见 DELIVERY_INSTALLATION.json。
 
 ## 已实现
 
@@ -81,7 +89,7 @@ M = internal/memory/experience_delivery_test.go；H = internal/hooks/lookup_rece
 | A41–A42 | 无新匹配时静默；不采纳/没有新增事实不产生长期记录；不把任务拆解作为触发器 |
 | A43 | M 边界修订保留旧版本；正文/cue/索引事务提交，故障回滚不退休旧正文 |
 
-## 迁移与安装核对
+## 0.6.0 迁移与安装快照
 
 原实际连接为 0.4.0-experience.1/schema3，Codex 配置同版；另有未启用的 0.5 包；ZCode 的 memory-review-trial 仍配置 0.3 并共享同一个 D: 库。安装必须一起更新共享入口；不以 0.5 源码覆盖原库。
 
@@ -93,6 +101,6 @@ M = internal/memory/experience_delivery_test.go；H = internal/hooks/lookup_rece
 
 已对方案禁止项逐项复核：入口不是经验；cue 不扩张类依赖；无正文截断/标题代替事实；新风险不降级为短引用；无整轮豁免/冷却提醒/每任务提示；无 Agent 已读/拒绝/完成 API；无强迫采纳、改代码、补偿调查；无额外模型、原文日志、Stop 续轮。唯一流程是按经验版本、cue 与真实投递记录判断。收据不证明理解、适用性、调查完成或授权。追加上下文会累计，不能被当成覆盖槽。
 
-未实测：ZCode/Qoder/Qoder IDE 的真实原生回执与模型可见注入、真实子 Agent/fork/clear、未报告的上下文裁剪、macOS/Linux 的真实 GUI 宿主。平台包交叉构建不是这些宿主验收。缺少 tool_use_id 的适配器只会 fail-open，不伪造成功。没有自然任务的自主模型使用样本，不能报告召回价值、误触发率、决策改善或模型 token 收益。
+0.6.0 快照未实测 ZCode/Qoder/Qoder IDE 的真实原生回执与模型可见注入、真实子 Agent/fork/clear、未报告的上下文裁剪、macOS/Linux 的真实 GUI 宿主。平台包交叉构建不是这些宿主验收。缺少 tool_use_id 的适配器只会 fail-open，不伪造成功。没有自然任务的自主模型使用样本，不能报告召回价值、误触发率、决策改善或模型 token 收益。
 
 官方协议参考：[Codex hooks](https://learn.chatgpt.com/docs/hooks?site_variant=chatgpt&translationFallback=zh-Hans)。本机可执行文件的原生实测优先于网页对其他版本的描述。
