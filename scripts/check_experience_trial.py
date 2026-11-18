@@ -14,6 +14,86 @@ import time
 from smoke import Host
 
 
+
+def check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool):
+    sql = "SELECT PRIVATE_SQL_MARKER FROM information_schema.columns"
+    evidence = dict(kind="runtime", reference="synthetic-sql", observation="Isolated Hook replay marker")
+    entrances = [
+        dict(kind="code_symbol", value="information_schema"),
+        dict(kind="business_signal", value="SHOW COLUMNS"),
+        dict(kind="business_signal", value="刷数据"),
+    ]
+    cue = dict(cue_id="metadata", label="Metadata", text="Fixture requires a prior metadata query",
+               evidence_refs=["synthetic-sql"], entrances=entrances)
+    case = dict(scope=scope, project=str(project), title="Synthetic SQL metadata rule",
+                experience=dict(pitfall="A lookup uses an unverified column name",
+                                counterexample="Fixture requires a prior metadata query",
+                                impact="An unsuitable query can fail",
+                                applicability="Synthetic metadata lookups",
+                                boundary="Only this disposable fixture",
+                                evidence=[evidence], cues=[cue]))
+    saved = host.tool("memory_experience_record", case)
+
+    for label, tool, args, expected in (
+            ("bash-command", "Bash", {"command": "grep information_schema fixture.sql"}, True),
+            ("bash-description", "Bash", {"command": "grep unrelated fixture.sql", "description": sql}, False),
+            ("read-path", "Read", {"file_path": str(project / "information_schema.sql")}, True),
+            ("grep-pattern", "Grep", {"pattern": "information_schema"}, True),
+            ("mysql-sql", sql_tool, {"sql": sql}, True),
+            ("mysql-command", sql_tool, {"command": sql}, False),
+            ("write-command", "Write", {"command": sql}, False),
+            ("bash-business-entrance", "Bash", {"command": "grep '刷数据' fixture.sql"}, True),
+            ("bash-ordinary-command", "Bash", {"command": "echo '刷数据'"}, False),
+            ("bare-select-unregistered", "Bash", {"command": "grep SELECT fixture.sql"}, False),
+            ("show-columns", sql_tool, {"sql": "show    columns from fixture"}, True),
+            ("bare-mysql-query", "mysql_query", {"query": sql}, True),
+            ("private-field", sql_tool, {"sql": "SELECT 1", "password": sql}, False),
+            ("unknown-mcp-tool", "mcp__unrelated__arbitrary_sql", {"sql": sql}, False)):
+        output = hook("PreToolUse", session=label, tool_name=tool, tool_input=args)[1]
+        assert (output.get("decision") == "block") == expected, (label, output)
+
+    prompt = hook("UserPromptSubmit", session="task-word-in-prompt", prompt="刷数据")[1]
+    assert prompt == {}, prompt
+    started = hook("SessionStart", session="start-banner")[1]["hookSpecificOutput"]["additionalContext"]
+    assert "记忆经验" in started and "Fixture requires" not in started, started
+
+    blocked = hook("PreToolUse", session="missing-result", tool_name=sql_tool, tool_input={"sql": sql})[1]
+    token = re.search(r'challenge_id="([a-f0-9]{32})"', blocked["reason"]).group(1)
+    lookup_name = "mcp__decision-memory__memory_experience_lookup"
+    args = dict(scope=scope, task="Synthetic SQL replay", questions="Check metadata",
+                keywords=["metadata"], challenge_id=token)
+    lookup_event = dict(session="missing-result", tool_name=lookup_name, tool_use_id="lookup-with-no-result",
+                        tool_input=args)
+    assert hook("PreToolUse", **lookup_event)[1] == {}
+    generated = host.tool("memory_experience_lookup", args)
+    assert generated["receipt_id"] and generated["challenge_outcome"] == "response_generated"
+    code, output, stderr, _ = hook("PostToolUse", **lookup_event)
+    assert (code, output, stderr) == (0, {}, ""), (code, output, stderr)
+    assert hook("PreToolUse", session="missing-result", tool_name=sql_tool, tool_input={"sql": sql})[1] == {}
+
+    with closing(sqlite3.connect(data / "memory.db")) as db:
+        runs = list(db.execute("SELECT result, detail FROM hook_runs"))
+        delivered = db.execute("SELECT count(*) FROM experience_body_deliveries").fetchone()[0]
+        observed = db.execute("SELECT receipt_id FROM experience_lookup_calls WHERE call_id='lookup-with-no-result'").fetchone()
+    assert delivered == 0 and observed == ("",), (delivered, observed)
+    assert ("lookup_result_missing", lookup_name) in runs, runs
+    assert ("business_probe_no_clues", sql_tool) in runs, runs
+    assert ("business_probe_no_match", sql_tool) in runs, runs
+    assert not any("PRIVATE_SQL_MARKER" in detail for _, detail in runs), runs
+
+    # Prove the six-character SQL keyword can match if explicitly indexed.
+    # Keep broad keywords confined to this fixture.
+    entrances.append(dict(kind="code_symbol", value="SELECT"))
+    updated = host.tool("memory_experience_record", dict(case, previous_id=saved["id"]))
+    assert updated["id"] == saved["id"], updated
+    for label, command, expected in (
+            ("explicit-select", "grep select fixture.sql", True),
+            ("select-substring", "grep SELECTED fixture.sql", False),
+            ("select-ordinary-command", "echo SELECT", False)):
+        output = hook("PreToolUse", session=label, tool_name="Bash", tool_input={"command": command})[1]
+        assert (output.get("decision") == "block") == expected, (label, output)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary")
@@ -78,8 +158,8 @@ def main():
             assert re.search(matcher, "mcp__decision_memory__memory_experience_lookup")
             assert not re.search(matcher, "apply_patch")
 
-            def hook(event, turn="turn-1", **fields):
-                payload = dict(hook_event_name=event, cwd=str(project), session_id="real-executable-fixture",
+            def hook(event, turn="turn-1", session="real-executable-fixture", **fields):
+                payload = dict(hook_event_name=event, cwd=str(project), session_id=session,
                                turn_id=turn, event_id=turn, **fields)
                 command = [handler["command"], *handler["args"]] if adapter == "zcode" else handler["command"]
                 start = time.perf_counter()
@@ -105,34 +185,7 @@ def main():
                     failure = current_events["PostToolUseFailure"][0]["matcher"]
                     assert re.search(failure, "mcp__decision-memory__memory_experience_lookup")
                     assert not re.search(failure, sql_tool)
-                    sql_case = dict(scope=scope, project=str(project), title="Synthetic SQL metadata rule",
-                                    experience=dict(pitfall="A lookup uses an unverified column name",
-                                                    counterexample="Fixture requires a prior metadata query",
-                                                    impact="An unsuitable query can fail",
-                                                    applicability="Synthetic metadata lookups",
-                                                    boundary="Only this disposable fixture",
-                                                    evidence=[dict(kind="runtime", reference="synthetic-sql",
-                                                                   observation="Isolated Hook replay marker")],
-                                                    cues=[dict(cue_id="metadata", label="Metadata",
-                                                               text="Fixture requires a prior metadata query",
-                                                               evidence_refs=["synthetic-sql"],
-                                                               entrances=[dict(kind="code_symbol", value="information_schema")])]))
-                    host.tool("memory_experience_record", sql_case)
-                    sql = "SELECT PRIVATE_SQL_MARKER FROM information_schema.columns"
-                    for i, (tool, args, expected) in enumerate((
-                            ("Bash", {"command": "grep information_schema fixture.sql"}, True),
-                            (sql_tool, {"sql": sql}, True),
-                            (sql_tool, {"command": sql}, False),
-                            ("mysql_query", {"query": sql}, True),
-                            (sql_tool, {"sql": "SELECT 1", "password": sql}, False),
-                            ("mcp__unrelated__arbitrary_sql", {"sql": sql}, False))):
-                        output = hook("PreToolUse", turn=f"sql-probe-{i}", tool_name=tool, tool_input=args)[1]
-                        assert (output.get("decision") == "block") == expected, (tool, i, output)
-                    with closing(sqlite3.connect(data / "memory.db")) as db:
-                        runs = list(db.execute("SELECT result, detail FROM hook_runs"))
-                    assert any(r == "business_probe_no_clues" and d == sql_tool for r, d in runs), runs
-                    assert any(r == "business_probe_no_match" and d == sql_tool for r, d in runs), runs
-                    assert not any("PRIVATE_SQL_MARKER" in d for _, d in runs), runs
+                    check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool)
                 else:
                     assert "PostToolUseFailure" not in current_events, current_events
                 draft = dict(scope=scope, project=str(project), title="Synthetic multi-entry risk",

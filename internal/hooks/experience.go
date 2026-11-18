@@ -186,6 +186,10 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		return empty, r.Store.FailExperienceLookup(ctx, r.host(), scope, e.Session, e.ToolUseID)
 	case "PostToolUse":
 		if r.isLookup(e.Tool) {
+			if e.Response == nil && !e.IsError && e.Error == nil {
+				_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "lookup_result_missing", e.Tool)
+				return empty, r.Store.FailExperienceLookup(ctx, r.host(), scope, e.Session, e.ToolUseID)
+			}
 			result, err := lookupResult(e)
 			if err != nil {
 				_ = r.Store.FailExperienceLookup(ctx, r.host(), scope, e.Session, e.ToolUseID)
