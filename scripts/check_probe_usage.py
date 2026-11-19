@@ -22,8 +22,7 @@ def main():
         config.write_text("{}", encoding="utf-8")
         rules = data / "tool-probes.json"
         rules.write_text(json.dumps({"projects": {scope: [
-            {"tool": "Write", "mode": "replace", "path_field": "file_path",
-             "text_fields": ["content"], "extensions": [".sql"]},
+            {"tool": "Write", "fields": {"path": "file_path", "text": "content"}},
         ]}}), encoding="utf-8")
         options = ["--host", "zcode", "--config", str(config), "--data-dir", str(data),
                    "--project", str(project), "--scope", scope]
@@ -56,7 +55,10 @@ def main():
             assert miss["outcome"] == "cue_missed" and "full identifier" in miss["next"], miss
             assert [item["id"] for item in miss["candidates"]] == [general["id"]], miss
             assert miss["expected"]["trigger_preview"]["entrances"][0]["value"] == short, miss
-            assert miss["steps"][0]["detail"]["text_fields"][0]["status"] == "present", miss
+            assert miss["tool_input"]["fields"][1] == {"field": "text", "input_path": "content", "status": "present",
+                                                          "bytes": len(f"{gate} table SET {full}=1; /* {sample_marker} */")}, miss
+            assert miss["cue_checks"][0]["outcome"] == "not_matched", miss
+            assert {field["path"]: field["type"] for field in miss["observed_fields"]} == {"content": "string", "file_path": "string"}, miss
             assert miss["read_only"] and not miss["native_event_verified"], miss
             assert snapshot() == before
 
@@ -68,11 +70,10 @@ def main():
             direct = check(updated["id"])
             assert direct["outcome"] == "direct_match" and len(direct["candidates"]) == 2, direct
             assert all(item["source"] == "direct" for item in direct["candidates"]), direct
-            assert check(updated["id"], tool="TodoWrite")["outcome"] == "tool_not_routed"
+            unregistered = check(updated["id"], tool="TodoWrite")
+            assert unregistered["outcome"] == "tool_not_registered" and len(unregistered["observed_fields"]) == 2, unregistered
             outside = check(updated["id"], path=root / "separate.sql")
-            assert outside["outcome"] == "no_scanned_fields" and "separate repository" in outside["next"], outside
-            assert outside["steps"][0]["detail"]["outcome"] == "path_outside_project", outside
-            assert check(updated["id"], path="example.txt")["steps"][0]["detail"]["outcome"] == "extension_mismatch"
+            assert outside["outcome"] == "direct_match", outside
             assert snapshot() == before and config.is_file()
 
             draft["previous_id"] = updated["id"]
@@ -88,13 +89,31 @@ def main():
             chosen = next(row for row in upper["candidates"] if row["id"] == sensitive["id"])
             assert chosen["op"] == "contains" and chosen["case_sensitive"] and chosen["entrance"] == "fix_Second", chosen
 
-            config_rules = json.loads(rules.read_text(encoding="utf-8"))
-            rule = config_rules["projects"][scope][0]
-            del rule["extensions"], rule["path_field"]
-            rule["when"] = {"field": "input.file_path", "op": "suffix", "value": ".sql", "case_sensitive": False}
-            rules.write_text(json.dumps(config_rules), encoding="utf-8")
-            uppercase_suffix = check(sensitive["id"], path="EXAMPLE.SQL", content="UPDATE table SET work_order_feedback_FIX_SECOND=1")
-            assert uppercase_suffix["outcome"] == "direct_match", uppercase_suffix
+            draft["previous_id"] = sensitive["id"]
+            draft["experience"]["cues"][0]["matches"] = [{"all": [
+                {"field": "path", "op": "suffix", "value": ".sql"},
+                {"field": "text", "op": "token", "value": "update"},
+                {"field": "text", "op": "contains", "entrances": ["fix_third"]},
+            ]}]
+            combined = host.tool("memory_experience_record", draft)
+            assert combined["id"] == sensitive["id"] and combined["trigger_preview"]["entrances"][0]["conditional"], combined
+            before = snapshot()
+            positive = check(combined["id"], path=root / "EXAMPLE.SQL",
+                             content="UPDATE demo SET work_order_feedback_FIX_THIRD=1")
+            assert positive["outcome"] == "direct_match" and len(positive["cue_checks"][0]["checks"]) == 3, positive
+            select = check(combined["id"], content="SELECT work_order_feedback_FIX_THIRD FROM demo")
+            assert select["outcome"] == "cue_missed" and select["cue_checks"][0]["checks"][-1]["value"] == "update", select
+            renamed = check(combined["id"], path="example.txt")
+            assert renamed["outcome"] == "cue_missed" and renamed["cue_checks"][0]["checks"][-1]["field"] == "path", renamed
+            only_path = check(combined["id"], path="fix_third.sql", content="UPDATE demo SET unrelated=1")
+            assert only_path["outcome"] == "cue_missed", only_path
+            missing = check(combined["id"], content=None)
+            assert missing["outcome"] == "cue_missed" and missing["cue_checks"][0]["outcome"] == "unknown", missing
+            assert snapshot() == before and config.is_file()
+            bad = json.loads(json.dumps(draft))
+            bad["experience"]["cues"][0]["matches"][0]["all"][1]["case_sensitiv"] = True
+            host.tool("memory_experience_record", bad, expect_error=True)
+            assert snapshot() == before
         finally:
             host.close()
     print("PASS: expected cue, whole identifier correction, actual routing, input diagnostics, and unchanged library")

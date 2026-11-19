@@ -12,45 +12,34 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/vaxjaz/memory-mcp/internal/matching"
 	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
 
 const probeConfigName = "tool-probes.json"
+const customProbeTextLimit = 32 * 1024
 
 type probeConfig struct {
-	Projects map[string][]probeRule     `json:"projects"`
-	Facts    map[string][]probeFactRule `json:"context_facts,omitempty"`
+	Projects map[string][]probeRule `json:"projects"`
 }
 
 type probeRule struct {
-	Tool       string          `json:"tool,omitempty"`
-	MCPTool    string          `json:"mcp_tool,omitempty"`
-	Mode       string          `json:"mode,omitempty"`
-	PathField  string          `json:"path_field,omitempty"`
-	TextFields []string        `json:"text_fields,omitempty"`
-	Extensions []string        `json:"extensions,omitempty"`
-	When       *probeCondition `json:"when,omitempty"`
-	Branches   []probeBranch   `json:"branches,omitempty"`
-}
-
-type probeBranch struct {
-	ID         string          `json:"id"`
-	When       *probeCondition `json:"when,omitempty"`
-	PathField  string          `json:"path_field,omitempty"`
-	TextFields []string        `json:"text_fields,omitempty"`
-	Extensions []string        `json:"extensions,omitempty"`
+	Tool    string             `json:"tool,omitempty"`
+	MCPTool string             `json:"mcp_tool,omitempty"`
+	Enabled *bool              `json:"enabled,omitempty"`
+	Fields  map[string]string  `json:"fields,omitempty"`
+	Observe []probeObservation `json:"observe,omitempty"`
+	preset  string
 }
 
 var (
 	probeToolName  = regexp.MustCompile(`^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$`)
 	probeFieldPath = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*){0,5}$`)
-	probeExtension = regexp.MustCompile(`^\.[A-Za-z0-9]{1,16}$`)
 )
 
 func loadProbeConfig(dir string) (probeConfig, error) {
-	path := filepath.Join(dir, probeConfigName)
 	var config probeConfig
-	file, err := os.Open(path)
+	file, err := os.Open(filepath.Join(dir, probeConfigName))
 	if errors.Is(err, os.ErrNotExist) {
 		return config, nil
 	}
@@ -58,13 +47,13 @@ func loadProbeConfig(dir string) (probeConfig, error) {
 		return config, err
 	}
 	defer file.Close()
-	const maxConfigBytes = 64 * 1024
-	raw, err := io.ReadAll(io.LimitReader(file, maxConfigBytes+1))
+	const limit = 64 * 1024
+	raw, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		return config, err
 	}
-	if len(raw) > maxConfigBytes {
-		return config, fmt.Errorf("%s exceeds %d bytes", probeConfigName, maxConfigBytes)
+	if len(raw) > limit {
+		return config, fmt.Errorf("%s exceeds %d bytes", probeConfigName, limit)
 	}
 	raw = bytes.TrimPrefix(raw, []byte{0xef, 0xbb, 0xbf})
 	if err := textguard.JSON(raw); err != nil {
@@ -73,7 +62,7 @@ func loadProbeConfig(dir string) (probeConfig, error) {
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&config); err != nil {
-		return config, fmt.Errorf("%s: %w", probeConfigName, err)
+		return config, fmt.Errorf("%s: %w. Use fields to map input names and put match conditions in the cue; see memory-mcp guide", probeConfigName, err)
 	}
 	if err := dec.Decode(new(any)); err != io.EOF {
 		return config, fmt.Errorf("%s: expected exactly one JSON object", probeConfigName)
@@ -81,109 +70,63 @@ func loadProbeConfig(dir string) (probeConfig, error) {
 	if config.Projects == nil {
 		return config, fmt.Errorf("%s: projects must be an object", probeConfigName)
 	}
-	if err := config.validateFacts(); err != nil {
-		return config, fmt.Errorf("%s: %w", probeConfigName, err)
-	}
 	total := 0
 	for scope, rules := range config.Projects {
-		if !strings.HasPrefix(scope, "project:") || strings.TrimSpace(scope) != scope || strings.TrimSpace(strings.TrimPrefix(scope, "project:")) == "" {
+		if !strings.HasPrefix(scope, "project:") || strings.TrimSpace(scope) != scope || len(scope) <= len("project:") {
 			return config, fmt.Errorf("%s: expected project:<identifier>", probeConfigName)
 		}
 		total += len(rules)
 		if total > 128 {
 			return config, fmt.Errorf("%s: at most 128 rules across projects", probeConfigName)
 		}
-		seen := make(map[[2]string]bool, len(rules))
-		for i, rule := range rules {
+		seen := map[[2]string]bool{}
+		observations := map[string]bool{}
+		for idx, rule := range rules {
+			if err := rule.validate(observations); err != nil {
+				return config, fmt.Errorf("%s: %s tool %d: %w", probeConfigName, scope, idx+1, err)
+			}
 			key := [2]string{rule.Tool, rule.MCPTool}
 			if seen[key] {
-				return config, fmt.Errorf("%s: %s rule %d repeats a selector", probeConfigName, scope, i+1)
+				return config, fmt.Errorf("%s: %s tool %d repeats a selector", probeConfigName, scope, idx+1)
 			}
 			seen[key] = true
-			if err := rule.validate(); err != nil {
-				return config, fmt.Errorf("%s: %s rule %d: %w", probeConfigName, scope, i+1, err)
-			}
-			for _, branch := range rule.branches() {
-				if err := branch.When.validate(false, config.Facts[scope], 0); err != nil {
-					return config, fmt.Errorf("%s: %s rule %d branch %q: %w", probeConfigName, scope, i+1, branch.ID, err)
-				}
-			}
 		}
 	}
 	return config, nil
 }
 
-func (r probeRule) validate() error {
-	if err := validateProbeSelector(r.Tool, r.MCPTool); err != nil {
-		return err
-	}
-	if r.Mode != "" && r.Mode != "append" && r.Mode != "replace" {
-		return errors.New("mode must be append or replace")
-	}
-	if len(r.Branches) > 8 || r.Branches != nil && len(r.Branches) == 0 {
-		return errors.New("branches requires 1-8 entries")
-	}
-	if len(r.Branches) > 0 && (r.PathField != "" || len(r.TextFields) > 0 || len(r.Extensions) > 0 || r.When != nil) {
-		return errors.New("branches owns the scan fields and when; omit them at tool level")
-	}
-	seen := map[string]bool{}
-	for _, branch := range r.branches() {
-		if !probeRuleID.MatchString(branch.ID) || seen[branch.ID] {
-			return errors.New("branch id must be a unique name")
-		}
-		seen[branch.ID] = true
-		if err := branch.validateFields(); err != nil {
-			return fmt.Errorf("branch %q: %w", branch.ID, err)
-		}
-	}
-	return nil
+func (r probeRule) active() bool { return r.Enabled == nil || *r.Enabled }
+func (r probeRule) inspectionOnly() bool {
+	return r.preset == "" && len(r.Fields) == 0 && len(r.Observe) == 0
 }
 
-func (r probeRule) branches() []probeBranch {
-	if len(r.Branches) != 0 {
-		return r.Branches
-	}
-	return []probeBranch{{ID: "default", When: r.When, PathField: r.PathField, TextFields: r.TextFields, Extensions: r.Extensions}}
-}
-
-func validateProbeSelector(tool, mcpTool string) error {
-	if (tool == "") == (mcpTool == "") {
+func (r probeRule) validate(observations map[string]bool) error {
+	if (r.Tool == "") == (r.MCPTool == "") {
 		return errors.New("specify exactly one of tool or mcp_tool")
 	}
-	name := tool
-	if mcpTool != "" {
-		name = mcpTool
+	name := r.Tool
+	if r.MCPTool != "" {
+		name = r.MCPTool
 	}
-	if !probeToolName.MatchString(name) || (mcpTool != "" && strings.HasPrefix(name, "mcp__")) {
-		return errors.New("tool selectors must use literal native tool names or bare MCP tool names")
+	if !probeToolName.MatchString(name) || (r.MCPTool != "" && strings.HasPrefix(name, "mcp__")) || isMemoryProbeName(name) {
+		return errors.New("use a native tool name or a bare non-memory MCP tool name")
 	}
-	if isMemoryProbeName(name) {
-		return errors.New("memory tools cannot trigger a custom probe")
+	if len(r.Fields) > 8 || len(r.Observe) > 8 {
+		return errors.New("at most eight fields and eight observations")
 	}
-	return nil
-}
-
-func (r probeBranch) validateFields() error {
-	if r.PathField == "" && len(r.TextFields) == 0 {
-		return errors.New("specify path_field or text_fields")
-	}
-	if r.PathField != "" && !probeFieldPath.MatchString(r.PathField) {
-		return errors.New("invalid path_field")
-	}
-	if len(r.TextFields) > 8 || len(r.Extensions) > 8 {
-		return errors.New("at most eight text fields and eight extensions")
-	}
-	fields := map[string]bool{r.PathField: true}
-	for _, field := range r.TextFields {
-		if !probeFieldPath.MatchString(field) || fields[field] {
-			return errors.New("invalid or duplicate text field")
+	for name, path := range r.Fields {
+		if !matching.FieldName.MatchString(name) || name == "tool" || !probeFieldPath.MatchString(path) {
+			return fmt.Errorf("invalid field mapping %q", name)
 		}
-		fields[field] = true
 	}
-	for _, ext := range r.Extensions {
-		if r.PathField == "" || !probeExtension.MatchString(ext) {
-			return errors.New("extensions require path_field and literal suffixes such as .sql")
+	for _, o := range r.Observe {
+		if err := o.validate(); err != nil {
+			return err
 		}
+		if observations[o.Name] {
+			return fmt.Errorf("duplicate observation name %q", o.Name)
+		}
+		observations[o.Name] = true
 	}
 	return nil
 }
@@ -203,37 +146,69 @@ func (r probeRule) pattern() string {
 	return "^mcp__.+__" + regexp.QuoteMeta(r.MCPTool) + "$"
 }
 
-func (c probeConfig) matcher(server string) string {
-	patterns := []string{experienceToolMatcher, businessToolMatcher, lookupToolMatcher(server)}
-	custom := c.factPatterns()
-	for _, rules := range c.Projects {
-		for _, rule := range rules {
-			custom[rule.pattern()] = true
+func selectTool(rules []probeRule, tool string) (probeRule, bool) {
+	var suffix probeRule
+	for _, rule := range rules {
+		if rule.Tool != "" && rule.Tool == tool {
+			return rule, true
+		}
+		if rule.MCPTool != "" {
+			ending := "__" + rule.MCPTool
+			if strings.HasPrefix(tool, "mcp__") && strings.HasSuffix(tool, ending) &&
+				len(tool) > len("mcp__")+len(ending) && len(rule.MCPTool) > len(suffix.MCPTool) {
+				suffix = rule
+			}
 		}
 	}
-	return probeMatchers(patterns, custom)
+	return suffix, suffix.MCPTool != ""
 }
 
+// One effective adapter. An explicit project entry takes priority over a preset.
+func (c probeConfig) ruleFor(scope, tool string) (probeRule, bool) {
+	if isMemoryProbeName(tool) {
+		return probeRule{}, false
+	}
+	if rule, ok := selectTool(c.Projects[scope], tool); ok {
+		return rule, true
+	}
+	return selectTool(defaultProbeRules, tool)
+}
+
+func (c probeConfig) routePatterns(observeOnly bool) map[string]bool {
+	patterns := map[string]bool{}
+	for _, r := range defaultProbeRules {
+		if r.active() && (!observeOnly || r.preset == "business") {
+			patterns[r.pattern()] = true
+		}
+	}
+	for _, rules := range c.Projects {
+		for _, r := range rules {
+			if r.active() && (!observeOnly || len(r.Observe) > 0 || r.inspectionOnly()) {
+				patterns[r.pattern()] = true
+			}
+		}
+	}
+	return patterns
+}
+func (c probeConfig) matcher(server string) string {
+	return probeMatchers([]string{lookupToolMatcher(server)}, c.routePatterns(false))
+}
 func (c probeConfig) postMatcher(server string) string {
-	return probeMatchers([]string{businessToolMatcher, lookupToolMatcher(server)}, c.factPatterns())
+	return probeMatchers([]string{lookupToolMatcher(server)}, c.routePatterns(true))
 }
-
 func (c probeConfig) failureMatcher(server string) string {
-	custom := c.factPatterns()
-	if len(custom) == 0 {
+	names := map[string]bool{}
+	for _, rules := range c.Projects {
+		for _, r := range rules {
+			if r.active() && len(r.Observe) > 0 {
+				names[r.pattern()] = true
+			}
+		}
+	}
+	if len(names) == 0 {
 		return lookupToolMatcher(server)
 	}
-	return probeMatchers([]string{lookupToolMatcher(server)}, custom)
-}
-
-func (c probeConfig) factPatterns() map[string]bool {
-	custom := map[string]bool{}
-	for _, rules := range c.Facts {
-		for _, rule := range rules {
-			custom[probeRule{Tool: rule.Tool, MCPTool: rule.MCPTool}.pattern()] = true
-		}
-	}
-	return custom
+	return probeMatchers([]string{lookupToolMatcher(server)}, names)
 }
 
 func probeMatchers(patterns []string, custom map[string]bool) string {
@@ -243,28 +218,6 @@ func probeMatchers(patterns []string, custom map[string]bool) string {
 	}
 	sort.Strings(extra)
 	return "(" + strings.Join(append(patterns, extra...), ")|(") + ")"
-}
-
-func (c probeConfig) ruleFor(scope, tool string) (probeRule, bool) {
-	if isMemoryProbeName(tool) {
-		return probeRule{}, false
-	}
-	var suffixRule probeRule
-	for _, rule := range c.Projects[scope] {
-		if rule.Tool != "" && rule.Tool == tool {
-			return rule, true
-		}
-		if rule.MCPTool != "" {
-			suffix := "__" + rule.MCPTool
-			if strings.HasPrefix(tool, "mcp__") && strings.HasSuffix(tool, suffix) && len(tool) > len("mcp__")+len(suffix) {
-				// A longer suffix is more specific if a tool name contains "__".
-				if len(rule.MCPTool) > len(suffixRule.MCPTool) {
-					suffixRule = rule
-				}
-			}
-		}
-	}
-	return suffixRule, suffixRule.MCPTool != ""
 }
 
 func probeValue(input map[string]any, field string) any {
@@ -279,6 +232,13 @@ func probeValue(input map[string]any, field string) any {
 	return value
 }
 
+func (c probeConfig) observationCount(scope string) int {
+	count := 0
+	for _, r := range c.Projects[scope] {
+		count += len(r.Observe)
+	}
+	return count
+}
 func probePath(root, cwd, path string) (string, string) {
 	if path == "" {
 		return "", "path_field_unavailable"
@@ -342,79 +302,4 @@ func probePath(root, cwd, path string) (string, string) {
 		return "", "path_not_accessible_from_project"
 	}
 	return filepath.ToSlash(relative), ""
-}
-
-const customProbeTextLimit = 32 * 1024
-
-type probeInputField struct {
-	Field  string `json:"field"`
-	Status string `json:"status"`
-	Bytes  int    `json:"bytes"`
-}
-
-type probeInputReport struct {
-	Tool       string            `json:"tool"`
-	Branch     string            `json:"branch"`
-	Outcome    string            `json:"outcome"`
-	PathField  string            `json:"path_field,omitempty"`
-	TextFields []probeInputField `json:"text_fields,omitempty"`
-}
-
-func (r probeBranch) clues(e Event, root string) ([]string, *probeInputReport) {
-	var texts []string
-	report := &probeInputReport{Tool: e.Tool, Branch: r.ID, PathField: r.PathField}
-	total := 0
-	for _, field := range r.TextFields {
-		input := probeValue(e.Input, field)
-		value, isString := input.(string)
-		status := "present"
-		switch {
-		case input == nil:
-			status = "missing"
-		case !isString:
-			status = "not_string"
-		case value == "":
-			status = "empty"
-		default:
-			total += len(value)
-			texts = append(texts, value)
-		}
-		report.TextFields = append(report.TextFields, probeInputField{Field: field, Status: status, Bytes: len(value)})
-	}
-
-	if r.PathField != "" {
-		value, ok := probeValue(e.Input, r.PathField).(string)
-		if !ok {
-			report.Outcome = "path_field_unavailable"
-			return nil, report
-		}
-		path, rejected := probePath(root, e.CWD, value)
-		if rejected != "" {
-			report.Outcome = rejected
-			return nil, report
-		}
-		if len(r.Extensions) > 0 {
-			matches := false
-			for _, ext := range r.Extensions {
-				matches = matches || strings.EqualFold(filepath.Ext(path), ext)
-			}
-			if !matches {
-				report.Outcome = "extension_mismatch"
-				return nil, report
-			}
-		}
-		texts = append([]string{path}, texts...)
-	}
-	if total > customProbeTextLimit {
-		report.Outcome = "text_budget_exceeded"
-		return nil, report
-	}
-	for _, field := range report.TextFields {
-		if field.Status != "present" {
-			report.Outcome = "text_fields_unavailable"
-			return texts, report
-		}
-	}
-	report.Outcome = "scanned"
-	return texts, report
 }

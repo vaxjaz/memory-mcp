@@ -106,10 +106,11 @@ func (s *Store) ExperienceStartTurn(ctx context.Context, host, scope, session, n
 }
 
 type ExperienceMatch struct {
-	CueID    string   `json:"cue_id"`
-	CueLabel string   `json:"-"`
-	CueText  string   `json:"-"`
-    EntranceComparison
+	CueID    string `json:"cue_id"`
+	CueLabel string `json:"-"`
+	CueText  string `json:"-"`
+	Field    string `json:"field,omitempty"`
+	EntranceComparison
 	ID       string   `json:"id"`
 	RootID   string   `json:"root_id"`
 	Entrance string   `json:"entrance"`

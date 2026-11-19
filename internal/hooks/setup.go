@@ -439,7 +439,7 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	report["historical_projects_auto_bound"] = false
 	report["probe_config_path"] = filepath.Join(o.DataDir, probeConfigName)
 	report["custom_probe_rules"] = len(probes.Projects[o.Scope])
-	report["probe_context_fact_rules"] = len(probes.Facts[o.Scope])
+	report["probe_context_fact_rules"] = probes.observationCount(o.Scope)
 	report["verification_command"] = fmt.Sprintf("doctor --host %s --config %q --data-dir %q --project %q --scope %q", o.Host, o.Config, o.DataDir, o.Project, o.Scope)
 	report["verification_argv"] = []string{o.Binary, "doctor", "--host", o.Host, "--config", o.Config, "--data-dir", o.DataDir, "--project", o.Project, "--scope", o.Scope, "--server-name", name}
 	plans, err := adapterFiles(adapter, o, c, raw, extra, name, args)

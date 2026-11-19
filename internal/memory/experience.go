@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/vaxjaz/memory-mcp/internal/matching"
 	"os"
 	"path/filepath"
 	"sort"
@@ -66,8 +67,10 @@ type TriggerPreview struct {
 }
 
 type PreviewEntrance struct {
-	CueID string `json:"cue_id"`
-	Value string `json:"value"`
+	Conditional bool   `json:"conditional,omitempty"`
+	CueID       string `json:"cue_id"`
+	Value       string `json:"value"`
+	Field       string `json:"field,omitempty"`
 	EntranceComparison
 }
 
@@ -291,14 +294,16 @@ func PreviewTriggers(e Entry) TriggerPreview {
 	default:
 		out.RecordStatus = "no_entrances"
 		const maxPreviewEntrances = 4
-        for _, cue := range entryCues(e) {
-            for _, group := range cue.Matches {
-                out.EntranceCount += len(group.Entrances)
-                for _, entrance := range group.Entrances[:min(len(group.Entrances), maxPreviewEntrances-len(out.Entrances))] {
-                    out.Entrances = append(out.Entrances, PreviewEntrance{CueID:cue.ID, Value:entrance, EntranceComparison:group.comparison()})
-                }
-            }
-        }
+		for _, cue := range entryCues(e) {
+			for _, group := range cue.Matches {
+				group.VisitEntrances(func(leaf *matching.Expression, value string) {
+					out.EntranceCount++
+					if len(out.Entrances) < maxPreviewEntrances {
+						out.Entrances = append(out.Entrances, PreviewEntrance{CueID: cue.ID, Value: value, Field: leaf.Field, Conditional: group.All != nil || group.Any != nil, EntranceComparison: entranceComparison(leaf.Rule)})
+					}
+				})
+			}
+		}
 		if out.EntranceCount > 0 {
 			out.RecordStatus = "eligible"
 		}

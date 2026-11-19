@@ -7,32 +7,29 @@ import (
 	"strings"
 	"unicode/utf8"
 
-"github.com/vaxjaz/memory-mcp/internal/matching"
+	"github.com/vaxjaz/memory-mcp/internal/matching"
 )
 
 // Cues are evidenced associations with the SAME historical counterexample.
 // Entrances are aliases, not independent risks or model-authored read receipts.
 type ExperienceCue struct {
-	ID           string        `json:"cue_id" jsonschema:"Stable within the record. Start with a lowercase ASCII letter; use up to 48 lowercase letters, digits or underscores in total."`
-	Label        string        `json:"label" jsonschema:"Compact association label, at most 24 Unicode characters."`
-	Text         string        `json:"text" jsonschema:"A complete evidence-backed reminder stating the applicable fact, at most 160 Unicode characters. Only facts already in this version's body; new risks require a material revision or new experience."`
-	EvidenceRefs []string      `json:"evidence_refs" jsonschema:"1-3 exact evidence[].reference values from this submitted body. When removing evidence, update all cues that cite it."`
- Matches []CueMatch `json:"matches" jsonschema:"Matching groups with a total of 1-12 directly evidenced entrance strings."`
+	ID           string     `json:"cue_id" jsonschema:"Stable within the record. Start with a lowercase ASCII letter; use up to 48 lowercase letters, digits or underscores in total."`
+	Label        string     `json:"label" jsonschema:"Compact association label, at most 24 Unicode characters."`
+	Text         string     `json:"text" jsonschema:"A complete evidence-backed reminder stating the applicable fact, at most 160 Unicode characters. Only facts already in this version's body; new risks require a material revision or new experience."`
+	EvidenceRefs []string   `json:"evidence_refs" jsonschema:"1-3 exact evidence[].reference values from this submitted body. When removing evidence, update all cues that cite it."`
+	Matches      []CueMatch `json:"matches" jsonschema:"Matching groups with a total of 1-12 directly evidenced entrance strings."`
 }
 
-type CueMatch struct {
-    matching.Rule
-    Entrances []string `json:"entrances" jsonschema:"Original literal strings sharing this comparison rule. Preserve the original case."`
-}
+type CueMatch = matching.Expression
 
 type EntranceComparison struct {
-    Op string `json:"op"`
-    CaseSensitive bool `json:"case_sensitive"`
-    Normalize string `json:"normalize,omitempty"`
+	Op            string `json:"op"`
+	CaseSensitive bool   `json:"case_sensitive"`
+	Normalize     string `json:"normalize,omitempty"`
 }
 
-func (m CueMatch) comparison() EntranceComparison {
-    return EntranceComparison{Op:m.Op, CaseSensitive:m.Sensitive(false), Normalize:m.Normalize}
+func entranceComparison(rule matching.Rule) EntranceComparison {
+	return EntranceComparison{Op: rule.Op, CaseSensitive: rule.Sensitive(false), Normalize: rule.Normalize}
 }
 
 var cueIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
@@ -44,7 +41,7 @@ func (v *recordValidation) cues(root string, cues []ExperienceCue, evidence []Ex
 	for _, e := range evidence {
 		refs[e.Reference] = true
 	}
-	ids, entrances := map[string]bool{}, map[string]bool{}
+	ids := map[string]bool{}
 	for i, c := range cues {
 		row := fmt.Sprintf("%s[%d]", field, i)
 		if !cueIDPattern.MatchString(c.ID) || ids[c.ID] {
@@ -59,34 +56,36 @@ func (v *recordValidation) cues(root string, cues []ExperienceCue, evidence []Ex
 				v.add(fmt.Sprintf("%s.evidence_refs[%d]", row, j), "does not match any "+root+".evidence[].reference; copy the exact value or revise the cue to use supporting evidence")
 			}
 		}
-        v.count(row+".matches", len(c.Matches), 1, 12, "matching groups")
-        total := 0
-        for j, group := range c.Matches {
-            path := fmt.Sprintf("%s.matches[%d]", row, j)
-            v.count(path+".entrances", len(group.Entrances), 1, 12, "evidenced entrances")
-            total += len(group.Entrances)
-            if group.Op == "exists" {
-                v.add(path+".op", "cue matches require a text comparison")
-                continue
-            }
-            for k, value := range group.Entrances {
-                entrance := fmt.Sprintf("%s.entrances[%d]", path, k)
-                v.count(entrance, utf8.RuneCountInString(value), 2, 160, "Unicode characters")
-                if genericEntranceValue[strings.ToLower(value)] || strings.TrimSpace(value)=="" {
-                    v.add(entrance, "must identify a specific entrance")
-                }
-                if err := group.Validate(value, 640); err != nil {
-                    v.add(entrance, err.Error())
-                }
-                v.checkText(entrance, value)
-                key := fmt.Sprintf("%s:%s:%t:%s", group.Op, group.Normalize, group.Sensitive(false), group.NormalizeText(value,false))
-                if entrances[key] {
-                    v.add(entrance, "duplicates another entrance with the same comparison")
-                }
-                entrances[key] = true
-            }
-        }
-        v.count(row+".matches", total, 1, 12, "total evidenced entrances")
+		v.count(row+".matches", len(c.Matches), 1, 12, "matching groups")
+		total := 0
+		for j, group := range c.Matches {
+			path := fmt.Sprintf("%s.matches[%d]", row, j)
+			if err := group.Validate(0, true); err != nil {
+				v.add(path, err.Error())
+				continue
+			}
+			if !group.RequiresEntrance() {
+				v.add(path, "every alternative needs a positive entrance string")
+			}
+			seen := map[*matching.Expression]map[string]bool{}
+			group.VisitEntrances(func(rule *matching.Expression, value string) {
+				total++
+				v.count(path+".entrances", utf8.RuneCountInString(value), 2, 160, "Unicode characters")
+				if genericEntranceValue[strings.ToLower(value)] || strings.TrimSpace(value) == "" {
+					v.add(path+".entrances", "must identify a specific entrance")
+				}
+				v.checkText(path+".entrances", value)
+				if seen[rule] == nil {
+					seen[rule] = map[string]bool{}
+				}
+				key := rule.NormalizeText(value, false)
+				if seen[rule][key] {
+					v.add(path+".entrances", "duplicates an entrance in this comparison")
+				}
+				seen[rule][key] = true
+			})
+		}
+		v.count(row+".matches", total, 1, 12, "total evidenced entrances")
 	}
 }
 

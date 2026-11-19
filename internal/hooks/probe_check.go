@@ -18,11 +18,6 @@ type probeCheckOptions struct {
 	File, Config, Dir, Project, Scope, Server, Session, Expect, Cue string
 }
 
-type probeCheckStep struct {
-	Stage  string `json:"stage"`
-	Detail any    `json:"detail"`
-}
-
 type probeCheckMatch struct {
 	memory.ExperienceMatch
 	Source string `json:"source"`
@@ -97,7 +92,10 @@ func readProbeEvent(o probeCheckOptions) (Event, error) {
 }
 
 func checkProbe(ctx context.Context, store *memory.Store, o probeCheckOptions, e Event) (map[string]any, error) {
-	report := map[string]any{"tool": e.Tool, "read_only": true, "native_event_verified": false}
+	report := map[string]any{"tool": e.Tool, "read_only": true, "native_event_verified": false, "observed_fields": describeToolFields(e.Input)}
+	if template, ok := toolTemplates[e.Tool]; ok {
+		report["registration_template"] = template
+	}
 	result := func(outcome, next string) (map[string]any, error) {
 		report["outcome"] = outcome
 		if next != "" {
@@ -122,11 +120,13 @@ func checkProbe(ctx context.Context, store *memory.Store, o probeCheckOptions, e
 		return result("project_binding_mismatch", "Use the sample's actual cwd and the matching library/scope from the existing setup.")
 	}
 	report["scope"] = scope
+	var expectedEntry memory.Entry
 	if o.Expect != "" {
 		entry, err := store.Read(ctx, o.Expect)
 		if err != nil {
 			return nil, err
 		}
+		expectedEntry = entry.Entry
 		preview := memory.PreviewTriggers(entry.Entry)
 		report["expected"] = map[string]any{"id": o.Expect, "cue_id": o.Cue, "trigger_preview": preview}
 		if entry.Entry.Scope != scope || preview.RecordStatus != "eligible" {
@@ -146,6 +146,15 @@ func checkProbe(ctx context.Context, store *memory.Store, o probeCheckOptions, e
 		report["config_error"] = err.Error()
 		return result("invalid_probe_config", "Correct the reported tool-probes.json field and run the same check again.")
 	}
+	rule, registered := probes.ruleFor(scope, e.Tool)
+	if !registered {
+		return result("tool_not_registered", "Map a verified input path in observed_fields to a named field, then run setup to register the tool.")
+	}
+	if !rule.active() {
+		return result("tool_disabled", "Check the active project tool registration.")
+	}
+	input, extraction := rule.extract(e)
+	report["tool_input"] = extraction
 	c, _, _, err := readAdapterConfig(o.Adapter, o.Config)
 	if err != nil {
 		return nil, err
@@ -156,25 +165,27 @@ func checkProbe(ctx context.Context, store *memory.Store, o probeCheckOptions, e
 	if routing["tool_routed"] != true {
 		return result("tool_not_routed", "Check the exact event tool name and service config. After adding a selector, run setup and refresh the client.")
 	}
-	r := Runtime{Host: o.Adapter.Name, Store: store, ServerName: o.Server}
-	var steps []probeCheckStep
-	clues, _, err := r.evaluateProbe(ctx, e, scope, probes, func(stage string, detail any) {
-		steps = append(steps, probeCheckStep{Stage: stage, Detail: detail})
-	})
-	report["steps"] = steps
-	if err != nil {
-		return nil, err
+	if rule.inspectionOnly() {
+		return result("inspection_only", "Map an observed field in the tool registration. A selector without fields or observations reports only field metadata.")
 	}
-	if len(clues) == 0 {
-		next := probeInputAdvice(steps)
-		if next == "" {
-			next = "Check the branch outcome and actual event input keys. For a built-in search probe, use an eligible read/search action."
+	r := Runtime{Host: o.Adapter.Name, Store: store, ServerName: o.Server}
+	r.attachFacts(ctx, e, scope, probes, input)
+	if o.Expect != "" {
+		checks, err := memory.ExplainCue(expectedEntry, o.Cue, input)
+		if err != nil {
+			return nil, err
 		}
-		return result("no_scanned_fields", next)
+		report["cue_checks"] = checks
+		if len(checks) == 0 {
+			return result("cue_not_found", "Use a cue ID in the selected current record, or omit --expect-cue to check the whole record.")
+		}
+	}
+	if len(input.Texts) == 0 {
+		return result("no_scanned_fields", "Check tool_input.fields and its outcome. Map a present string from observed_fields, or use a supported operation for this preset.")
 	}
 	probe, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancel()
-	direct, matches, err := r.probeMatches(probe, e, scope, clues)
+	direct, matches, err := r.probeMatches(probe, e, scope, input, rule)
 	if err != nil {
 		return nil, err
 	}
@@ -203,34 +214,7 @@ func checkProbe(ctx context.Context, store *memory.Store, o probeCheckOptions, e
 		return result("direct_match", "")
 	}
 	if expected(matches) {
-		return result("context_match", "This cue was matched by a stored business observation in this session.")
+		return result("context_match", "The candidate came from a stored same-input business observation.")
 	}
-	if next := probeInputAdvice(steps); next != "" {
-		return result("cue_missed", next)
-	}
-	return result("cue_missed", "Compare the saved entrance and its operation/case policy with the scanned field. For token use the full identifier; for a deliberate substring use contains. Rerun this check.")
-}
-
-func probeInputAdvice(steps []probeCheckStep) string {
-	for _, step := range steps {
-		report, ok := step.Detail.(*probeInputReport)
-		if !ok {
-			continue
-		}
-		switch report.Outcome {
-		case "path_outside_project":
-			return "Check the bound directory. For a separate repository, use a when suffix condition on input.file_path and scan content."
-		case "extension_mismatch":
-			return "Compare the actual target suffix with the branch extensions."
-		case "path_field_unavailable":
-			return "Use the actual event field containing the target path."
-		case "path_not_resolved", "path_not_accessible_from_project", "path_is_project_root", "path_too_long":
-			return "Check that the target resolves to a file under the bound directory, including link and junction boundaries."
-		case "text_budget_exceeded", "combined_budget_exceeded":
-			return "Use fewer or smaller configured text fields. This probe exceeded the 32 KiB text budget."
-		case "text_fields_unavailable":
-			return "Use the actual event's string field and check the missing, empty or non-string status."
-		}
-	}
-	return ""
+	return result("cue_missed", "Check cue_checks for the first unmatched condition and tool_input for the field mapping. Use a full identifier with token, or use contains for a deliberate substring.")
 }

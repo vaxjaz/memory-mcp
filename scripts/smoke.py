@@ -38,7 +38,7 @@ def main():
   try:
    tools=h.request("tools/list",{})["tools"];names={x["name"] for x in tools}
    assert names=={"memory_bootstrap","memory_experience_record","memory_reference_record","memory_experience_lookup","memory_search","memory_read","memory_cleanup"},names
-   boot=h.tool("memory_bootstrap",{});assert boot["workflow"]=="verified_experience" and boot["integration_protocol"]=="8"
+   boot=h.tool("memory_bootstrap",{});assert boot["workflow"]=="verified_experience" and boot["integration_protocol"]=="9"
    assert not any("mode" in f or "reminder" in f or "checkpoint" in f for f in boot["features"])
    guide=boot["guide"].lower();assert "a native userpromptsubmit hook supplies a short reminder" not in guide
    page=h.tool("memory_search",{"scope":"project:fixture","query":""});assert not page["results"]

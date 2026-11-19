@@ -1,8 +1,8 @@
 package hooks
 
 import (
-"github.com/vaxjaz/memory-mcp/internal/matching"
 	"encoding/json"
+	"github.com/vaxjaz/memory-mcp/internal/matching"
 	"regexp"
 	"strings"
 	"testing"
@@ -14,7 +14,7 @@ func TestBusinessResultObservationWakesOnlySameObjectAndInput(t *testing.T) {
 	s, r, p := trialFixture(t)
 	saved, err := s.RecordAgreement(testCtx, memory.AgreementWrite{Scope: "project:demo", Project: p, Title: "isolated agreement reference", Agreement: memory.Agreement{
 		ObjectIDPrefixes: []string{"WXN"},
-		Cues:             []memory.ExperienceCue{{ID: "cancel", Label: "取消前核验", Text: "仅为隔离测试的核验约定", EvidenceRefs: []string{"fixture:confirmed-agreement"}, Matches: []memory.CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"取消 WXN-001"}}}}},
+		Cues:             []memory.ExperienceCue{{ID: "cancel", Label: "取消前核验", Text: "仅为隔离测试的核验约定", EvidenceRefs: []string{"fixture:confirmed-agreement"}, Matches: []memory.CueMatch{{Rule: matching.Rule{Op: "token", Normalize: "whitespace"}, Entrances: []string{"取消 WXN-001"}}}}},
 		Requirement:      "仅为隔离测试的核验约定", Applicability: "隔离工单处理", Boundary: "不覆盖审批撤回，不授予执行权限",
 		Authority: "isolated fixture owner", ConfirmationReference: "fixture:confirmed-agreement",
 		Evidence: []memory.ExperienceEvidence{{Kind: "business", Reference: "fixture:confirmed-agreement", Observation: "explicitly synthetic test agreement"}},
@@ -76,19 +76,21 @@ func TestBusinessResultObservationWakesOnlySameObjectAndInput(t *testing.T) {
 
 func TestBusinessCluesStayBoundedAndDoNotProbeEveryTool(t *testing.T) {
 	for _, name := range []string{"mcp__decision_memory__memory_experience_lookup", "web_search", "mcp__github__fetch", "apply_patch", "Skill"} {
-		if isBusinessTool(name) {
+		if rule, _ := (probeConfig{}).ruleFor("", name); rule.preset == "business" {
 			t.Fatal("overbroad native selector", name)
 		}
 	}
-	if !isBusinessTool("mcp__mysql__query") {
+	rule, _ := (probeConfig{}).ruleFor("", "mcp__mysql__query")
+	if rule.preset != "business" {
 		t.Fatal("known database tool omitted")
 	}
 	e := Event{Tool: "mcp__mysql__query", Input: map[string]any{"sql": "select order_no from t", "password": "DO_NOT_PROBE_SECRET"}}
-	if strings.Contains(businessClues(e, false), "DO_NOT_PROBE_SECRET") {
+	inp, _ := rule.extract(e)
+	if len(inp.Texts) != 2 || inp.Fields["password"] != nil {
 		t.Fatal("secret field probed")
 	}
 	e.Input["sql"] = strings.Repeat("x", 32769)
-	if businessClues(e, false) != "" {
+	if inp, _ = rule.extract(e); len(inp.Texts) != 0 {
 		t.Fatal("oversized probe partially matched")
 	}
 	b, _ := json.Marshal(Event{Name: "PostToolUse", CWD: "/workspace", Session: "session", Response: map[string]any{"text": "data"}})

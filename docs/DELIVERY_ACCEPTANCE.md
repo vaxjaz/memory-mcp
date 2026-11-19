@@ -104,3 +104,9 @@ M = internal/memory/experience_delivery_test.go；H = internal/hooks/lookup_rece
 0.6.0 快照未实测 ZCode/Qoder/Qoder IDE 的真实原生回执与模型可见注入、真实子 Agent/fork/clear、未报告的上下文裁剪、macOS/Linux 的真实 GUI 宿主。平台包交叉构建不是这些宿主验收。缺少 tool_use_id 的适配器只会 fail-open，不伪造成功。没有自然任务的自主模型使用样本，不能报告召回价值、误触发率、决策改善或模型 token 收益。
 
 官方协议参考：[Codex hooks](https://learn.chatgpt.com/docs/hooks?site_variant=chatgpt&translationFallback=zh-Hans)。本机可执行文件的原生实测优先于网页对其他版本的描述。
+
+## 0.6.3-dev.10 tool registration and cue matching
+
+The Windows ZCode 3.16.3 isolated native fixture used a local mock model and a synthetic login MCP service. Login's Pre and Post had the same call ID. Write's native Pre carried file_path and content and had no context object. The cue used one expression combining a .sql suffix, case-insensitive UPDATE, a fix_third substring, and the observed login result. The first Write requested a lookup, the native lookup Post recorded delivery, and the retry wrote the fixture file. No real SQL or business service ran.
+
+Executable replay verifies matching UPDATE and same-column SELECT, Write path and text from one registration, live field metadata, no state changes from doctor --probe, and result facts with wrong keys, stale results or expired TTL. The old dev.9 executable and a disposable schema 7 library verify migration to schema 8, cue behavior, original spelling, and restoring the backup with dev.9.

@@ -10,11 +10,11 @@ For a revision, use the full current ID and send the complete revised body. Copy
 
 Use memory_reference_record for compact pointers to existing explicitly confirmed agreements. Include authority, confirmation locator, scope, exceptions and evidence-backed cues. Indexing creates no authority. Changes of meaning/scope require the relevant authorization.
 
-After a successful new write or revision, including an entrance-only update, tell the user in one sentence how to encounter the recorded cue in normal work. Use one or two entrances from trigger_preview and the bound scope. Mention the tool, field or conditions if verified in the active host. A preview reports eligibility and the stored wakeup policy. Actual delivery still depends on the host dispatching a matching probe and the current delivery state. If the record is ineligible or wakeup is disabled, say so. For additional entrances, read the saved revision by ID. Report an exact submission retry once.
+After a successful new write or revision, including an entrance-only update, tell the user in one sentence how to encounter the recorded cue in normal work. Use one or two entrances from trigger_preview and the bound scope. Mention the tool, field or conditions if verified in the active host. A preview reports eligibility and the stored wakeup policy. If an entrance is marked conditional, describe the full saved expression or check it with doctor before stating how to trigger it. Actual delivery still depends on the host dispatching a matching probe and the current delivery state. If the record is ineligible or wakeup is disabled, say so. For additional entrances, read the saved revision by ID. Report an exact submission retry once.
 
 To verify a direct trigger before calling it ready, use doctor --probe EVENT.json --expect RECORD_ID or an actual hook record that lists that cue. A result of a lookup alone verifies retrieval, separate from a direct trigger. The probe check is read-only and reports where to correct a miss. See **Check a trigger before using it** below.
 
-Use cues[].matches[].entrances for distinctive trigger phrases and identifiers. Optional object_id_prefixes belongs to the same-input business-result association only. Run memory-mcp migrate to inspect an older library. When the report lists a record without cues, verify its evidence and submit a revised cue with previous_id.
+Use literal entrances in cue match expressions for distinctive trigger phrases and identifiers. Optional object_id_prefixes belongs to the same-input business-result association only. Run memory-mcp migrate to inspect an older library. When the report lists a record without cues, verify its evidence and submit a revised cue with previous_id.
 
 Lookup task/questions come from the whole current task and concrete uncertainty. Supply 1-4 independent grounded queries, terms with match=all (default) or any. keywords remains compatible. Similar words and source locations do not establish applicability. Check current evidence; no hit does not prove no risk. Up to three complete items (default two) fit one JSON text body <=8 KiB. Follow next_cursor or refine queries; changed queries/corpus require restarting. Legacy excerpts are navigation; read freely for full historical source.
 
@@ -26,85 +26,32 @@ You may judge an experience inapplicable, already repaired or consistent with co
 
 Selected business results preserve record boundaries (including MCP JSON text and structuredContent) before matching. Direct and observed candidates are combined; ambiguous multi-object prose creates no inferred association. Only identifier hashes and matched candidate IDs are retained. No raw prompt, command or result is persisted. No per-turn experience reminder, time/count reminder, extra model, async write or Stop continuation. Existing explicit maintenance stays separate: preview a reversible plan and obtain actual fresh approval for that shown plan before confirm/apply; undo needs fresh approval. Preserve history and backups.
 
-## Custom tool probes
+## Register the tool and name its fields
 
-Put tool-probes.json in the running service's data_dir. Replace the example scope with the exact bound scope. Each project maps to an array of rules. This Write example selects files inside the bound project directory.
+Put `tool-probes.json` in the running service's `data_dir`. Use the bound scope from `doctor`. First check a representative event with `doctor --probe EVENT.json`. `observed_fields` lists paths, types and string lengths from that sample. For Write and Edit, `registration_template` shows the suggested mapping. Compare the template to the fields your client actually sent.
+
+If you do not have an event sample, register only the selector, for example `{"tool":"Write"}` or `{"mcp_tool":"warehouse_query"}`. Run setup, restart, then use the tool once in that project and run `doctor --session SESSION_ID`. The `tool_field_shape` rows show field paths and types for observed PreToolUse and successful PostToolUse events. A selector with no fields or observations is for inspection and does not challenge the operation. Copy a confirmed path into `fields`. Save the match in your cue.
 
 ```json
 {
   "projects": {
     "project:example/team-repo": [
-      {"tool": "Write", "path_field": "file_path", "text_fields": ["content"], "extensions": [".sql"]},
-      {"mcp_tool": "warehouse_query", "text_fields": ["arguments.statement"]}
+      {"tool": "Write", "fields": {"path": "file_path", "text": "content"}},
+      {"mcp_tool": "warehouse_query", "fields": {"text": "arguments.statement"}}
     ]
   }
 }
 ```
 
-Use exactly one selector per rule. tool is the exact native event name. mcp_tool is the bare name matched across mcp__<server>__<tool>. Field names come from the actual tool_input. Dots select nested string fields. mode defaults to append. Use replace to scan only the configured fields for that tool.
+In `fields` the left side names a value for cues. The right side is a path inside `tool_input`, with dots for nested objects. The example makes `tool_input.content` available to a cue as `text`. Use `tool` for an exact native tool name, including a full MCP name when targeting one server. Use `mcp_tool` for a bare name across MCP servers. A project entry takes precedence over a preset. An exact tool name takes precedence over a bare MCP name within the project. Set `enabled: false` to skip that tool in the project.
 
-Run doctor with the active --host, --config, --data-dir, --project and --scope before replaying a hook. Check probe_config_valid and custom_probe_rules. A selector change requires setup and a client restart; probe_matcher_mismatches checks the on-disk dispatch configuration. A valid configuration alone cannot confirm native dispatch.
+Bash search commands (including rg), Grep, Read and recognized MCP query tools such as mysql_query already have presets. Their primary command, pattern or SQL is available as `text`. Read paths are available as `path`. Use `tool_input.fields` to confirm what the tool actually exported. The Bash preset covers search operations. A project can explicitly map Bash's command field if other shell operations should participate. An invalid tool configuration yields `probe_config_invalid`; tool probes pause until the file is corrected.
 
-Use doctor --session <event-session-id> with the same options to inspect recent_events for that session. probe_config_invalid means the file was rejected and the hook fell back to built-ins. custom_probe_no_clues means the rule supplied no usable input; custom_probe_no_match means no cue matched. experience_probe with outcome silent is a matched probe with no new delivery. Look for the recorded outcome before repeating with a fresh session.
+Run setup and restart the client after changing tool selectors. `doctor` reports `probe_config_valid`, `custom_probe_rules` and `probe_matcher_mismatches`. Adjusting a cue's match or changing a field mapping for an already routed tool applies to subsequent calls. A valid configuration confirms the on-disk settings. Native events confirm what the client sends.
 
-custom_probe_input explains path_field rejections, extension mismatch, unavailable text fields and the 32 KiB text budget. It reports field names, statuses and UTF-8 byte lengths without path or text values. A field can be present even when a path or extension check rejected the branch.
+## Define when a cue matches
 
-### Writes to a separate repository
-
-To match a Write from the bound session based on the target's filename and proposed content, use a field condition for the suffix. This also works when the target is in a separate documentation repository. Only the proposed content is scanned for cues. The condition compares the tool argument as text.
-
-```json
-{
-  "tool": "Write",
-  "mode": "replace",
-  "when": {"field": "input.file_path", "op": "suffix", "value": ".sql"},
-  "text_fields": ["content"]
-}
-```
-
-The suffix comparison is case-sensitive. Add an any condition for other suffix spelling or combine a prefix condition to target a particular repository.
-
-### Conditions and previous results
-
-A rule accepts when plus scan fields, or branches with separate id, when and scan fields. Branches that pass contribute their own fields. Custom fields are matched separately and cue hits are deduplicated. With append, the built-in scan runs independently. Use replace to let the custom conditions control that tool's whole probe.
-
-The following example uses fixture field names. Confirm the fields of the actual PreToolUse and PostToolUse payloads before adapting it.
-
-```json
-{
-  "context_facts": {
-    "project:example/team-repo": [{
-      "name": "authenticated", "mcp_tool": "login",
-      "key": ["input.service", "input.connection_id"],
-      "when": {"field": "result.ok", "op": "eq", "value": true},
-      "ttl_seconds": 120
-    }]
-  },
-  "projects": {
-    "project:example/team-repo": [{
-      "mcp_tool": "warehouse_query", "mode": "replace",
-      "branches": [
-        {"id": "change", "text_fields": ["sql"], "when": {"all": [
-          {"fact": "authenticated", "key": ["input.service", "input.connection_id"]},
-          {"field": "input.sql", "op": "token", "value": "UPDATE"}
-        ]}},
-        {"id": "read", "text_fields": ["sql"], "when":
-          {"field": "input.sql", "op": "token", "value": "SELECT"}}
-      ]
-    }]
-  }
-}
-```
-
-Use input.<field> to read tool input and result.<field> in an observer to read the result object. The latter can be a direct object, MCP structuredContent or a single JSON-object text block. all, any and not can nest. Field operators are exists, eq, prefix, suffix, contains and token. eq compares a string, boolean or number without coercion. For strings, token is case-insensitive by default and the other operators are case-sensitive. Set case_sensitive explicitly to change that. A comparison with a missing value or missing fact is unknown. exists reports whether a field has a value. Negating unknown keeps it unknown. Only true branches scan.
-
-An observer needs matching native call IDs and an observed input boundary. Its key is an ordered tuple of up to four scalars; large IDs belong in strings. Facts are scoped by host, project, session/agent and context generation. Default lifetime is input; session retains an observed fact across inputs up to its TTL. TTL defaults to 120 seconds and is capped at 600. A late result cannot become a new input's fact. Only a hash of the key and the predicate outcome are stored; the original result is not saved.
-
-After adding a producer or consumer tool, run setup and restart to install the native matchers. doctor shows probe_context_fact_rules and checks Pre/Post dispatch configuration. doctor --session shows custom_probe_condition with branch outcomes passed, not_met or unknown and shows whether a result could be associated with its call. A result observer affects later calls.
-
-### Choose cue entrance matching
-
-A cue has matches groups. Each group holds the comparison options and an entrances array of literal strings. Any matching group can deliver the same cue. The strings are saved with their original case. Cue groups default to case_sensitive false and require an explicit op.
+The following cue matches when Write targets a .sql file and its proposed content has both the UPDATE token and a column containing fix_third. The same column in a SELECT, a .txt file, or the filename alone does not trigger this cue. Replace the evidence reference with an exact reference in your submission.
 
 ```json
 {
@@ -112,32 +59,81 @@ A cue has matches groups. Each group holds the comparison options and an entranc
   "label": "Settlement field",
   "text": "The two isolated environments returned different values for the same field.",
   "evidence_refs": ["verified-source"],
-  "matches": [
-    {
-      "op": "token",
-      "case_sensitive": false,
-      "entrances": ["work_order_feedback_fix_second", "work_order_feedback_fix_third"]
-    }
+  "matches": [{
+    "all": [
+      {"field": "path", "op": "suffix", "value": ".sql"},
+      {"field": "text", "op": "token", "value": "UPDATE"},
+      {"field": "text", "op": "contains", "entrances": ["fix_second", "fix_third"]}
+    ]
+  }]
+}
+```
+
+| Match property | Behavior |
+| --- | --- |
+| `matches` | Any matching expression is enough for this cue. A simple expression such as `{"op":"token","entrances":["findCustomer"]}` works with preset and registered tools. |
+| `entrances` | Literal trigger phrases or identifiers. Any string in a leaf can match. A leaf with no `field` searches the exposed strings individually. Each successful alternative needs an entrance. |
+| `value` | A comparison guard on a named field. Use it for an operation, path, switch, or result flag. |
+| `all`, `any`, `not` | Require every condition, at least one condition, or a false child. Missing fields or unavailable facts are unknown, and negating unknown leaves it unknown. |
+| `token`, `contains` | `token` uses ASCII identifier boundaries, including underscores. `contains` finds a substring within one field. Use it for a partial identifier such as `fix_third`. |
+| `eq`, `prefix`, `suffix`, `exists` | Compare the whole value, its beginning, its end, or its presence. `eq` also accepts boolean and number values and preserves their types. `exists` takes no value. |
+| `case_sensitive`, `normalize` | Entrances retain original spelling. String comparisons default to case-insensitive. Set `case_sensitive: true` on a comparison to require exact casing. `normalize: "path"` unifies slash styles, and `"whitespace"` ignores Unicode whitespace. |
+
+For SQL queries, `text` can already be mapped by the mysql_query preset or by the warehouse_query example. To make the cue work for both file writing and queries, add a second expression to `matches` with an exact tool guard for the query and the desired SQL predicates. Add another expression for another distinct trigger. A path comparison interprets the event's filename as text, including a target in a separate documentation repository.
+
+### Previous tool results
+
+A tool can expose result fields through an observation. In this example, login exposes two fields for comparison with a cue. The ordered producer key uses `tool_input.connection_id`. The consumer names that same input value `connection`.
+
+```json
+{
+  "projects": {
+    "project:example/team-repo": [
+      {"mcp_tool": "login", "observe": [{
+        "name": "authenticated",
+        "key": ["input.connection_id"],
+        "fields": {"ok": "ok", "state": "status"},
+        "ttl_seconds": 120
+      }]},
+      {"mcp_tool": "warehouse_query", "fields": {
+        "text": "arguments.statement", "connection": "connection_id"
+      }}
+    ]
+  }
+}
+```
+
+In the query cue's `matches`, place the following expression alongside any other trigger expressions. The authentication comparison belongs to this cue.
+
+```json
+{
+  "all": [
+    {"field": "text", "op": "token", "value": "UPDATE"},
+    {"field": "text", "op": "contains", "entrances": ["fix_third"]},
+    {"fact": {"name": "authenticated", "key": ["connection"], "match": {
+      "all": [
+        {"field": "ok", "op": "eq", "value": true},
+        {"field": "state", "op": "eq", "value": "READY"}
+      ]
+    }}}
   ]
 }
 ```
 
-Replace verified-source with the exact reference of your submitted evidence. Start with one group using token for known identifiers. token looks for the literal text with ASCII identifier boundaries. Underscores belong to the identifier. If you deliberately want a broader match, add a group such as {"op":"contains","case_sensitive":true,"entrances":["fix_Second"]}. It matches work_order_feedback_fix_Second and fix_Second_backup within one scanned field. eq compares the entire field. prefix and suffix compare the ends of the entire field.
-
-The optional normalize setting is path for matching slash styles or whitespace for ignoring Unicode whitespace. Rules keep punctuation unless it is a path separator being normalized. when conditions and result observers share these operations. For example, a when condition with field input.file_path, op suffix, value .sql and case_sensitive false accepts both .sql and .SQL. Context-fact lookup keys still compare exactly.
+Observation field paths are relative to the result object, which can be a direct object, MCP structuredContent or a single JSON-object text block. A producer key has 1–4 ordered scalar paths prefixed with `input.` or `result.`. Use the same value types and order on the consumer. The hook needs the same native call ID on PreToolUse and PostToolUse, plus the session and input boundary. Default lifetime is the current input. Set `lifetime: "session"` to retain a fact across inputs within its TTL. TTL defaults to 120 seconds and is capped at 600. Only the comparison outcome and hashes are stored. Rerun the producer after changing the result predicate.
 
 ### Check a trigger before using it
 
-Save a small representative PreToolUse sample with the event's tool_name and tool_input. If the sample omits cwd, run the check from the bound project or supply --project. Use the same host, config and data directory as the running service. This example uses invented SQL and requires no actual Write.
+Save a sample with the client's `tool_name` and `tool_input`. Use `--project` if the sample omits `cwd`. For example, save the following as EVENT.json.
 
 ```json
-{"tool_name":"Write","tool_input":{"file_path":"example.sql","content":"UPDATE demo SET work_order_feedback_fix_third = 1;"}}
+{"tool_name":"Write","tool_input":{"file_path":"example.sql","content":"update demo SET work_order_feedback_fix_third = 1;"}}
 ```
 
 ```text
-memory-mcp doctor --host zcode --data-dir LIBRARY --project PROJECT --probe EVENT.json --expect RECORD_ID
+memory-mcp doctor --host zcode --config CONFIG --data-dir LIBRARY --project PROJECT --probe EVENT.json --expect RECORD_ID --expect-cue settlement_code
 ```
 
-Use the full record ID from the write receipt. To require a specific cue within it, add --expect-cue CUE_ID. The example contains work_order_feedback_fix_third as one ASCII identifier. Register the full name with token, or use contains with a deliberate substring. Probe candidates and the trigger preview show the effective op, case_sensitive and normalization. Keep lookup and trigger checks separate.
+Read `outcome` and `next`. For `tool_not_registered`, use `observed_fields` to map the actual paths. For `tool_not_routed`, rerun setup and refresh the client. For `no_scanned_fields` or missing named inputs, check `tool_input.fields` for missing, empty, unsupported or oversized values. For `cue_missed`, check `cue_checks` for the comparisons that failed or lack a value. Try the expected matching sample and a similar sample that should pass without a challenge. Include `--session SESSION_ID` or the native event identity if testing a saved result fact. The probe check executes no tool and writes no hook event, fact, challenge or receipt. It does not verify native dispatch.
 
-If the result is direct_match, the expected entry matched the sample. For a miss, next gives the first corrective step and steps shows branch conditions and scanned field metadata. Use --session SESSION_ID or the actual event identity to include saved facts from that session. The check examines on-disk dispatch configuration and uses the real matching path; use doctor --session after a native action to verify actual client delivery. The check executes no tool and writes no hook event, fact, challenge or receipt.
+After a real operation, use `doctor --session SESSION_ID` to inspect `recent_events`. An `experience_probe` with `candidate_ids` and a `silent` outcome means the cue matched and had no new delivery. A successful lookup can also retrieve a cue absent from the trigger candidates. Inspect the candidates before concluding that a cue triggered.

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/vaxjaz/memory-mcp/internal/matching"
 	"math"
 	"sort"
 	"strings"
@@ -94,15 +95,15 @@ func indexRecallEntry(ctx context.Context, tx *sql.Tx, e Entry) error {
 	}
 	for _, c := range entryCues(e) {
 		add(c.Text, 2)
-        for _, group := range c.Matches {
-            for _, value := range group.Entrances {
-                add(value, 8)
-                compact := humanSignalKey(value)
-                if group.Normalize == "whitespace" && compact != strings.ToLower(value) {
-                    add(compact, 8)
-                }
-            }
-        }
+		for _, group := range c.Matches {
+			group.VisitEntrances(func(leaf *matching.Expression, value string) {
+				add(value, 8)
+				compact := humanSignalKey(value)
+				if leaf.Normalize == "whitespace" && compact != strings.ToLower(value) {
+					add(compact, 8)
+				}
+			})
+		}
 	}
 	length := 0.0
 	for _, n := range weights {
@@ -387,8 +388,8 @@ func (s *Store) rankedRecall(ctx context.Context, scope string, queries []Recall
 		var entrances []string
 		for _, cue := range entryCues(e) {
 			for _, group := range cue.Matches {
- entrances = append(entrances, group.Entrances...)
- }
+				group.VisitEntrances(func(_ *matching.Expression, value string) { entrances = append(entrances, value) })
+			}
 		}
 		uniq := map[string]bool{}
 		r.Terms = nil

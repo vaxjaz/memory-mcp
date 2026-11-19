@@ -3,13 +3,13 @@ module github.com/vaxjaz/memory-mcp
 go 1.26.0
 
 require (
-	github.com/pelletier/go-toml/v2 v2.2.4
+	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/ncruces/go-sqlite3 v0.35.6
+	github.com/pelletier/go-toml/v2 v2.2.4
 )
 
 require (
-	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/ncruces/go-sqlite3-wasm/v6 v6.3.35304 // indirect
 	github.com/ncruces/julianday v1.0.0 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect

@@ -7,70 +7,86 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
+	"math"
 	"strings"
 	"time"
 
+	"github.com/vaxjaz/memory-mcp/internal/matching"
 	"github.com/vaxjaz/memory-mcp/internal/memory"
 )
 
-type probeFactRule struct {
-	Name       string          `json:"name"`
-	Tool       string          `json:"tool,omitempty"`
-	MCPTool    string          `json:"mcp_tool,omitempty"`
-	Key        []string        `json:"key"`
-	When       *probeCondition `json:"when"`
-	Lifetime   string          `json:"lifetime,omitempty"`
-	TTLSeconds int             `json:"ttl_seconds,omitempty"`
+type probeObservation struct {
+	Name       string            `json:"name"`
+	Key        []string          `json:"key"`
+	Fields     map[string]string `json:"fields"`
+	Lifetime   string            `json:"lifetime,omitempty"`
+	TTLSeconds int               `json:"ttl_seconds,omitempty"`
 }
 
-func (c probeConfig) validateFacts() error {
-	total := 0
-	for scope, rules := range c.Facts {
-		if !strings.HasPrefix(scope, "project:") || strings.TrimSpace(scope) != scope || len(scope) <= len("project:") {
-			return errors.New("context_facts keys must be project:<identifier>")
+func (o probeObservation) validate() error {
+	if !matching.FieldName.MatchString(o.Name) || len(o.Key) < 1 || len(o.Key) > 4 || len(o.Fields) < 1 || len(o.Fields) > 8 {
+		return errors.New("observation requires a name, 1-4 correlation paths, and 1-8 result fields")
+	}
+	for _, key := range o.Key {
+		source, path, ok := strings.Cut(key, ".")
+		if !ok || (source != "input" && source != "result") || !probeFieldPath.MatchString(path) {
+			return fmt.Errorf("observation %q key paths use input.<field> or result.<field>", o.Name)
 		}
-		total += len(rules)
-		if total > 128 {
-			return errors.New("context_facts supports at most 128 rules")
+	}
+	for alias, path := range o.Fields {
+		if !matching.FieldName.MatchString(alias) || !probeFieldPath.MatchString(path) {
+			return fmt.Errorf("observation %q has an invalid result field mapping", o.Name)
 		}
-		seen := map[string]bool{}
-		for _, rule := range rules {
-			if !probeRuleID.MatchString(rule.Name) || seen[rule.Name] {
-				return fmt.Errorf("context_facts %s requires unique fact names", scope)
-			}
-			seen[rule.Name] = true
-			if err := validateProbeSelector(rule.Tool, rule.MCPTool); err != nil {
-				return fmt.Errorf("fact %q: %w", rule.Name, err)
-			}
-			if !validProbeKey(rule.Key, true) || rule.When == nil {
-				return fmt.Errorf("fact %q requires key and when", rule.Name)
-			}
-			if err := rule.When.validate(true, nil, 0); err != nil {
-				return fmt.Errorf("fact %q: %w", rule.Name, err)
-			}
-			if rule.Lifetime != "" && rule.Lifetime != "input" && rule.Lifetime != "session" {
-				return fmt.Errorf("fact %q lifetime must be input or session", rule.Name)
-			}
-			if rule.TTLSeconds < 0 || rule.TTLSeconds > 600 {
-				return fmt.Errorf("fact %q ttl_seconds must be 0-600 (0 uses 120 seconds)", rule.Name)
-			}
-		}
+	}
+	if (o.Lifetime != "" && o.Lifetime != "input" && o.Lifetime != "session") || o.TTLSeconds < 0 || o.TTLSeconds > 600 {
+		return fmt.Errorf("observation %q requires input/session lifetime and 0-600 ttl_seconds", o.Name)
 	}
 	return nil
 }
 
-func (c probeConfig) producers(scope, tool string) []probeFactRule {
-	var matched []probeFactRule
-	for _, rule := range c.Facts[scope] {
-		pattern := probeRule{Tool: rule.Tool, MCPTool: rule.MCPTool}.pattern()
-		if regexp.MustCompile(pattern).MatchString(tool) {
-			matched = append(matched, rule)
+func (c probeConfig) observation(scope, name string) (probeObservation, bool) {
+	for _, rule := range c.Projects[scope] {
+		if !rule.active() {
+			continue
+		}
+		for _, o := range rule.Observe {
+			if o.Name == name {
+				return o, true
+			}
 		}
 	}
-	return matched
+	return probeObservation{}, false
 }
 
+func observationKey(paths []string, value func(string) any) string {
+	values := make([]any, 0, len(paths))
+	for _, path := range paths {
+		raw := value(path)
+		switch v := raw.(type) {
+		case string:
+			if strings.TrimSpace(v) == "" || len(v) > 256 {
+				return ""
+			}
+		case float64:
+			if math.Trunc(v) != v || math.Abs(v) > 9007199254740991 {
+				return ""
+			}
+		case bool:
+		default:
+			return ""
+		}
+		values = append(values, raw)
+	}
+	bytes, _ := json.Marshal(values)
+	return string(bytes)
+}
+
+func observationDefinition(o probeObservation, expr *matching.Expression) string {
+	return probeDefinition(struct {
+		Observation probeObservation
+		Match       *matching.Expression
+	}{o, expr})
+}
 func probeDefinition(v any) string {
 	data, _ := json.Marshal(v)
 	digest := sha256.Sum256(data)
@@ -112,68 +128,144 @@ func (r Runtime) probeContext(ctx context.Context, e Event, scope string) (memor
 	return memory.ProbeContext{Host: r.host(), Scope: scope, Session: e.Session, Project: project, Turn: e.TurnID}, err
 }
 
-func (r Runtime) startProbeFacts(ctx context.Context, e Event, scope string, producers []probeFactRule) error {
+func (r Runtime) startProbeFacts(ctx context.Context, e Event, scope string, sources []probeObservation) error {
 	if e.ToolUseID == "" || len(e.ToolUseID) > 512 {
 		return r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_context_call_unknown", e.Tool)
 	}
-	context, err := r.probeContext(ctx, e, scope)
+	bound, err := r.probeContext(ctx, e, scope)
 	if err != nil {
 		return err
 	}
-	pending, err := r.Store.BeginProbeCall(ctx, context, e.Tool, e.ToolUseID, probeDefinition(producers))
+	pending, err := r.Store.BeginProbeCall(ctx, bound, e.Tool, e.ToolUseID, probeDefinition(sources))
 	if err == nil && !pending {
 		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_context_call_unknown", e.Tool)
 	}
 	return err
 }
 
-func (r Runtime) finishProbeFacts(ctx context.Context, e Event, scope string) error {
-	config, err := loadProbeConfig(r.Store.Dir)
-	if err != nil {
-		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_config_invalid", probeConfigName)
-		return nil
+func (r Runtime) attachFacts(ctx context.Context, e Event, scope string, config probeConfig, input *matching.Input) {
+	if e.Session == "" {
+		return
 	}
-	producers := config.producers(scope, e.Tool)
-	if len(producers) == 0 {
+	var bound memory.ProbeContext
+	input.Fact = func(f *matching.Fact) (matching.Truth, error) {
+		source, ok := config.observation(scope, f.Name)
+		if !ok || len(source.Key) != len(f.Key) {
+			return matching.Unknown, nil
+		}
+		key := observationKey(f.Key, func(field string) any { return input.Fields[field] })
+		if key == "" {
+			return matching.Unknown, nil
+		}
+		if bound.Project == "" {
+			var err error
+			bound, err = r.probeContext(ctx, e, scope)
+			if err != nil {
+				return matching.Unknown, err
+			}
+		}
+		value, err := r.Store.ReadProbeFact(ctx, bound, observationDefinition(source, f.Match), key)
+		return matching.Truth(value), err
+	}
+}
+
+func (r Runtime) finishProbeFacts(ctx context.Context, e Event, scope string, sources []probeObservation) error {
+	if len(sources) == 0 {
 		return nil
 	}
 	if e.ToolUseID == "" || len(e.ToolUseID) > 512 {
 		return r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_context_result_unbound", e.Tool)
 	}
-	context, err := r.probeContext(ctx, e, scope)
+	bound, err := r.probeContext(ctx, e, scope)
 	if err != nil {
 		return err
 	}
-	values := probeValues{input: e.Input, result: probeResult(e)}
-	var facts []memory.ProbeFact
-	for _, rule := range producers {
-		key := values.key(rule.Key)
+	result := probeResult(e)
+	type observed struct {
+		source probeObservation
+		key    string
+		input  matching.Input
+	}
+	mapped := map[string]observed{}
+	for _, source := range sources {
+		key := observationKey(source.Key, func(path string) any {
+			side, path, _ := strings.Cut(path, ".")
+			if side == "input" {
+				return probeValue(e.Input, path)
+			}
+			return probeValue(result, path)
+		})
 		if key == "" {
 			continue
 		}
-		state := probeUnknown
-		if values.result != nil {
-			state, err = rule.When.evaluate(values)
-			if err != nil {
-				return err
+		input := matching.Input{Fields: map[string]any{}}
+		for alias, path := range source.Fields {
+			v := probeValue(result, path)
+			switch value := v.(type) {
+			case string:
+				if len(value) > customProbeTextLimit {
+					continue
+				}
+				input.Texts = append(input.Texts, matching.NamedText{Field: alias, Value: value})
+			case bool, float64:
+			default:
+				continue
 			}
+			input.Fields[alias] = v
 		}
-		ttl := rule.TTLSeconds
-		if ttl == 0 {
-			ttl = 120
-		}
-		facts = append(facts, memory.ProbeFact{Definition: probeDefinition(rule), Key: key, Value: int(state),
-			TTL: time.Duration(ttl) * time.Second, Session: rule.Lifetime == "session"})
+		mapped[source.Name] = observed{source, key, input}
 	}
-	saved, err := r.Store.CompleteProbeCall(ctx, context, e.Tool, e.ToolUseID, probeDefinition(producers), facts)
+
+	// Result comparisons are read from current cues. The registration only
+	// exposes result fields and stores no input or result value.
+	var facts []memory.ProbeFact
+	var compareErr error
+	seen := map[string]bool{}
+	if len(mapped) > 0 {
+		err = r.Store.VisitToolFacts(ctx, scope, func(f *matching.Fact) {
+			value, ok := mapped[f.Name]
+			if !ok || len(f.Key) != len(value.source.Key) || compareErr != nil {
+				return
+			}
+			definition := observationDefinition(value.source, f.Match)
+			if seen[definition] {
+				return
+			}
+			if len(facts) >= 128 {
+				compareErr = errors.New("too many result comparisons for one tool observation")
+				return
+			}
+			seen[definition] = true
+			truth := matching.Unknown
+			if result != nil {
+				truth, _, compareErr = f.Match.Evaluate(&value.input, nil)
+				if compareErr != nil {
+					return
+				}
+			}
+			ttl := value.source.TTLSeconds
+			if ttl == 0 {
+				ttl = 120
+			}
+			facts = append(facts, memory.ProbeFact{Definition: definition, Key: value.key, Value: int(truth), TTL: time.Duration(ttl) * time.Second, Session: value.source.Lifetime == "session"})
+		})
+		if err != nil {
+			return err
+		}
+		if compareErr != nil {
+			return compareErr
+		}
+	}
+	saved, err := r.Store.CompleteProbeCall(ctx, bound, e.Tool, e.ToolUseID, probeDefinition(sources), facts)
 	if err != nil {
 		return err
 	}
-	if !saved {
+	switch {
+	case !saved:
 		return r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_context_result_unbound", e.Tool)
-	}
-	if len(facts) == 0 {
+	case len(mapped) == 0:
 		return r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_context_key_unknown", e.Tool)
+	default:
+		return r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_context_result_observed", e.Tool)
 	}
-	return r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_context_result_observed", e.Tool)
 }

@@ -162,7 +162,7 @@ func Run(ctx context.Context, args []string) error {
 			r["probe_config_error"] = probeErr.Error()
 		} else if *scope != "" {
 			r["custom_probe_rules"] = len(probes.Projects[*scope])
-			r["probe_context_fact_rules"] = len(probes.Facts[*scope])
+			r["probe_context_fact_rules"] = probes.observationCount(*scope)
 		}
 		inspectManagedWorkflow(r, c, services, *host, *config, *serverName, probes, "")
 		if probeErr != nil {

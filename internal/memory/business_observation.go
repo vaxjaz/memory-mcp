@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -13,6 +14,18 @@ import (
 // host exposes the actual model context or that all pruning emits this event.
 func (s *Store) ExperienceAfterCompact(ctx context.Context, host, scope, session string) error {
 	return s.ExperienceContextReset(ctx, host, scope, session, "")
+}
+
+// A historic result cannot satisfy a condition on a later call's named
+// fields or facts. Only plain text entrances can use this result association.
+func plainObservationEntrance(cue ExperienceCue, match ExperienceMatch) bool {
+	for _, group := range cue.Matches {
+		if group.Field == "" && group.Op != "" && slices.Contains(group.Entrances, match.Entrance) &&
+			entranceComparison(group.Rule) == match.EntranceComparison {
+			return true
+		}
+	}
+	return false
 }
 func (s *Store) ExperienceContextReset(ctx context.Context, host, scope, session, eventID string) error {
 	generation := experienceNonce()
@@ -99,6 +112,11 @@ func (s *Store) ObserveBusinessRecords(ctx context.Context, host, scope, session
 			if er != nil {
 				return er
 			}
+			if !slices.ContainsFunc(entryCues(e.Entry), func(cue ExperienceCue) bool {
+				return cue.ID == m.CueID && plainObservationEntrance(cue, m)
+			}) {
+				continue
+			}
 			prefixes := entryObjectPrefixes(e.Entry)
 			m.Objects = observedObjects(clues, prefixes)
 			if len(m.Objects) != 1 {
@@ -161,7 +179,7 @@ func (s *Store) ObservedBusinessMatches(ctx context.Context, host, scope, sessio
 		// cached sentence or a newer revision with a superficially equal cue ID.
 		found := false
 		for _, cue := range entryCues(e.Entry) {
-			if cue.ID == m.CueID {
+			if cue.ID == m.CueID && plainObservationEntrance(cue, m) {
 				m.CueLabel = cue.Label
 				m.CueText = cue.Text
 				found = true

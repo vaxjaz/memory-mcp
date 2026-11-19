@@ -31,24 +31,15 @@ def main():
             return json.loads(out)
 
         cli("setup")
-        probes = {"context_facts": {scope: [
-            {"name": "authenticated", "mcp_tool": "login",
-             "key": ["input.service", "input.connection_id"],
-             "when": {"all": [
-                 {"field": "result.ok", "op": "eq", "value": True},
-                 {"field": "result.state", "op": "contains", "value": "ready", "case_sensitive": False},
-             ]}, "ttl_seconds": 60},
-        ]}, "projects": {scope: [
-            {"mcp_tool": "warehouse_query", "mode": "replace", "branches": [
-                {"id": "change", "text_fields": ["sql", "note"], "when": {"all": [
-                    {"fact": "authenticated", "key": ["input.service", "input.connection_id"]},
-                    {"any": [{"field": "input.sql", "op": "token", "value": "UPDATE"},
-                             {"field": "input.sql", "op": "token", "value": "DELETE"}]},
-                    {"not": {"field": "input.dry_run", "op": "eq", "value": True}},
-                ]}},
-                {"id": "read", "text_fields": ["sql"],
-                 "when": {"field": "input.sql", "op": "token", "value": "SELECT"}},
+        probes = {"projects": {scope: [
+            {"mcp_tool": "login", "observe": [
+                {"name": "authenticated", "key": ["input.service", "input.connection_id"],
+                 "fields": {"ok": "ok", "state": "state"}, "ttl_seconds": 60},
             ]},
+            {"mcp_tool": "warehouse_query", "fields": {
+                "text": "sql", "note": "note", "service": "service",
+                "connection": "connection_id", "dry_run": "dry_run",
+            }},
         ]}}
         (data / "tool-probes.json").write_text(json.dumps(probes), encoding="utf-8")
         stale = cli("doctor")
@@ -71,14 +62,30 @@ def main():
         host = Host(binary, str(data))
         try:
             body = "This synthetic fixture distinguishes query contexts."
-            host.tool("memory_experience_record", dict(scope=scope, project=str(project), title="Synthetic context probe",
+            change = {"all": [
+                {"fact": {"name": "authenticated", "key": ["service", "connection"], "match": {"all": [
+                    {"field": "ok", "op": "eq", "value": True},
+                    {"field": "state", "op": "contains", "value": "ready"},
+                ]}}},
+                {"any": [{"field": "text", "op": "token", "value": "UPDATE"},
+                         {"field": "text", "op": "token", "value": "DELETE"}]},
+                {"not": {"field": "dry_run", "op": "eq", "value": True}},
+                {"field": "text", "op": "token", "entrances": ["SettlementTarget", "ORDER UPDATE"]},
+            ]}
+            read = {"all": [
+                {"field": "text", "op": "token", "value": "SELECT"},
+                {"field": "text", "op": "token", "entrances": ["information_schema"]},
+            ]}
+            saved = host.tool("memory_experience_record", dict(scope=scope, project=str(project), title="Synthetic context probe",
                       experience=dict(pitfall="Infer context without a matching tool result", counterexample=body,
                                       impact="An unrelated query can trigger a reminder", applicability="Fixture only",
                                       boundary="No database was queried",
                                       evidence=[dict(kind="runtime", reference="context-fixture", observation=body)],
-                                      cues=[dict(cue_id="query", label="Context", text=body, evidence_refs=["context-fixture"],
-                                                 matches=[dict(op="token", entrances=["SettlementTarget", "ORDER UPDATE", "information_schema"])])])))
-            assert "contextual_tool_probes" in host.tool("memory_bootstrap", {})["features"]
+                                      cues=[dict(cue_id="change", label="Context", text=body, evidence_refs=["context-fixture"],
+                                                 matches=[change]),
+                                            dict(cue_id="read", label="Read", text="Isolated metadata fixture.",
+                                                 evidence_refs=["context-fixture"], matches=[read])])))
+            assert "tool_result_facts" in host.tool("memory_bootstrap", {})["features"]
             identity = {"service": "fixture", "connection_id": "one"}
 
             def start(call, **event):
@@ -89,44 +96,49 @@ def main():
                             tool_response={"structuredContent": {"ok": success, "state": "LOGIN_READY",
                                                                  "secret": "DO_NOT_STORE_RESPONSE"}}, **event)
 
-            def run(sql="UPDATE SettlementTarget", connection="one", service="fixture", note="", **event):
-                dry_run = event.pop("dry_run", False)
+            def query_input(sql, connection, service, note, dry_run):
                 args = {"service": service, "connection_id": connection, "sql": sql, "note": note}
                 if dry_run is not None:
                     args["dry_run"] = dry_run
+                return args
+
+            def run(sql="UPDATE SettlementTarget", connection="one", service="fixture", note="", **event):
+                args = query_input(sql, connection, service, note, event.pop("dry_run", False))
                 return hook("PreToolUse", tool_name=query, tool_input=args, **event)
 
             def challenge(output):
                 return output.get("decision") == "block" or output.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
 
-            def outcome(branch, session="main"):
-                report = cli("doctor", "--session", session)
-                for row in report["recent_events"]:
-                    if row["result"] == "custom_probe_condition":
-                        detail = json.loads(row["detail"])
-                        if detail["branch"] == branch:
-                            return detail["outcome"]
-                raise AssertionError(report["recent_events"])
+            def outcome(sql="UPDATE SettlementTarget", connection="one", service="fixture", note="",
+                        dry_run=False, session="main", turn="turn-1"):
+                payload = dict(tool_name=query, session_id=session, turn_id=turn, cwd=str(project),
+                               tool_input=query_input(sql, connection, service, note, dry_run))
+                result = subprocess.run([binary, "doctor", *options, "--probe=-", "--expect", saved["id"],
+                                         "--expect-cue", "change"], input=json.dumps(payload), encoding="utf-8",
+                                        capture_output=True, check=True)
+                report = json.loads(result.stdout)
+                return report["cue_checks"][0]["outcome"]
 
             hook("UserPromptSubmit")
             complete("missing-pre", True)
-            assert run() == {} and outcome("change") == "unknown"
+            assert run() == {} and outcome() == "unknown"
             assert challenge(run("SELECT information_schema"))
             start("login-1")
             complete("login-1", True)
             assert challenge(run())
-            assert run(connection="two") == {} and outcome("change") == "unknown"
-            assert run(service="other") == {} and outcome("change") == "unknown"
+            assert run(connection="two") == {} and outcome(connection="two") == "unknown"
+            assert run(service="other") == {} and outcome(service="other") == "unknown"
             assert run(session="other") == {}
-            assert run(dry_run=True) == {} and outcome("change") == "not_met"
-            assert run(dry_run=None) == {} and outcome("change") == "unknown"
-            assert run("UPDATE example ORDER", note="UPDATE") == {} and outcome("change") == "passed"
+            assert run(dry_run=True) == {} and outcome(dry_run=True) == "not_matched"
+            assert run(dry_run=None) == {} and outcome(dry_run=None) == "unknown"
+            assert run("UPDATE example ORDER", note="UPDATE") == {} and outcome("UPDATE example ORDER", note="UPDATE") == "not_matched"
+            assert run("SELECT SettlementTarget") == {} and outcome("SELECT SettlementTarget") == "not_matched"
 
             start("older")
             start("newer")
             complete("newer", False)
             complete("older", True)
-            assert run() == {} and outcome("change") == "not_met"
+            assert run() == {} and outcome() == "not_matched"
             complete("newer", True)
             assert run() == {}
 
@@ -138,12 +150,12 @@ def main():
                 db.commit()
             start("purge-expired")
             complete("older-than-expired", True)
-            assert run() == {} and outcome("change") == "unknown"
+            assert run() == {} and outcome() == "unknown"
 
             start("previous-input")
             hook("UserPromptSubmit", turn="turn-2")
             complete("previous-input", True, turn="turn-1")
-            assert run(turn="turn-2") == {} and outcome("change") == "unknown"
+            assert run(turn="turn-2") == {} and outcome(turn="turn-2") == "unknown"
             start("login-2", turn="turn-2")
             complete("login-2", True, turn="turn-2")
             assert challenge(run(turn="turn-2"))
@@ -152,10 +164,10 @@ def main():
                 assert rows and "DO_NOT_STORE_RESPONSE" not in str(rows) and "fixture" not in str(rows), rows
                 db.execute("UPDATE probe_context_facts SET expires=0")
                 db.commit()
-            assert run(turn="turn-2") == {} and outcome("change") == "unknown"
+            assert run(turn="turn-2") == {} and outcome(turn="turn-2") == "unknown"
         finally:
             host.close()
-    print("PASS: configured Pre/Post dispatch, branches, scoped facts, field boundaries, late results, and expiry")
+    print("PASS: configured Pre/Post dispatch, cue comparisons, scoped facts, field boundaries, late results, and expiry")
 
 
 if __name__ == "__main__":

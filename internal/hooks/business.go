@@ -2,79 +2,15 @@ package hooks
 
 import (
 	"encoding/json"
-	"regexp"
 	"sort"
 	"strings"
 )
-
-// Tool integration, never business vocabulary or a prescribed workflow. Unknown
-// adapters remain uncovered rather than treating every tool as a semantic probe.
-const businessToolMatcher = "^(mysql_query|mcp__.+__(get_ticket|read_ticket|search_tickets|get_order|query_order|query_orders|search_orders|query|mysql_query|read_query|execute_query|execute_sql|run_sql|query_database))$"
-
-var businessTools = regexp.MustCompile(businessToolMatcher)
-
-func isBusinessTool(name string) bool {
-	lower := strings.ToLower(name)
-	return !strings.Contains(lower, "memory_") && !strings.Contains(lower, "decision_memory") && businessTools.MatchString(name)
-}
-
-func businessClues(e Event, output bool) string {
-	if !isBusinessTool(e.Tool) {
-		return ""
-	}
-	if output {
-		records := businessObservationRecords(e)
-		if len(records) == 1 {
-			return records[0]
-		}
-		return "" // Never flatten several records into a fabricated association.
-	}
-	keys := map[string]bool{"query": true, "sql": true, "statement": true, "order_id": true, "order_no": true, "order_code": true, "ticket_id": true, "ticket_no": true, "document_id": true, "id": true, "number": true, "operation": true, "action": true, "type": true, "params": true, "parameters": true, "arguments": true}
-	var parts []string
-	size := 0
-	oversized := false
-	var walk func(any, bool, int)
-	walk = func(value any, allowed bool, depth int) {
-		if depth > 6 {
-			oversized = true
-			return
-		}
-		switch v := value.(type) {
-		case string:
-			if allowed {
-				size += len(v)
-				if size > 32768 {
-					oversized = true
-					return
-				}
-				parts = append(parts, v)
-			}
-		case map[string]any:
-			for k, child := range v {
-				if keys[strings.ToLower(k)] {
-					walk(child, true, depth+1)
-				}
-			}
-		case []any:
-			if allowed {
-				for _, child := range v {
-					walk(child, true, depth+1)
-				}
-			}
-		}
-	}
-	walk(e.Input, false, 0)
-	if oversized || len(parts) == 0 {
-		return ""
-	}
-	return e.Tool + " " + strings.Join(parts, " ")
-}
 
 // Preserve object boundaries through structured rows and MCP JSON text blocks.
 // Parent/sibling fields are not inherited by a record. Unstructured text is one
 // candidate record; Store rejects ambiguous multiple-object co-occurrence.
 func businessObservationRecords(e Event) []string {
-	if !isBusinessTool(e.Tool) || e.IsError || e.Error != nil {
+	if e.IsError || e.Error != nil {
 		return nil
 	}
 	if result, ok := e.Response.(map[string]any); ok && result["isError"] == true {

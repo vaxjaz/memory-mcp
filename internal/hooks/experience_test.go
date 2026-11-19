@@ -1,7 +1,7 @@
 package hooks
 
 import (
-"github.com/vaxjaz/memory-mcp/internal/matching"
+	"github.com/vaxjaz/memory-mcp/internal/matching"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,7 +17,7 @@ func trialFixture(t *testing.T) (*memory.Store, Runtime, string) {
 	r.Host = "zcode"
 	os.WriteFile(filepath.Join(p, "Policy.java"), []byte("boolean canDispatchLynOrder() { return true; }\n"), 0600)
 	_, err := s.RecordExperience(testCtx, memory.ExperienceWrite{Scope: "project:demo", Project: p, Title: "isolated failure features", Experience: memory.Experience{
-		Cues:    []memory.ExperienceCue{{ID: "admission", Label: "准入覆盖", Text: "隔离实验中另一入口绕过了检查。", EvidenceRefs: []string{"isolated test"}, Matches: []memory.CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"LYN 创建准入"}}}}},
+		Cues:    []memory.ExperienceCue{{ID: "admission", Label: "准入覆盖", Text: "隔离实验中另一入口绕过了检查。", EvidenceRefs: []string{"isolated test"}, Matches: []memory.CueMatch{{Rule: matching.Rule{Op: "token", Normalize: "whitespace"}, Entrances: []string{"LYN 创建准入"}}}}},
 		Pitfall: "局部调用覆盖所有入口", Counterexample: "隔离测试中的另一入口不经过该调用；不宣称真实业务核实", Impact: "部分入口漏校验",
 		Applicability: "相同限制需要覆盖多个入口", Boundary: "不同业务目标需单独判断",
 		Evidence: []memory.ExperienceEvidence{{Kind: "code", Reference: "isolated test", Observation: "只验证当前符号位置", Path: "Policy.java", Symbol: "canDispatchLynOrder"}},
@@ -113,7 +113,7 @@ func TestExperienceNormReadingAndUnrelatedToolsStayAvailable(t *testing.T) {
 }
 
 func TestExperienceMatcherAvoidsLaunchingOnUnrelatedToolPaths(t *testing.T) {
-	matcher := regexp.MustCompile(experienceToolMatcher)
+	matcher := regexp.MustCompile(probeMatchers(nil, (probeConfig{}).routePatterns(false)))
 	for _, name := range []string{"Grep", "Glob", "Read", "Bash", "exec_command", "run_in_terminal", "grep_code", "search_file", "mcp__filesystem__read_file"} {
 		if !matcher.MatchString(name) {
 			t.Fatal("documented code tool excluded", name)

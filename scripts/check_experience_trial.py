@@ -173,7 +173,7 @@ def main():
             try:
                 boot = host.tool("memory_bootstrap", {})
                 assert "compact_experiences" in boot["features"]
-                assert "custom_tool_probes" in boot["features"]
+                assert "tool_field_mapping" in boot["features"]
                 assert subprocess.check_output([binary, "guide"], text=True, encoding="utf-8") == boot["guide"]
                 assert boot["workflow"] == "verified_experience"
                 assert host.tool("memory_read", {"id": "legacy-source"})["entry"]["body"] == "Historical source must survive the workflow change"
@@ -239,6 +239,9 @@ def main():
                     assert all(row["session"] == session for row in recent), recent
                     assert recent[0]["result"] == "probe_config_invalid", recent
                     assert recent[1]["result"] == "experience_probe", recent
+                    code, output, _, _ = hook("PreToolUse", session="invalid-preset", tool_name="Grep",
+                                              tool_input={"pattern": "LYN 创建准入"})
+                    assert code == 0 and not output, output
                 else:
                     assert not cli("doctor", *options)["probe_config_valid"]
                 probes.unlink()
