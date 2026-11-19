@@ -10,7 +10,7 @@ Specific observed entrances map to stable, evidenced associations (cues). An und
 
 Lookup returns one JSON text copy of complete facts, conditions, exceptions and evidence within 8 KiB, with pagination. Index/entrance metadata stays out of the visible experience DTO. Voluntary lookup/read remains available. Delivery records describe system output, never understanding, applicability, authorization or an obligation to change code. Finding no current problem is a valid result.
 
-The 0.6.3 development build uses integration protocol 10 and schema 9. An existing library requires [explicit migration](docs/AGENT_INSTALL.md#upgrade-to-the-cue-schema) before setup. Selected SQL tools, including ZCode's mysql_query, probe bounded sql/query/statement fields. Lookup delivery diagnostics distinguish generated, observed and missing results.
+The 0.6.3 development build uses integration protocol 11 and schema 9. An existing library requires [explicit migration](docs/AGENT_INSTALL.md#upgrade-to-the-cue-schema) before setup. Selected SQL tools, including ZCode's mysql_query, probe bounded sql/query/statement fields. Lookup delivery diagnostics distinguish generated, observed and missing results.
 
 Upgrades from older schemas rebuild derived indexes and workflow state. Stop all old writers and independently back up the COMPLETE library/configuration before any new binary opens it. Existing history, IDs, bindings and disabled policies survive. Rollback restores the old executable/configuration AND pre-upgrade library. Never mix versions.
 

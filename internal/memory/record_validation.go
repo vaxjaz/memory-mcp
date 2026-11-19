@@ -72,3 +72,21 @@ func (v *recordValidation) evidence(root string, evidence []ExperienceEvidence) 
 		v.checkText(row+".symbol", e.Symbol)
 	}
 }
+
+func (v *recordValidation) experienceAdmission(admission *ExperienceAdmission, evidence []ExperienceEvidence) {
+	if admission == nil {
+		v.add("admission", "required for an experience write; state the future decision and cite supporting evidence. Skip writing for a task-only correction.")
+		return
+	}
+	v.shortText("admission.future_decision", admission.FutureDecision, 240)
+	v.shortText("admission.evidence_ref", admission.EvidenceRef, 240)
+	if strings.TrimSpace(admission.EvidenceRef) == "" {
+		return
+	}
+	for _, item := range evidence {
+		if item.Reference == admission.EvidenceRef {
+			return
+		}
+	}
+	v.add("admission.evidence_ref", "does not match any experience.evidence[].reference; copy the exact supporting reference from this submission")
+}

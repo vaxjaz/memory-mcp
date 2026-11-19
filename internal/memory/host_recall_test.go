@@ -233,6 +233,7 @@ func TestChallengeCanReturnLargeRequiredCasesAcrossBoundedPages(t *testing.T) {
 		in.Experience.Evidence = append(in.Experience.Evidence, ExperienceEvidence{Kind: "runtime", Reference: fmt.Sprintf("fixture:%d:%s", i, strings.Repeat("锚", 180)), Observation: "仅为隔离测试来源，不是真实事故"})
 	}
 	in.Experience.Cues[0].EvidenceRefs = []string{in.Experience.Evidence[0].Reference}
+	in.Admission.EvidenceRef = in.Experience.Evidence[0].Reference
 	for i := 0; i < 2; i++ {
 		d := in
 		d.Experience.Counterexample = fmt.Sprintf("隔离测试中不同的反例分支%d", i)

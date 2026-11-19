@@ -30,7 +30,9 @@ def main():
         gate, short, full = "UPDATE", "fix_third", "work_order_feedback_fix_third"
         host = Host(binary, str(data))
         def record(title, entrance):
-            return dict(scope=scope, project=str(project), title=title, experience=dict(
+            return dict(scope=scope, project=str(project), title=title,
+                        admission=dict(future_decision="Check the proposed text for the required whole identifier.",
+                                       evidence_ref="fixture"), experience=dict(
                 pitfall=title, counterexample="Synthetic cue verification fixture", impact="Could miss the intended cue",
                 applicability="Isolated CLI test", boundary="No business tool executed",
                 evidence=[dict(kind="runtime", reference="fixture", observation="Verified in the fixture")],

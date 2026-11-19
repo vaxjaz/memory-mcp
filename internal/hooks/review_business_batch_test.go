@@ -9,7 +9,7 @@ import (
 
 func TestReviewBusinessBatchDoesNotTransferActionBetweenObjects(t *testing.T) {
 	s, r, p := trialFixture(t)
-	_, err := s.RecordExperience(testCtx, memory.ExperienceWrite{Scope: "project:demo", Project: p, Title: "Synthetic row-local cancellation risk", Experience: memory.Experience{
+	_, err := s.RecordExperience(testCtx, memory.ExperienceWrite{Scope: "project:demo", Project: p, Title: "Synthetic row-local cancellation risk", Admission: &memory.ExperienceAdmission{FutureDecision: "判断是否取消时检查目标记录自己的状态。", EvidenceRef: "fixture:review-batch"}, Experience: memory.Experience{
 		ObjectIDPrefixes: []string{"WXN"},
 		Pitfall:          "合成取消动作误以为关联状态已同步", Counterexample: "合成测试中取消后关联记录仍保留旧状态", Impact: "合成关联状态不一致", Applicability: "合成取消动作", Boundary: "仅隔离审查测试",
 		Evidence: []memory.ExperienceEvidence{{Kind: "business", Reference: "fixture:review-batch", Observation: "隔离测试，不是真实事故"}},

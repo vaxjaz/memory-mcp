@@ -76,6 +76,8 @@ def main():
                 {"field": "text", "op": "token", "entrances": ["information_schema"]},
             ]}
             saved = host.tool("memory_experience_record", dict(scope=scope, project=str(project), title="Synthetic context probe",
+                      admission=dict(future_decision="Check the earlier outcome for the same connection.",
+                                     evidence_ref="context-fixture"),
                       experience=dict(pitfall="Infer context without a matching tool result", counterexample=body,
                                       impact="An unrelated query can trigger a reminder", applicability="Fixture only",
                                       boundary="No database was queried",

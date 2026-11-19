@@ -8,12 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/vaxjaz/memory-mcp/internal/matching"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/vaxjaz/memory-mcp/internal/matching"
 )
 
 // Experience is an observed failure pattern, never a prescribed implementation.
@@ -38,13 +39,20 @@ type ExperienceEvidence struct {
 	SHA256      string `json:"sha256,omitempty" jsonschema:"Optional expected SHA256; rejects local source drift."`
 }
 
+// ExperienceAdmission is checked at the write boundary and discarded after validation.
+type ExperienceAdmission struct {
+	FutureDecision string `json:"future_decision" jsonschema:"1-240 Unicode characters. Name the specific decision this experience will change when a similar situation recurs."`
+	EvidenceRef    string `json:"evidence_ref" jsonschema:"Exact experience.evidence[].reference supporting that change in judgment."`
+}
+
 type ExperienceWrite struct {
-	Scope      string     `json:"scope"`
-	Project    string     `json:"project" jsonschema:"Actual bound project directory; not inferred from a model name or another machine"`
-	Title      string     `json:"title"`
-	Experience Experience `json:"experience"`
-	PreviousID string     `json:"previous_id,omitempty" jsonschema:"Full current case revision ID for a material correction. Send the complete revised experience, including evidence and cue references. Omit to create/deduplicate."`
-	RequestID  string     `json:"request_id,omitempty" jsonschema:"Reuse only when retrying the exact same submitted write"`
+	Admission  *ExperienceAdmission `json:"admission,omitempty" jsonschema:"Required for new writes and previous_id revisions. Correct task-specific misunderstandings without calling this tool. Explain a reusable judgment backed by a submitted evidence reference."`
+	Scope      string               `json:"scope"`
+	Project    string               `json:"project" jsonschema:"Actual bound project directory; not inferred from a model name or another machine"`
+	Title      string               `json:"title"`
+	Experience Experience           `json:"experience"`
+	PreviousID string               `json:"previous_id,omitempty" jsonschema:"Full current case revision ID for a material correction. Send the complete revised experience, including evidence and cue references. Omit to create/deduplicate."`
+	RequestID  string               `json:"request_id,omitempty" jsonschema:"Reuse only when retrying the same record payload"`
 }
 
 type ExperienceReceipt struct {
@@ -106,10 +114,16 @@ var genericEntranceValue = map[string]bool{
 }
 
 func validateExperience(x *Experience) error {
-	if x == nil {
-		return errors.New("experience required")
-	}
 	var validation recordValidation
+	validation.experience(x)
+	return validation.err()
+}
+
+func (validation *recordValidation) experience(x *Experience) {
+	if x == nil {
+		validation.add("experience", "required")
+		return
+	}
 	if err := validatePrefixes(x.ObjectIDPrefixes); err != nil {
 		validation.add("experience.object_id_prefixes", err.Error())
 	}
@@ -124,7 +138,6 @@ func validateExperience(x *Experience) error {
 	if len(body) > 3000 {
 		validation.add("experience", fmt.Sprintf("body budget is 3000 UTF-8 bytes, got %d; condense prose and preserve conditions", len(body)))
 	}
-	return validation.err()
 }
 
 // Resolve symlinks before reading; memory content never authorizes external reads.
@@ -207,10 +220,15 @@ func experienceKey(x *Experience) string {
 
 func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (ExperienceReceipt, error) {
 	var result ExperienceReceipt
-	raw, _ := json.Marshal(in)
-	if err := validateExperience(&in.Experience); err != nil {
+	var validation recordValidation
+	validation.experienceAdmission(in.Admission, in.Experience.Evidence)
+	validation.experience(&in.Experience)
+	if err := validation.err(); err != nil {
 		return result, err
 	}
+	// Keep retries over the material payload stable across protocol upgrades.
+	in.Admission = nil
+	raw, _ := json.Marshal(in)
 	project, err := s.experienceProject(ctx, in.Project, in.Scope)
 	if err != nil {
 		return result, err

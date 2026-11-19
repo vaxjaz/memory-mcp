@@ -24,7 +24,7 @@ func TestReviewDirectDeliveredMatchCannotHideObservedUndeliveredExperience(t *te
 		t.Fatal(err)
 	}
 	observeLookup(t, s, r, p, "review-mixed", "lookup-e1", token, page)
-	second, err := s.RecordExperience(testCtx, memory.ExperienceWrite{Scope: "project:demo", Project: p, Title: "Synthetic observed second experience", Experience: memory.Experience{
+	second, err := s.RecordExperience(testCtx, memory.ExperienceWrite{Scope: "project:demo", Project: p, Title: "Synthetic observed second experience", Admission: &memory.ExperienceAdmission{FutureDecision: "取消后单独核对关联行状态。", EvidenceRef: "fixture:review-observed"}, Experience: memory.Experience{
 		ObjectIDPrefixes: []string{"WXN"},
 		Pitfall:          "合成取消动作误以为无需处理关联记录", Counterexample: "合成测试中取消后关联记录仍保留旧状态", Impact: "合成关联状态不一致", Applicability: "合成取消动作", Boundary: "仅隔离审查测试",
 		Evidence: []memory.ExperienceEvidence{{Kind: "business", Reference: "fixture:review-observed", Observation: "隔离测试，不是真实事故"}},

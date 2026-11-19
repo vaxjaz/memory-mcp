@@ -30,13 +30,13 @@ def rpc_write_fixture(binary, data, project, business=False):
             if value.get('id')==msg['id']: return value
     call({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-11-25','capabilities':{},'clientInfo':{'name':'isolated-delivery-fixture','version':'1'}}})
     call({'jsonrpc':'2.0','method':'notifications/initialized'})
-    experience = {'anchors':[], 'signals':[], 'pitfall':'合成实验误以为备注变化自动影响日志', 'counterexample':'合成实验中业务备注已更新，日志仍读取独立旧参数。', 'impact':'合成日志可能保留旧文本', 'applicability':'同一合成回馈业务', 'boundary':'条件不同或已修复时可以直接继续，无需修改或登记拒绝', 'evidence':[{'kind':'business','reference':'fixture:local-only','observation':'合成反例，不是真实事故'}], 'cues':[
+    experience = {'pitfall':'合成实验误以为备注变化自动影响日志', 'counterexample':'合成实验中业务备注已更新，日志仍读取独立旧参数。', 'impact':'合成日志可能保留旧文本', 'applicability':'同一合成回馈业务', 'boundary':'条件不同或已修复时可以直接继续，无需修改或登记拒绝', 'evidence':[{'kind':'business','reference':'fixture:local-only','observation':'合成反例，不是真实事故'}], 'cues':[
         {'cue_id':'remark','label':'备注变化','text':'合成实验中备注更新后日志仍保留旧文本。','evidence_refs':['fixture:local-only'],'matches':[{'op':'token','entrances':['RemarkInput.java','WorkOrder.remark']}]},
         {'cue_id':'log_input','label':'取值入口','text':'合成实验中日志生成读取独立旧参数，备注更新未传入。','evidence_refs':['fixture:local-only'],'matches':[{'op':'token','entrances':['FeedbackLogBuilder.java','FeedbackLogBuilder.build']}]}]}
     if business:
         experience['object_id_prefixes']=['WXN']
         experience['cues'][1]['matches'].append({'op':'token','normalize':'whitespace','entrances':['生成回馈日志']})
-    result = call({'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':'memory_experience_record','arguments':{'scope':'project:delivery-fixture','project':str(project),'title':'isolated delivery fixture','experience':experience}}})
+    result = call({'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':'memory_experience_record','arguments':{'scope':'project:delivery-fixture','project':str(project),'title':'isolated delivery fixture','admission':{'future_decision':'Check the log input independently after a remark update.','evidence_ref':'fixture:local-only'},'experience':experience}}})
     if result.get('error') or result.get('result',{}).get('isError'): raise RuntimeError(result)
     process.stdin.close();process.wait(timeout=10)
 

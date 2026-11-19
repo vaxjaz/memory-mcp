@@ -116,3 +116,9 @@ Executable replay verifies matching UPDATE and same-column SELECT, Write path an
 Disposable Windows executable tests confirm that a cue with a Write and .sql prerequisite triggers on a matching body, allows a Grep call containing the same word, and does not match when only the filename contains the entrance. The read-only doctor reports prerequisite failure or an unknown path separately from a missed entrance. The same hook tests query prior results by their configured key, including wrong keys, stale results and expiry.
 
 Migration from the actual dev.10 binary preserves schema 8 entries, existing match expressions and delivery history. A dev.10 binary rejects the resulting schema 9 library. The backup can be opened with dev.10.
+
+## 0.6.3-dev.12 required experience write admission
+
+The Windows executable's real MCP tool catalog lists admission as required for experience writes. Isolated stdio tests reject missing, null, blank and mismatched admission with an identical SQLite snapshot before and after each rejected call. New writes and previous_id revisions pass with a specific future judgment and an exact evidence reference. The extra text stays out of the stored body.
+
+The actual dev.11 executable created a disposable schema 9 library and a request ID. Dev.12 opens it directly, reads the old entry unchanged, rejects the bare retry, and returns the original record for an admitted retry. These tests verify the server boundary. They do not measure how a live model classifies a correction.

@@ -23,7 +23,7 @@ memory_experience_record saves verified failure features; memory_reference_recor
 
 ## Upgrade to the cue schema
 
-Version 0.6.3 development builds use database schema 9 and integration protocol 10. Existing libraries must complete this step **before** setup or serve. New empty libraries start at schema 9.
+Version 0.6.3 development builds use database schema 9 and integration protocol 11. Existing libraries must complete this step **before** setup or serve. New empty libraries start at schema 9. Libraries already at schema 9, including dev.11, can use the dev.12 executable without a database migration. New experience writes and revisions require admission.future_decision and admission.evidence_ref.
 
 1. Run the read-only preview.
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Actual MCP calls in a disposable library; not a model-quality claim."""
 import argparse
+from contextlib import closing
 import json
+import sqlite3
 from pathlib import Path
 import subprocess
 import tempfile
@@ -29,11 +31,26 @@ def main():
         subprocess.run(setup, check=True, capture_output=True)
         host = Host(binary, str(data))
         try:
-            tools = {t["name"]: t["description"] for t in host.request("tools/list", {})["tools"]}
+            tools = {t["name"]: t for t in host.request("tools/list", {})["tools"]}
             for name in ("memory_experience_record", "memory_reference_record"):
-                assert "use trigger_preview to tell the user" in tools[name], tools[name]
+                assert "use trigger_preview to tell the user" in tools[name]["description"], tools[name]
+            assert "admission" in tools["memory_experience_record"]["inputSchema"]["required"]
+            assert "admission" not in tools["memory_reference_record"]["inputSchema"]["properties"]
+
+            def snapshot():
+                with closing(sqlite3.connect((data / "memory.db").as_uri() + "?mode=ro", uri=True)) as database:
+                    return tuple(database.iterdump())
+
+            def assert_rejected_unchanged(payload, issue):
+                before = snapshot()
+                response = host.tool("memory_experience_record", payload, expect_error=True)
+                message = response["content"][0]["text"]
+                assert issue in message, response
+                assert snapshot() == before, "rejected request changed the library"
             draft = dict(scope=scope, project=str(project), title="Synthetic failure recognition",
-                         request_id="fixture-experience", experience=dict(
+                         request_id="fixture-experience",
+                         admission=dict(future_decision="Verify the dependent conditions before deciding whether a state can change.",
+                                        evidence_ref="fixture:runtime"), experience=dict(
                              object_id_prefixes=["OBJ"],
                              cues=[dict(cue_id="cancellation",label="状态约束",text="合成取消实验中本地状态未覆盖关联影响限制。",evidence_refs=["fixture:runtime"],matches=[dict(op="token",normalize="whitespace",entrances=["取消 OBJ-001"])])],
                              pitfall="An isolated task assumes a local status represents every condition",
@@ -51,8 +68,18 @@ def main():
             cue.pop("matches")
             cue["entrances"] = [{"kind": "business_signal", "value": "取消 OBJ-001"}]
             host.tool("memory_experience_record", obsolete, expect_error=True)
+            missing = dict(draft)
+            missing.pop("admission")
+            assert_rejected_unchanged(missing, "admission")
+            assert_rejected_unchanged(dict(draft, admission=None), "admission")
+            blank = dict(draft, admission=dict(draft["admission"], future_decision="　 "))
+            assert_rejected_unchanged(blank, "admission.future_decision")
+            wrong_ref = dict(draft, admission=dict(draft["admission"], evidence_ref="fixture:runtime "))
+            assert_rejected_unchanged(wrong_ref, "admission.evidence_ref")
             saved = host.tool("memory_experience_record", draft)
             assert saved["indexed"]
+            assert not any(draft["admission"]["future_decision"] in sql for sql in snapshot())
+            assert_rejected_unchanged(missing, "admission")
             preview = saved["trigger_preview"]
             assert preview == {
                 "scope": scope, "record_status": "eligible", "wakeup_enabled": True, "entrance_count": 1,
@@ -182,6 +209,12 @@ def main():
             typo["experience"]["pitfall "] = typo["experience"].pop("pitfall")
             typo_error = host.tool("memory_experience_record", typo, expect_error=True)["content"][0]["text"]
             assert '"pitfall "' in typo_error, typo_error
+            missing_revision = dict(revision)
+            missing_revision.pop("admission")
+            assert_rejected_unchanged(missing_revision, "admission")
+            invalid_revision = dict(revision, admission=dict(revision["admission"], evidence_ref="removed-reference"))
+            assert_rejected_unchanged(invalid_revision, "admission.evidence_ref")
+            assert host.tool("memory_read", {"id": saved["id"]})["entry"]["current"]
             replacement = host.tool("memory_experience_record", revision)
             assert replacement["id"] != saved["id"] and replacement["root_id"] == saved["root_id"], replacement
             assert not host.tool("memory_read", {"id": saved["id"]})["entry"]["current"]

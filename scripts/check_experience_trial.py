@@ -25,6 +25,7 @@ def check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool):
                    dict(op="token", normalize="whitespace", entrances=["SHOW COLUMNS", "刷数据"]),
                ])
     case = dict(scope=scope, project=str(project), title="Synthetic SQL metadata rule",
+                admission=dict(future_decision="Verify columns before proposing a query.", evidence_ref="synthetic-sql"),
                 experience=dict(pitfall="A lookup uses an unverified column name",
                                 counterexample="Fixture requires a prior metadata query",
                                 impact="An unsuitable query can fail",
@@ -190,6 +191,8 @@ def main():
                 else:
                     assert "PostToolUseFailure" not in current_events, current_events
                 draft = dict(scope=scope, project=str(project), title="Synthetic multi-entry risk",
+                             admission=dict(future_decision="Check each entry point for the required validation.",
+                                            evidence_ref="isolated fixture"),
                              request_id="experience-once",
                              experience=dict(cues=[dict(cue_id="admission",label="入口准入",text="合成多入口实验中本地调用未覆盖另一入口的准入条件。",evidence_refs=["isolated fixture"],matches=[dict(op="token",entrances=["canDispatchLynOrder"]),dict(op="token",normalize="whitespace",entrances=["LYN 创建准入"])])],
                                              pitfall="A local caller is assumed to cover every entry",

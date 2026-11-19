@@ -1,8 +1,10 @@
 # Experience delivery
 
-The 0.6.3 development build uses integration protocol 10 and database schema 9.
+The 0.6.3 development build uses integration protocol 11 and database schema 9.
 
 ## Writes and identity
+
+Each experience submission, including a previous_id revision, requires admission.future_decision and admission.evidence_ref. The first names a concrete judgment that changes in a similar situation. The second must exactly cite an evidence reference submitted with that record. The server validates admission before recording or resolving a request retry. The admission is transient. Existing schema 9 records require no backfill.
 
 Experiences contain pitfall, counterexample, impact, applicability, boundary, 1-3 evidence locators and 1-12 cues. Each cue has stable cue_id, label (<=24 Unicode characters), a complete historical sentence (<=160), 1-3 evidence_refs present in the body and 1-12 directly evidenced entrance strings across its matches groups. A group is a match expression. It can compare a named field using op, case_sensitive and normalize, or combine current fields and previous tool results. An optional `when` in a match expression gates evaluation of its entrance and can use the same comparisons. Pure business cases require no source file. Multiple aliases for one association share one cue. Do not turn dependencies into associations. The host verifies meaning; length and locators cannot certify semantic truth.
 

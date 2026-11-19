@@ -17,6 +17,7 @@ import (
 func deliveryFixture(t *testing.T) (*Store, string, ExperienceWrite) {
 	s, p, in := experienceFixture(t)
 	in.Experience.Counterexample = "隔离实验中备注更新后日志仍取旧文本；另一取值入口读取独立参数。"
+	in.Admission = &ExperienceAdmission{FutureDecision: "修改备注时单独核对日志的数据来源。", EvidenceRef: "fixture:counterexample"}
 	in.Experience.Evidence = []ExperienceEvidence{{Kind: "business", Reference: "fixture:counterexample", Observation: "合成实验只验证投递协议，不是真实业务事故"}}
 	in.Experience.Cues = []ExperienceCue{
 		{ID: "remark", Label: "备注变化", Text: "隔离实验中备注更新后日志仍取旧文本。", EvidenceRefs: []string{"fixture:counterexample"}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"WorkOrder.remark"}}, {Rule:matching.Rule{Op:"token"},Entrances:[]string{"RemarkInput.java"}}, {Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"调整回馈备注"}}}},
@@ -500,6 +501,7 @@ func TestDeliveryA21CodeReferenceRelocation(t *testing.T) {
 	oldRef := in.Experience.Evidence[0].Reference
 	in.Experience.Evidence[0].SHA256 = ""
 	in.Experience.Evidence[0].Reference = "fixture:relocated-commit-line"
+	in.Admission.EvidenceRef = in.Experience.Evidence[0].Reference
 	in.Experience.Cues[0].EvidenceRefs = []string{in.Experience.Evidence[0].Reference}
 	in.Experience.Cues[0].Matches = append(in.Experience.Cues[0].Matches,CueMatch{Rule:matching.Rule{Op:"token"},Entrances:[]string{"admission.fixture.enabled"}})
 	again, err := s.RecordExperience(ctx, in)
