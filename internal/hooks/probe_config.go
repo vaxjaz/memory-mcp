@@ -267,11 +267,6 @@ func (c probeConfig) ruleFor(scope, tool string) (probeRule, bool) {
 	return suffixRule, suffixRule.MCPTool != ""
 }
 
-func probeField(input map[string]any, field string) string {
-	text, _ := probeValue(input, field).(string)
-	return text
-}
-
 func probeValue(input map[string]any, field string) any {
 	var value any = input
 	for _, key := range strings.Split(field, ".") {
@@ -284,19 +279,22 @@ func probeValue(input map[string]any, field string) any {
 	return value
 }
 
-func probePath(root, cwd, path string) string {
-	if path == "" || len(path) > 4096 {
-		return ""
+func probePath(root, cwd, path string) (string, string) {
+	if path == "" {
+		return "", "path_field_unavailable"
+	}
+	if len(path) > 4096 {
+		return "", "path_too_long"
 	}
 	path = filepath.FromSlash(path)
 	if !filepath.IsAbs(path) {
 		if filepath.VolumeName(path) != "" {
-			return ""
+			return "", "path_not_resolved"
 		}
 		path = filepath.Join(cwd, path)
 	}
 	if !strings.EqualFold(filepath.VolumeName(root), filepath.VolumeName(path)) {
-		return ""
+		return "", "path_outside_project"
 	}
 	// Write may target a file that does not exist yet. Resolve its nearest
 	// existing ancestor so a symlink cannot turn an in-project path into an
@@ -306,49 +304,94 @@ func probePath(root, cwd, path string) string {
 		if _, err := os.Lstat(ancestor); err == nil {
 			break
 		} else if !errors.Is(err, os.ErrNotExist) || ancestor == root {
-			return ""
+			return "", "path_not_resolved"
 		}
 		parent := filepath.Dir(ancestor)
 		if parent == ancestor {
-			return ""
+			return "", "path_not_resolved"
 		}
 		ancestor = parent
 	}
 	resolved, err := filepath.EvalSymlinks(ancestor)
 	if err != nil {
-		return ""
+		return "", "path_not_resolved"
 	}
 	suffix, err := filepath.Rel(ancestor, path)
 	if err != nil {
-		return ""
+		return "", "path_not_resolved"
 	}
 	relative, err := filepath.Rel(root, filepath.Join(resolved, suffix))
-	if err != nil || relative == "." || !filepath.IsLocal(relative) {
-		return ""
+	if err != nil || !filepath.IsLocal(relative) {
+		return "", "path_outside_project"
+	}
+	if relative == "." {
+		return "", "path_is_project_root"
 	}
 	// EvalSymlinks does not identify all Windows reparse points as links.
 	// Root.Stat checks traversal from the project directory's actual handle.
 	known, err := filepath.Rel(root, resolved)
 	if err != nil || !filepath.IsLocal(known) {
-		return ""
+		return "", "path_outside_project"
 	}
 	project, err := os.OpenRoot(root)
 	if err != nil {
-		return ""
+		return "", "path_not_resolved"
 	}
 	defer project.Close()
 	if _, err := project.Stat(known); err != nil {
-		return ""
+		return "", "path_not_accessible_from_project"
 	}
-	return filepath.ToSlash(relative)
+	return filepath.ToSlash(relative), ""
 }
 
-func (r probeBranch) clues(e Event, root string) []string {
-	var parts []string
+const customProbeTextLimit = 32 * 1024
+
+type probeInputField struct {
+	Field  string `json:"field"`
+	Status string `json:"status"`
+	Bytes  int    `json:"bytes"`
+}
+
+type probeInputReport struct {
+	Tool       string            `json:"tool"`
+	Branch     string            `json:"branch"`
+	Outcome    string            `json:"outcome"`
+	PathField  string            `json:"path_field,omitempty"`
+	TextFields []probeInputField `json:"text_fields,omitempty"`
+}
+
+func (r probeBranch) clues(e Event, root string) ([]string, *probeInputReport) {
+	var texts []string
+	report := &probeInputReport{Tool: e.Tool, Branch: r.ID, PathField: r.PathField}
+	total := 0
+	for _, field := range r.TextFields {
+		input := probeValue(e.Input, field)
+		value, isString := input.(string)
+		status := "present"
+		switch {
+		case input == nil:
+			status = "missing"
+		case !isString:
+			status = "not_string"
+		case value == "":
+			status = "empty"
+		default:
+			total += len(value)
+			texts = append(texts, value)
+		}
+		report.TextFields = append(report.TextFields, probeInputField{Field: field, Status: status, Bytes: len(value)})
+	}
+
 	if r.PathField != "" {
-		path := probePath(root, e.CWD, probeField(e.Input, r.PathField))
-		if path == "" {
-			return nil
+		value, ok := probeValue(e.Input, r.PathField).(string)
+		if !ok {
+			report.Outcome = "path_field_unavailable"
+			return nil, report
+		}
+		path, rejected := probePath(root, e.CWD, value)
+		if rejected != "" {
+			report.Outcome = rejected
+			return nil, report
 		}
 		if len(r.Extensions) > 0 {
 			matches := false
@@ -356,21 +399,21 @@ func (r probeBranch) clues(e Event, root string) []string {
 				matches = matches || strings.EqualFold(filepath.Ext(path), ext)
 			}
 			if !matches {
-				return nil
+				report.Outcome = "extension_mismatch"
+				return nil, report
 			}
 		}
-		parts = append(parts, path)
+		texts = append([]string{path}, texts...)
 	}
-	size := 0
-	for _, field := range r.TextFields {
-		value := probeField(e.Input, field)
-		size += len(value)
-		if size > 32768 {
-			return nil
-		}
-		if value != "" {
-			parts = append(parts, value)
+	if total > customProbeTextLimit {
+		report.Outcome = "text_budget_exceeded"
+		return nil, report
+	}
+	for _, field := range report.TextFields {
+		if field.Status != "present" {
+			report.Outcome = "text_fields_unavailable"
+			return texts, report
 		}
 	}
-	return parts
+	return texts, nil
 }

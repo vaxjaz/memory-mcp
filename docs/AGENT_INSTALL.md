@@ -42,6 +42,8 @@ Available starting with the 0.6.3 development build. Create a UTF-8 file named t
 
 Use `memory-mcp guide` or `memory_bootstrap` to get a minimal example from the current executable. The bootstrap feature is `custom_tool_probes`.
 
+The Write and Edit examples below target files inside the **bound project directory**. For targets in a separate documentation repository, see the path-suffix condition in the guide under **Writes to a separate repository**.
+
 ```json
 {
   "projects": {
@@ -74,6 +76,8 @@ Use `memory-mcp guide` or `memory_bootstrap` to get a minimal example from the c
 - The same rule format works with the ZCode, Codex, Qoder CLI and Qoder IDE adapters. Tool names and payload fields can vary among hosts. Check the native event shape when reusing a rule. The probes use the existing experience entries and delivery rules. Adding a tool or field alone does not create a reason to block.
 
 Check `doctor` before replaying a hook. If a probe allows the action, run `doctor --session <event-session-id>` using the same host, config, data directory, project and scope. In `recent_events`, `probe_config_invalid` records fallback to built-in probes. `custom_probe_no_clues` and `custom_probe_no_match` indicate where a configured probe stopped. An `experience_probe` with `outcome: "silent"` in its detail indicates a match with no new delivery. An empty list means there is no recorded event for that session.
+
+When `custom_probe_input` is present, look at its `outcome` and the selected fields' statuses and UTF-8 lengths. A project path rejection, an extension mismatch and the 32 KiB budget are distinct outcomes. The diagnostic contains no input values.
 
 For conditional probes and cross-call facts, run `memory-mcp guide` and see **Conditions and previous results**. Validate the sample against the actual tool events with `doctor`. Producer selectors need a setup refresh so the client sends both the PreToolUse and PostToolUse events. Preserve case-specific cues and use `doctor --session` to see whether a branch passed, failed or has unknown context.
 

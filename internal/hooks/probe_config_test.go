@@ -24,6 +24,82 @@ func saveProbeFixture(t *testing.T, dir string, config probeConfig) {
 	}
 }
 
+func TestWriteProbeExplainsPathAndTextRejections(t *testing.T) {
+	store, r, project := trialFixture(t)
+	const scope = "project:demo"
+	const content = "private fixture text"
+	saveProbeFixture(t, store.Dir, probeConfig{Projects: map[string][]probeRule{
+		scope: {{Tool: "Write", Mode: "replace", PathField: "file_path", TextFields: []string{"content"}, Extensions: []string{".sql"}}},
+	}})
+	for _, tc := range []struct {
+		name, path, outcome, fieldStatus string
+		content                          any
+		bytes                            int
+	}{
+		{"outside", filepath.Join(t.TempDir(), "out.sql"), "path_outside_project", "present", content, len(content)},
+		{"suffix", "out.txt", "extension_mismatch", "present", content, len(content)},
+		{"large", "out.sql", "text_budget_exceeded", "present", strings.Repeat("x", customProbeTextLimit+1), customProbeTextLimit + 1},
+		{"empty", "out.sql", "text_fields_unavailable", "empty", "", 0},
+		{"missing", "out.sql", "text_fields_unavailable", "missing", nil, 0},
+		{"wrong-type", "out.sql", "text_fields_unavailable", "not_string", true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := map[string]any{"file_path": tc.path}
+			if tc.content != nil {
+				input["content"] = tc.content
+			}
+			handle(t, r, Event{Name: "PreToolUse", CWD: project, Session: tc.name, Tool: "Write", Input: input})
+			diagnostics, err := store.HookDiagnostics(testCtx, tc.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			events := diagnostics["recent_events"].([]map[string]string)
+			for _, event := range events {
+				if event["result"] != "custom_probe_input" {
+					continue
+				}
+				var report probeInputReport
+				if err := json.Unmarshal([]byte(event["detail"]), &report); err != nil {
+					t.Fatal(err)
+				}
+				wantField := probeInputField{Field: "content", Status: tc.fieldStatus, Bytes: tc.bytes}
+				if report.Outcome != tc.outcome || len(report.TextFields) != 1 || report.TextFields[0] != wantField {
+					t.Fatalf("unexpected diagnostic: %+v", report)
+				}
+				if strings.Contains(event["detail"], content) || strings.Contains(event["detail"], tc.path) {
+					t.Fatal("diagnostic included a raw input value")
+				}
+				return
+			}
+			t.Fatalf("missing diagnostic: %v", events)
+		})
+	}
+
+	const cue = "LYN 创建准入"
+	for _, path := range []string{"combined.sql", "combined.SQL"} {
+		result := handle(t, r, Event{Name: "PreToolUse", CWD: project, Session: path, Tool: "Write", Input: map[string]any{
+			"file_path": path, "content": cue,
+		}})
+		if result["decision"] != "block" {
+			t.Fatalf("combined path and content did not match: %v", result)
+		}
+	}
+
+	saveProbeFixture(t, store.Dir, probeConfig{Projects: map[string][]probeRule{
+		scope: {{Tool: "Write", Mode: "replace", TextFields: []string{"content"},
+			When: &probeCondition{Field: "input.file_path", Op: "suffix", Value: ".sql"}}},
+	}})
+	otherRepo := t.TempDir()
+	for path, block := range map[string]bool{"report.sql": true, "report.txt": false} {
+		result := handle(t, r, Event{Name: "PreToolUse", CWD: project, Session: path, Tool: "Write", Input: map[string]any{
+			"file_path": filepath.Join(otherRepo, path), "content": cue,
+		}})
+		if (result["decision"] == "block") != block {
+			t.Fatalf("unexpected cross-repository suffix result: %v", result)
+		}
+	}
+}
+
 func TestCustomProbeDispatchAndScope(t *testing.T) {
 	store, r, project := trialFixture(t)
 	const scope = "project:demo"
@@ -139,7 +215,7 @@ func TestCustomProbeConfigValidationAndPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := probePath(canonical, root, filepath.Join("new dir", "report.sql")); got != "new dir/report.sql" {
+	if got, reason := probePath(canonical, root, filepath.Join("new dir", "report.sql")); got != "new dir/report.sql" || reason != "" {
 		t.Fatal(got)
 	}
 	t.Run("external redirect", func(t *testing.T) {
@@ -160,7 +236,7 @@ func TestCustomProbeConfigValidationAndPath(t *testing.T) {
 				t.Error(err)
 			}
 		})
-		if got := probePath(canonical, root, filepath.Join("external", "missing.sql")); got != "" {
+		if got, reason := probePath(canonical, root, filepath.Join("external", "missing.sql")); got != "" || reason == "" {
 			t.Fatal("redirect outside project contributed clues", got)
 		}
 	})

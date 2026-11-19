@@ -26,7 +26,7 @@ Selected business results preserve record boundaries (including MCP JSON text an
 
 ## Custom tool probes
 
-Put tool-probes.json in the running service's data_dir. Replace the example scope with the exact bound scope. Each project maps to an array of rules.
+Put tool-probes.json in the running service's data_dir. Replace the example scope with the exact bound scope. Each project maps to an array of rules. This Write example selects files inside the bound project directory.
 
 ```json
 {
@@ -44,6 +44,23 @@ Use exactly one selector per rule. tool is the exact native event name. mcp_tool
 Run doctor with the active --host, --config, --data-dir, --project and --scope before replaying a hook. Check probe_config_valid and custom_probe_rules. A selector change requires setup and a client restart; probe_matcher_mismatches checks the on-disk dispatch configuration. A valid configuration alone cannot confirm native dispatch.
 
 Use doctor --session <event-session-id> with the same options to inspect recent_events for that session. probe_config_invalid means the file was rejected and the hook fell back to built-ins. custom_probe_no_clues means the rule supplied no usable input; custom_probe_no_match means no cue matched. experience_probe with outcome silent is a matched probe with no new delivery. Look for the recorded outcome before repeating with a fresh session.
+
+custom_probe_input explains path_field rejections, extension mismatch, unavailable text fields and the 32 KiB text budget. It reports field names, statuses and UTF-8 byte lengths without path or text values. A field can be present even when a path or extension check rejected the branch.
+
+### Writes to a separate repository
+
+To match a Write from the bound session based on the target's filename and proposed content, use a field condition for the suffix. This also works when the target is in a separate documentation repository. Only the proposed content is scanned for cues. The condition compares the tool argument as text.
+
+```json
+{
+  "tool": "Write",
+  "mode": "replace",
+  "when": {"field": "input.file_path", "op": "suffix", "value": ".sql"},
+  "text_fields": ["content"]
+}
+```
+
+The suffix comparison is case-sensitive. Add an any condition for other suffix spelling or combine a prefix condition to target a particular repository.
 
 ### Conditions and previous results
 

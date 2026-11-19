@@ -140,11 +140,18 @@ func (r Runtime) configuredClues(ctx context.Context, e Event, scope string) ([]
 				return nil, true, err
 			}
 		}
-		for _, value := range branch.clues(e, active.Project) {
+		branchClues, report := branch.clues(e, active.Project)
+		if report != nil {
+			detail, _ := json.Marshal(report)
+			_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "custom_probe_input", string(detail))
+		}
+		for _, value := range branchClues {
 			if !seen[value] {
 				seen[value] = true
 				total += len(value)
-				if total > 32768 {
+				if total > customProbeTextLimit {
+					detail, _ := json.Marshal(probeInputReport{Tool: e.Tool, Branch: branch.ID, Outcome: "combined_budget_exceeded"})
+					_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "custom_probe_input", string(detail))
 					return clues, true, nil
 				}
 				custom = append(custom, value)
