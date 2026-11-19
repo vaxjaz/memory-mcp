@@ -415,5 +415,6 @@ func (r probeBranch) clues(e Event, root string) ([]string, *probeInputReport) {
 			return texts, report
 		}
 	}
-	return texts, nil
+	report.Outcome = "scanned"
+	return texts, report
 }

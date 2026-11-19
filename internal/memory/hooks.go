@@ -101,8 +101,10 @@ func (s *Store) HookResolve(ctx context.Context, cwd string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err = s.InitHooks(ctx); err != nil {
-		return "", err
+	if !s.readOnly {
+		if err = s.InitHooks(ctx); err != nil {
+			return "", err
+		}
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT path,scope FROM hook_bindings ORDER BY length(path) DESC`)
 	if err != nil {
@@ -130,8 +132,10 @@ type HookBinding struct {
 }
 
 func (s *Store) HookBindings(ctx context.Context) ([]HookBinding, error) {
-	if err := s.InitHooks(ctx); err != nil {
-		return nil, err
+	if !s.readOnly {
+		if err := s.InitHooks(ctx); err != nil {
+			return nil, err
+		}
 	}
 	rows, err := s.db.QueryContext(ctx, "SELECT path,scope FROM hook_bindings ORDER BY path")
 	if err != nil {

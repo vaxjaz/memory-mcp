@@ -64,12 +64,18 @@ type Runtime struct {
 	ServerName string
 }
 
-func (r Runtime) Handle(ctx context.Context, e Event) (map[string]any, error) {
+func (e *Event) normalizeAgentSession() {
 	e.normalize()
 	if e.AgentID != "" {
-		identity, _ := json.Marshal([]string{e.Session, e.AgentID})
-		e.Session = string(identity)
+		if e.Session != "" {
+			identity, _ := json.Marshal([]string{e.Session, e.AgentID})
+			e.Session = string(identity)
+		}
 	}
+}
+
+func (r Runtime) Handle(ctx context.Context, e Event) (map[string]any, error) {
+	e.normalizeAgentSession()
 	empty := map[string]any{}
 	if e.Name != "SessionStart" && e.Name != "UserPromptSubmit" && e.Name != "PreToolUse" && e.Name != "PostToolUse" && !(r.host() == "zcode" && e.Name == "PostToolUseFailure") {
 		return empty, nil

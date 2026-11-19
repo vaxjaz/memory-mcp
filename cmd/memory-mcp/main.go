@@ -56,6 +56,8 @@ Usage:
   memory-mcp hook --host HOST [--data-dir DIR]    User-level event handler (not an MCP server)
   memory-mcp doctor [--data-dir DIR] [--session ID]
                                              Bindings, probe configuration and recent hook events
+  memory-mcp doctor --probe EVENT.json [--expect RECORD_ID]
+                                             Read-only check of a sample tool call and its cue matches
   memory-mcp adapters                           List implemented host protocols and validation limits
   memory-mcp diagnose --data-dir DIR [--entry-id ID] [--probe-ids ID,ID] [--out FILE]
                                              Read-only metadata/link diagnostics; no migration or repair

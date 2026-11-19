@@ -272,11 +272,11 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 
 func experienceReceipt(e Entry, reused bool) ExperienceReceipt {
 	return ExperienceReceipt{ID: e.ID, RootID: e.RootID, Reused: reused, BodySHA256: e.BodySHA256, Indexed: true,
-		TriggerPreview: previewTriggers(e),
+		TriggerPreview: PreviewTriggers(e),
 		Notice:         "Saved failure features, not an instruction or prescribed destination. Code hashes/locators check mechanics; semantic evidence remains the host's responsibility."}
 }
 
-func previewTriggers(e Entry) TriggerPreview {
+func PreviewTriggers(e Entry) TriggerPreview {
 	out := TriggerPreview{Scope: e.Scope}
 	switch {
 	case !e.Current:

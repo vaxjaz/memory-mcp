@@ -81,4 +81,6 @@ When `custom_probe_input` is present, look at its `outcome` and the selected fie
 
 For conditional probes and cross-call facts, run `memory-mcp guide` and see **Conditions and previous results**. Validate the sample against the actual tool events with `doctor`. Producer selectors need a setup refresh so the client sends both the PreToolUse and PostToolUse events. Preserve case-specific cues and use `doctor --session` to see whether a branch passed, failed or has unknown context.
 
+After saving or revising a cue, use `doctor --probe EVENT.json --expect RECORD_ID` with the existing host and data options. It checks a representative call without executing it and explains a miss. For a pasteable event and examples of cue spelling, see **Check a trigger before using it** in `memory-mcp guide`.
+
 Rollback: stop all new writers and restore the old program/configuration and the complete pre-upgrade library together. Merely pointing the old binary at a post-upgrade library is not a tested rollback.

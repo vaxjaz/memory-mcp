@@ -12,6 +12,8 @@ Use memory_reference_record for compact pointers to existing explicitly confirme
 
 After a successful new write or revision, including an entrance-only update, tell the user in one sentence how to encounter the recorded cue in normal work. Use one or two entrances from trigger_preview and the bound scope. Mention the tool, field or conditions if verified in the active host. A preview reports eligibility and the stored wakeup policy. Actual delivery still depends on the host dispatching a matching probe and the current delivery state. If the record is ineligible or wakeup is disabled, say so. For additional entrances, read the saved revision by ID. Report an exact submission retry once.
 
+To verify a direct trigger before calling it ready, use doctor --probe EVENT.json --expect RECORD_ID or an actual hook record that lists that cue. A result of a lookup alone verifies retrieval, separate from a direct trigger. The probe check is read-only and reports where to correct a miss. See **Check a trigger before using it** below.
+
 Use cues[].entrances for distinctive trigger phrases and identifiers. Optional object_id_prefixes belongs to the same-input business-result association only. A newer client can inspect an older library with memory-mcp migrate. When the migration report lists a record without cues, read its evidence, verify applicability, then submit a new cue with previous_id to activate the revised record.
 
 Lookup task/questions come from the whole current task and concrete uncertainty. Supply 1-4 independent grounded queries, terms with match=all (default) or any. keywords remains compatible. Similar words and source locations do not establish applicability. Check current evidence; no hit does not prove no risk. Up to three complete items (default two) fit one JSON text body <=8 KiB. Follow next_cursor or refine queries; changed queries/corpus require restarting. Legacy excerpts are navigation; read freely for full historical source.
@@ -99,3 +101,19 @@ Use input.<field> to read tool input and result.<field> in an observer to read t
 An observer needs matching native call IDs and an observed input boundary. Its key is an ordered tuple of up to four scalars; large IDs belong in strings. Facts are scoped by host, project, session/agent and context generation. Default lifetime is input; session retains an observed fact across inputs up to its TTL. TTL defaults to 120 seconds and is capped at 600. A late result cannot become a new input's fact. Only a hash of the key and the predicate outcome are stored; the original result is not saved.
 
 After adding a producer or consumer tool, run setup and restart to install the native matchers. doctor shows probe_context_fact_rules and checks Pre/Post dispatch configuration. doctor --session shows custom_probe_condition with branch outcomes passed, not_met or unknown and shows whether a result could be associated with its call. A result observer affects later calls.
+
+### Check a trigger before using it
+
+Save a small representative PreToolUse sample with the event's tool_name and tool_input. If the sample omits cwd, run the check from the bound project or supply --project. Use the same host, config and data directory as the running service. This example uses invented SQL and requires no actual Write.
+
+```json
+{"tool_name":"Write","tool_input":{"file_path":"example.sql","content":"UPDATE demo SET work_order_feedback_fix_third = 1;"}}
+```
+
+```text
+memory-mcp doctor --host zcode --data-dir LIBRARY --project PROJECT --probe EVENT.json --expect RECORD_ID
+```
+
+Use the full record ID from the write receipt. To require a specific cue within it, add --expect-cue CUE_ID. The example contains work_order_feedback_fix_third as one ASCII identifier. Use that full column for a direct match. A cue containing just fix_third matches the standalone identifier. Underscores belong to the identifier. A period can separate configuration key segments. Keep lookup and trigger checks separate.
+
+If the result is direct_match, the expected entry matched the sample. For a miss, next gives the first corrective step and steps shows branch conditions and scanned field metadata. Use --session SESSION_ID or the actual event identity to include saved facts from that session. The check examines on-disk dispatch configuration and uses the real matching path; use doctor --session after a native action to verify actual client delivery. The check executes no tool and writes no hook event, fact, challenge or receipt.

@@ -41,8 +41,12 @@ func Run(ctx context.Context, args []string) error {
 	dry := fs.Bool("dry-run", false, "show setup targets without writing config or opening the database")
 	checkText := fs.Bool("check-text", false, "doctor: scan stored text for invalid UTF-8/U+FFFD without changing it")
 	var session string
+	var probeFile, expectedRecord, expectedCue string
 	if cmd == "doctor" {
 		fs.StringVar(&session, "session", "", "limit recent hook events to this exact session ID")
+		fs.StringVar(&probeFile, "probe", "", "read-only probe check from event JSON file, or - for stdin")
+		fs.StringVar(&expectedRecord, "expect", "", "with --probe, check whether this full record ID directly matches")
+		fs.StringVar(&expectedCue, "expect-cue", "", "with --expect, check this specific cue ID")
 	}
 	_ = fs.String("managed-id", "", "installer ownership marker")
 	if err = fs.Parse(args[1:]); err != nil {
@@ -53,6 +57,9 @@ func Run(ctx context.Context, args []string) error {
 	}
 	if fs.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
+	}
+	if expectedRecord != "" && probeFile == "" || expectedCue != "" && expectedRecord == "" {
+		return errors.New("--expect requires --probe and --expect-cue requires --expect")
 	}
 	if *host == "" && cmd != "doctor" {
 		return errors.New("explicit --host required; identify the actual client and read docs/AGENT_INSTALL.md")
@@ -104,6 +111,10 @@ func Run(ctx context.Context, args []string) error {
 			return fail(err)
 		}
 	}
+	if probeFile != "" {
+		return runProbeCheck(ctx, probeCheckOptions{File: probeFile, Adapter: adapter, Config: *config, Dir: *dir,
+			Project: *project, Scope: *scope, Server: *serverName, Session: session, Expect: expectedRecord, Cue: expectedCue})
+	}
 	openStore := memory.Open
 	if cmd == "hook" {
 		openStore = memory.OpenForHook
@@ -142,22 +153,7 @@ func Run(ctx context.Context, args []string) error {
 		r["adapter_receipts"] = receipts
 		_, statErr := os.Stat(*config)
 		r["config_exists"] = statErr == nil
-		services := []map[string]any{}
-		if mc, ok := c["mcp"].(map[string]any); ok {
-			if servers, ok := mc["servers"].(map[string]any); ok {
-				for name, v := range servers {
-					if ent, ok := v.(map[string]any); ok {
-						command, _ := ent["command"].(string)
-						if isMemoryCommand(command) {
-							data := configData(ent)
-							a, _ := canonicalForDoctor(data)
-							b, _ := canonicalForDoctor(store.Dir)
-							services = append(services, map[string]any{"workflow": configuredWorkflow(stringArgs(ent["args"])), "server": name, "command": command, "data_dir": data, "matches_opened_data_dir": a != "" && a == b})
-						}
-					}
-				}
-			}
-		}
+		services := configuredMemoryServices(c, store.Dir)
 		r["memory_services"] = services
 		probes, probeErr := loadProbeConfig(store.Dir)
 		r["probe_config_path"] = filepath.Join(store.Dir, probeConfigName)
@@ -168,7 +164,7 @@ func Run(ctx context.Context, args []string) error {
 			r["custom_probe_rules"] = len(probes.Projects[*scope])
 			r["probe_context_fact_rules"] = len(probes.Facts[*scope])
 		}
-		inspectManagedWorkflow(r, c, services, *host, *config, *serverName, probes)
+		inspectManagedWorkflow(r, c, services, *host, *config, *serverName, probes, "")
 		if probeErr != nil {
 			r["configuration_consistent"] = false
 		}

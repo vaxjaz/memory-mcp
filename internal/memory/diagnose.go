@@ -36,7 +36,7 @@ func OpenReadOnly(dir string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	return &Store{db: db, Dir: absolute}, nil
+	return &Store{db: db, Dir: absolute, readOnly: true}, nil
 }
 
 type ProbeEntry struct {

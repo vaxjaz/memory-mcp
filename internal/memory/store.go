@@ -80,8 +80,9 @@ type Draft struct {
 }
 
 type Store struct {
-	db  *sql.DB
-	Dir string
+	db       *sql.DB
+	Dir      string
+	readOnly bool
 }
 
 func DefaultDir() (string, error) {

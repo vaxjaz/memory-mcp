@@ -76,21 +76,35 @@ func experienceClues(e Event) string {
 }
 
 func (r Runtime) configuredClues(ctx context.Context, e Event, scope string) ([]string, bool, error) {
-	var clues []string
-	defaultClues := func() {
-		if base := experienceClues(e); base != "" {
-			clues = append(clues, base)
-		}
-	}
 	config, err := loadProbeConfig(r.Store.Dir)
 	if err != nil {
 		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_config_invalid", probeConfigName)
-		defaultClues()
-		return clues, false, nil
+		config = probeConfig{}
 	}
 	if producers := config.producers(scope, e.Tool); len(producers) > 0 {
 		if err := r.startProbeFacts(ctx, e, scope, producers); err != nil {
 			return nil, false, err
+		}
+	}
+	return r.evaluateProbe(ctx, e, scope, config, func(stage string, detail any) {
+		if stage == "builtin_probe" {
+			return
+		}
+		if report, ok := detail.(*probeInputReport); ok && report.Outcome == "scanned" {
+			return
+		}
+		raw, _ := json.Marshal(detail)
+		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, stage, string(raw))
+	})
+}
+
+func (r Runtime) evaluateProbe(ctx context.Context, e Event, scope string, config probeConfig, observe func(string, any)) ([]string, bool, error) {
+	var clues []string
+	defaultClues := func() {
+		base := experienceClues(e)
+		observe("builtin_probe", map[string]any{"selected": base != ""})
+		if base != "" {
+			clues = append(clues, base)
 		}
 	}
 	rule, configured := config.ruleFor(scope, e.Tool)
@@ -128,8 +142,7 @@ func (r Runtime) configuredClues(ctx context.Context, e Event, scope string) ([]
 		}
 		if branch.When != nil || len(rule.Branches) > 0 {
 			outcome := map[probeTruth]string{probeTrue: "passed", probeFalse: "not_met", probeUnknown: "unknown"}[truth]
-			detail, _ := json.Marshal(map[string]string{"tool": e.Tool, "branch": branch.ID, "outcome": outcome})
-			_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "custom_probe_condition", string(detail))
+			observe("custom_probe_condition", map[string]string{"tool": e.Tool, "branch": branch.ID, "outcome": outcome})
 		}
 		if truth != probeTrue {
 			continue
@@ -141,17 +154,13 @@ func (r Runtime) configuredClues(ctx context.Context, e Event, scope string) ([]
 			}
 		}
 		branchClues, report := branch.clues(e, active.Project)
-		if report != nil {
-			detail, _ := json.Marshal(report)
-			_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "custom_probe_input", string(detail))
-		}
+		observe("custom_probe_input", report)
 		for _, value := range branchClues {
 			if !seen[value] {
 				seen[value] = true
 				total += len(value)
 				if total > customProbeTextLimit {
-					detail, _ := json.Marshal(probeInputReport{Tool: e.Tool, Branch: branch.ID, Outcome: "combined_budget_exceeded"})
-					_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "custom_probe_input", string(detail))
+					observe("custom_probe_input", &probeInputReport{Tool: e.Tool, Branch: branch.ID, Outcome: "combined_budget_exceeded"})
 					return clues, true, nil
 				}
 				custom = append(custom, value)
@@ -159,6 +168,22 @@ func (r Runtime) configuredClues(ctx context.Context, e Event, scope string) ([]
 		}
 	}
 	return append(clues, custom...), true, nil
+}
+
+func (r Runtime) probeMatches(ctx context.Context, e Event, scope string, clues []string) ([]memory.ExperienceMatch, []memory.ExperienceMatch, error) {
+	direct, err := r.Store.MatchExperiences(ctx, scope, clues...)
+	if err != nil || !isBusinessTool(e.Tool) || e.Session == "" {
+		return direct, direct, err
+	}
+	matches := direct
+	for _, text := range clues {
+		observed, err := r.Store.ObservedBusinessMatches(ctx, r.host(), scope, e.Session, e.TurnID, text)
+		if err != nil {
+			return nil, nil, err
+		}
+		matches = mergeExperienceMatches(matches, observed)
+	}
+	return direct, matches, nil
 }
 
 func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[string]any, error) {
@@ -229,19 +254,10 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		start := time.Now()
 		probe, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 		defer cancel()
-		matches, err := r.Store.MatchExperiences(probe, scope, clues...)
+		_, matches, err := r.probeMatches(probe, e, scope, clues)
 		if err != nil {
 			return empty, err
 		} // Run() fails open; never records completion.
-		if business {
-			for _, text := range clues {
-				observed, err := r.Store.ObservedBusinessMatches(probe, r.host(), scope, e.Session, e.TurnID, text)
-				if err != nil {
-					return empty, err
-				}
-				matches = mergeExperienceMatches(matches, observed)
-			}
-		}
 		if len(matches) == 0 {
 			if configured {
 				_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "custom_probe_no_match", e.Tool)
