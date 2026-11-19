@@ -1,6 +1,6 @@
 # 首次正文与关联点增量交付：实施与验收
 
-当前版本 0.6.2，integration protocol 6，schema 5。[安装指南](AGENT_INSTALL.md) 与 [升级包指南](AGENT_UPGRADE_PACKAGE.md) 适用于此版本。后续各节保留 0.6.1 和 0.6.0 验收快照。
+本节为 0.6.2 的历史验收，使用 integration protocol 6 和 schema 5。[安装指南](AGENT_INSTALL.md) 与 [升级包指南](AGENT_UPGRADE_PACKAGE.md) 以当前发布包为准。后续各节保留 0.6.1 和 0.6.0 验收快照。
 
 ## 0.6.2 的 ZCode 与 SQL 验收
 

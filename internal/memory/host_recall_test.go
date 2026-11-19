@@ -1,6 +1,7 @@
 package memory
 
 import (
+"github.com/vaxjaz/memory-mcp/internal/matching"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -134,7 +135,7 @@ func TestAgreementIsNotAFabricatedExperienceAndRevalidatesSource(t *testing.T) {
 	os.WriteFile(filepath.Join(project, "agreement.txt"), []byte(source), 0600)
 	a := AgreementWrite{Scope: in.Scope, Project: project, Title: "隔离业务约定", RequestID: "reference-once", Agreement: Agreement{
 		ObjectIDPrefixes: []string{"WXN"},
-		Cues:             []ExperienceCue{{ID: "cancel", Label: "取消前核验", Text: "先核验实际数据再形成附件，仅为隔离测试", EvidenceRefs: []string{"fixture:explicit-owner-agreement"}, Entrances: []CueEntrance{{Kind: "business_signal", Value: "WXN-001 取消"}}}},
+		Cues:             []ExperienceCue{{ID: "cancel", Label: "取消前核验", Text: "先核验实际数据再形成附件，仅为隔离测试", EvidenceRefs: []string{"fixture:explicit-owner-agreement"}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"WXN-001 取消"}}}}},
 		Requirement:      "先核验实际数据再形成附件，仅为隔离测试", Applicability: "测试业务范围内的工单处理", Boundary: "不覆盖审批撤回，也不授予数据库权限",
 		Authority: "isolated fixture owner", ConfirmationReference: "fixture:explicit-owner-agreement",
 		Evidence: []ExperienceEvidence{{Kind: "business", Reference: "fixture:explicit-owner-agreement", Path: "agreement.txt", Observation: "synthetic agreement source exists"}},

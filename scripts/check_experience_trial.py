@@ -18,13 +18,12 @@ from smoke import Host
 def check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool):
     sql = "SELECT PRIVATE_SQL_MARKER FROM information_schema.columns"
     evidence = dict(kind="runtime", reference="synthetic-sql", observation="Isolated Hook replay marker")
-    entrances = [
-        dict(kind="code_symbol", value="information_schema"),
-        dict(kind="business_signal", value="SHOW COLUMNS"),
-        dict(kind="business_signal", value="刷数据"),
-    ]
+    entrances = ["information_schema"]
     cue = dict(cue_id="metadata", label="Metadata", text="Fixture requires a prior metadata query",
-               evidence_refs=["synthetic-sql"], entrances=entrances)
+               evidence_refs=["synthetic-sql"], matches=[
+                   dict(op="token", entrances=entrances),
+                   dict(op="token", normalize="whitespace", entrances=["SHOW COLUMNS", "刷数据"]),
+               ])
     case = dict(scope=scope, project=str(project), title="Synthetic SQL metadata rule",
                 experience=dict(pitfall="A lookup uses an unverified column name",
                                 counterexample="Fixture requires a prior metadata query",
@@ -83,7 +82,7 @@ def check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool):
 
     # Prove the six-character SQL keyword can match if explicitly indexed.
     # Keep broad keywords confined to this fixture.
-    entrances.append(dict(kind="code_symbol", value="SELECT"))
+    entrances.append("SELECT")
     updated = host.tool("memory_experience_record", dict(case, previous_id=saved["id"]))
     assert updated["id"] == saved["id"], updated
     for label, command, expected in (
@@ -192,7 +191,7 @@ def main():
                     assert "PostToolUseFailure" not in current_events, current_events
                 draft = dict(scope=scope, project=str(project), title="Synthetic multi-entry risk",
                              request_id="experience-once",
-                             experience=dict(cues=[dict(cue_id="admission",label="入口准入",text="合成多入口实验中本地调用未覆盖另一入口的准入条件。",evidence_refs=["isolated fixture"],entrances=[dict(kind="code_symbol",value="canDispatchLynOrder"),dict(kind="business_signal",value="LYN 创建准入")])],
+                             experience=dict(cues=[dict(cue_id="admission",label="入口准入",text="合成多入口实验中本地调用未覆盖另一入口的准入条件。",evidence_refs=["isolated fixture"],matches=[dict(op="token",entrances=["canDispatchLynOrder"]),dict(op="token",normalize="whitespace",entrances=["LYN 创建准入"])])],
                                              pitfall="A local caller is assumed to cover every entry",
                                              counterexample="An explicitly synthetic isolated counterexample, not a real business rule",
                                              impact="One entry may miss a required admission check",

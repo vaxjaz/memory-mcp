@@ -36,6 +36,11 @@ func TestExplicitCueMigrationPreservesHistoryAndRequiresReviewedCues(t *testing.
 			t.Fatal(err)
 		}
 	}
+	if _, err := s.db.Exec(`UPDATE entry_profiles SET profile_json=json_remove(json_set(profile_json,
+	  '$.experience.cues[0].entrances',json('[{"kind":"code_symbol","value":"canDispatchLynOrder"},{"kind":"business_signal","value":"LYN 创建准入"}]')),
+	  '$.experience.cues[0].matches') WHERE entry_id=?`, active.ID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.db.Exec("UPDATE entry_profiles SET profile_json=json_remove(profile_json,'$.experience.cues') WHERE entry_id=?", pending.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +92,10 @@ func TestExplicitCueMigrationPreservesHistoryAndRequiresReviewedCues(t *testing.
 	saved, err := upgraded.Read(ctx, active.ID)
 	if err != nil || len(saved.Entry.Profile.Experience.ObjectIDPrefixes) != 1 || saved.Entry.Profile.Experience.ObjectIDPrefixes[0] != "WXN" {
 		t.Fatal("object selector was lost", saved, err)
+	}
+	groups := saved.Entry.Profile.Experience.Cues[0].Matches
+	if len(groups) != 2 || groups[0].Op != "token" || groups[0].Entrances[0] != "canDispatchLynOrder" || groups[1].Normalize != "whitespace" {
+		t.Fatal("old cue's original spelling or comparison was lost", groups)
 	}
 	old, err := upgraded.Read(ctx, pending.ID)
 	if err != nil || !old.Entry.NeedsReview || old.Entry.BodySHA256 != pending.BodySHA256 || old.Entry.RootID != pending.RootID {

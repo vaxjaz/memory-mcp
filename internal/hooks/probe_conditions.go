@@ -8,18 +8,17 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/vaxjaz/memory-mcp/internal/memory"
+	"github.com/vaxjaz/memory-mcp/internal/matching"
 )
 
 var probeRuleID = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,39}$`)
-var probeToken = regexp.MustCompile(`^[A-Za-z0-9_$]+$`)
 
 type probeCondition struct {
 	All   []*probeCondition `json:"all,omitempty"`
 	Any   []*probeCondition `json:"any,omitempty"`
 	Not   *probeCondition   `json:"not,omitempty"`
 	Field string            `json:"field,omitempty"`
-	Op    string            `json:"op,omitempty"`
+    matching.Rule
 	Value any               `json:"value,omitempty"`
 	Fact  string            `json:"fact,omitempty"`
 	Key   []string          `json:"key,omitempty"`
@@ -58,41 +57,14 @@ func (c *probeCondition) validate(observation bool, facts []probeFactRule, depth
 			forms++
 		}
 	}
-	if forms != 1 || (c.Field == "" && (c.Op != "" || c.Value != nil)) || (c.Fact == "" && c.Key != nil) {
+	if forms != 1 || (c.Field == "" && (c.Op != "" || c.Value != nil || c.CaseSensitive != nil || c.Normalize != "")) || (c.Fact == "" && c.Key != nil) {
 		return errors.New("expected exactly one of all, any, not, field or fact")
 	}
 	if c.Field != "" {
 		if !probeFieldAllowed(c.Field, observation) {
 			return fmt.Errorf("invalid field %q for this event", c.Field)
 		}
-		switch c.Op {
-		case "exists":
-			if c.Value != nil {
-				return errors.New("exists takes no value")
-			}
-		case "eq":
-			switch value := c.Value.(type) {
-			case string:
-				if len(value) > 256 {
-					return errors.New("eq text value exceeds 256 bytes")
-				}
-			case bool:
-			case float64:
-				if math.Abs(value) > 9007199254740991 {
-					return errors.New("eq number exceeds the safe JSON integer range; use a string")
-				}
-			default:
-				return errors.New("eq requires a string, boolean or number")
-			}
-		case "prefix", "suffix", "token":
-			value, ok := c.Value.(string)
-			if !ok || value == "" || len(value) > 256 || c.Op == "token" && !probeToken.MatchString(value) {
-				return fmt.Errorf("%s requires a nonempty text value (token uses ASCII identifier characters)", c.Op)
-			}
-		default:
-			return fmt.Errorf("unknown operator %q", c.Op)
-		}
-		return nil
+        return c.Rule.Validate(c.Value, 256)
 	}
 	if c.Fact != "" {
 		if observation || !validProbeKey(c.Key, false) {
@@ -123,20 +95,13 @@ func (c *probeCondition) validate(observation bool, facts []probeFactRule, depth
 	return nil
 }
 
-type probeTruth int
+type probeTruth = matching.Truth
 
 const (
-	probeUnknown probeTruth = iota - 1
-	probeFalse
-	probeTrue
+    probeUnknown = matching.Unknown
+    probeFalse = matching.False
+    probeTrue = matching.True
 )
-
-func probeBool(v bool) probeTruth {
-	if v {
-		return probeTrue
-	}
-	return probeFalse
-}
 
 type probeValues struct {
 	input, result map[string]any
@@ -183,44 +148,19 @@ func (c *probeCondition) evaluate(v probeValues) (probeTruth, error) {
 		if err != nil || result == probeUnknown {
 			return result, err
 		}
-		return probeBool(result == probeFalse), nil
+		return matching.Bool(result == probeFalse), nil
 	case c.Fact != "":
 		key := v.key(c.Key)
 		if key == "" || v.fact == nil {
 			return probeUnknown, nil
 		}
 		return v.fact(c.Fact, key)
-	case c.Field != "":
-		value := v.field(c.Field)
-		if c.Op == "exists" {
-			return probeBool(value != nil), nil
-		}
-		switch expected := c.Value.(type) {
-		case string:
-			actual, ok := value.(string)
-			if !ok || len(actual) > 32768 {
-				return probeUnknown, nil
-			}
-			switch c.Op {
-			case "prefix":
-				return probeBool(strings.HasPrefix(actual, expected)), nil
-			case "suffix":
-				return probeBool(strings.HasSuffix(actual, expected)), nil
-			case "token":
-				return probeBool(memory.MatchIdentifier(actual, expected)), nil
-			default:
-				return probeBool(actual == expected), nil
-			}
-		case bool:
-			if actual, ok := value.(bool); ok {
-				return probeBool(actual == expected), nil
-			}
-		case float64:
-			if actual, ok := value.(float64); ok {
-				return probeBool(actual == expected), nil
-			}
-		}
-		return probeUnknown, nil
+    case c.Field != "":
+        value := v.field(c.Field)
+        if s,ok := value.(string); ok && c.Op != "exists" && len(s)>32768 {
+            return probeUnknown,nil
+        }
+        return c.Rule.Compare(value,c.Value,c.Op!="token"),nil
 	default:
 		children, stop, fallback := c.All, probeFalse, probeTrue
 		if c.Any != nil {

@@ -24,7 +24,7 @@ def tables_digest(db, tables):
     return digest.hexdigest(), counts
 
 
-def cue_profiles(db, convert):
+def cue_profiles(db, before=None, target=None):
     table_exists = db.execute(
         "SELECT count(*) FROM sqlite_master WHERE name='entry_profiles' AND type='table'").fetchone()[0]
     profiles, pending = {}, set()
@@ -32,17 +32,38 @@ def cue_profiles(db, convert):
         return profiles, pending
     for entry_id, raw in db.execute("SELECT entry_id, profile_json FROM entry_profiles"):
         profile = json.loads(raw)
-        if convert:
+        if before is not None:
             for key in ("experience", "agreement"):
                 model = profile.get(key)
                 if not isinstance(model, dict):
                     continue
-                if "object_id_prefixes" not in model and isinstance(model.get("anchor_prefixes"), list):
-                    model["object_id_prefixes"] = model["anchor_prefixes"]
-                for obsolete in ("anchors", "signals", "anchor_prefixes"):
-                    model.pop(obsolete, None)
-                if not model.get("cues"):
-                    pending.add(entry_id)
+                if before < 6:
+                    if "object_id_prefixes" not in model and isinstance(model.get("anchor_prefixes"), list):
+                        model["object_id_prefixes"] = model["anchor_prefixes"]
+                    for obsolete in ("anchors", "signals", "anchor_prefixes"):
+                        model.pop(obsolete, None)
+                    if not model.get("cues"):
+                        pending.add(entry_id)
+                if target >= 7:
+                    for cue in model.get("cues") or []:
+                        if "entrances" not in cue:
+                            continue
+                        groups = []
+                        for entrance in cue.pop("entrances") or []:
+                            value = entrance["value"]
+                            rule = {"op": "token"}
+                            if entrance["kind"] == "business_signal":
+                                rule["normalize"] = "whitespace"
+                            elif "/" in value or "\\" in value:
+                                rule = {"op": "contains", "normalize": "path"}
+                            elif not value.isascii():
+                                rule["op"] = "contains"
+                            if groups and {k: v for k, v in groups[-1].items() if k != "entrances"} == rule:
+                                if value not in groups[-1]["entrances"]:
+                                    groups[-1]["entrances"].append(value)
+                            else:
+                                groups.append(dict(rule, entrances=[value]))
+                        cue["matches"] = groups
         profiles[entry_id] = profile
     return profiles, pending
 
@@ -76,10 +97,10 @@ def main():
                        "experience_cooldown_settings", "recall_responses", "recall_wakeup_responses",
                        "business_observations", "recall_documents", "recall_postings",
                        "recall_terms", "recall_index_meta", "recall_index_version", "experience_entrances"}
-            explicit = version_before < target_schema and target_schema == 6
+            explicit = 0 < version_before < target_schema and target_schema >= 6
             if explicit:
                 derived.update({"entries", "entry_profiles"})
-                expected_profiles, pending = cue_profiles(db, True)
+                expected_profiles, pending = cue_profiles(db, version_before, target_schema)
                 entry_columns = [row[1] for row in db.execute("PRAGMA table_info(entries)")]
                 selected_columns = ", ".join('"' + name.replace('"', '""') + '"' for name in entry_columns)
                 original_entries = list(db.execute(f"SELECT {selected_columns} FROM entries ORDER BY id"))
@@ -115,7 +136,7 @@ def main():
             assert before == after and counts == after_counts, "source tables changed outside the migration plan"
             if explicit:
                 assert list(db.execute(f"SELECT {selected_columns} FROM entries ORDER BY id")) == expected_entries
-                assert cue_profiles(db, False)[0] == expected_profiles, "unexpected rewrite of profile data"
+                assert cue_profiles(db)[0] == expected_profiles, "unexpected rewrite of profile data"
             assert db.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             indexed = db.execute("SELECT count(*) FROM recall_documents").fetchone()[0]
             delivered_after = db.execute("SELECT count(*) FROM experience_body_deliveries").fetchone()[0]

@@ -94,13 +94,15 @@ func indexRecallEntry(ctx context.Context, tx *sql.Tx, e Entry) error {
 	}
 	for _, c := range entryCues(e) {
 		add(c.Text, 2)
-		for _, entrance := range c.Entrances {
-			add(entrance.Value, 8)
-			compact := humanSignalKey(entrance.Value)
-			if entrance.Kind == "business_signal" && compact != strings.ToLower(entrance.Value) {
-				add(compact, 8)
-			}
-		}
+        for _, group := range c.Matches {
+            for _, value := range group.Entrances {
+                add(value, 8)
+                compact := humanSignalKey(value)
+                if group.Normalize == "whitespace" && compact != strings.ToLower(value) {
+                    add(compact, 8)
+                }
+            }
+        }
 	}
 	length := 0.0
 	for _, n := range weights {
@@ -129,7 +131,7 @@ func migrateRecall(tx *sql.Tx) error {
  CREATE TABLE IF NOT EXISTS recall_terms(scope TEXT NOT NULL,term TEXT NOT NULL,entry_id TEXT NOT NULL REFERENCES recall_documents(entry_id) ON DELETE CASCADE,frequency REAL NOT NULL,PRIMARY KEY(scope,term,entry_id));
  CREATE INDEX IF NOT EXISTS recall_terms_entry ON recall_terms(entry_id);
  CREATE TABLE IF NOT EXISTS experience_keys(scope TEXT NOT NULL,fingerprint TEXT NOT NULL,root_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,PRIMARY KEY(scope,fingerprint));
- CREATE TABLE IF NOT EXISTS experience_entrances(entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,cue_id TEXT NOT NULL,kind TEXT NOT NULL,value TEXT NOT NULL,match_key TEXT NOT NULL,scope TEXT NOT NULL,PRIMARY KEY(entry_id,cue_id,kind,value));
+ CREATE TABLE IF NOT EXISTS experience_entrances(entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,cue_id TEXT NOT NULL,match_group INTEGER NOT NULL,value TEXT NOT NULL,match_key TEXT NOT NULL,scope TEXT NOT NULL,PRIMARY KEY(entry_id,cue_id,match_group,value));
  CREATE INDEX IF NOT EXISTS experience_entrances_scope ON experience_entrances(scope);
  CREATE TABLE IF NOT EXISTS recall_index_version(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL);
  `); err != nil {
@@ -384,9 +386,9 @@ func (s *Store) rankedRecall(ctx context.Context, scope string, queries []Recall
 		}
 		var entrances []string
 		for _, cue := range entryCues(e) {
-			for _, entrance := range cue.Entrances {
-				entrances = append(entrances, entrance.Value)
-			}
+			for _, group := range cue.Matches {
+ entrances = append(entrances, group.Entrances...)
+ }
 		}
 		uniq := map[string]bool{}
 		r.Terms = nil

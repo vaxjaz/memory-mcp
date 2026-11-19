@@ -35,7 +35,7 @@ def main():
             draft = dict(scope=scope, project=str(project), title="Synthetic failure recognition",
                          request_id="fixture-experience", experience=dict(
                              object_id_prefixes=["OBJ"],
-                             cues=[dict(cue_id="cancellation",label="状态约束",text="合成取消实验中本地状态未覆盖关联影响限制。",evidence_refs=["fixture:runtime"],entrances=[dict(kind="business_signal",value="取消 OBJ-001")])],
+                             cues=[dict(cue_id="cancellation",label="状态约束",text="合成取消实验中本地状态未覆盖关联影响限制。",evidence_refs=["fixture:runtime"],matches=[dict(op="token",normalize="whitespace",entrances=["取消 OBJ-001"])])],
                              pitfall="An isolated task assumes a local status represents every condition",
                              counterexample="Synthetic observation: 取消受状态约束与关联影响限制",
                              impact="An isolated state transition may miss a required condition",
@@ -46,12 +46,17 @@ def main():
             obsolete = json.loads(json.dumps(draft))
             obsolete["experience"]["anchors"] = ["ObjectType"]
             host.tool("memory_experience_record", obsolete, expect_error=True)
+            obsolete = json.loads(json.dumps(draft))
+            cue = obsolete["experience"]["cues"][0]
+            cue.pop("matches")
+            cue["entrances"] = [{"kind": "business_signal", "value": "取消 OBJ-001"}]
+            host.tool("memory_experience_record", obsolete, expect_error=True)
             saved = host.tool("memory_experience_record", draft)
             assert saved["indexed"]
             preview = saved["trigger_preview"]
             assert preview == {
                 "scope": scope, "record_status": "eligible", "wakeup_enabled": True, "entrance_count": 1,
-                "entrances": [{"cue_id": "cancellation", "kind": "business_signal", "value": "取消 OBJ-001"}],
+                "entrances": [{"cue_id": "cancellation", "op": "token", "case_sensitive": False, "normalize": "whitespace", "value": "取消 OBJ-001"}],
             }, preview
             assert host.tool("memory_experience_record", draft)["id"] == saved["id"]
             reference = dict(scope=scope, project=str(project), title="Synthetic confirmed convention",
@@ -60,7 +65,7 @@ def main():
                                  cues=[dict(cue_id="confirm", label="确认要求",
                                             text="Synthetic agreement: obtain current evidence before preparing an attachment",
                                             evidence_refs=["fixture:owner-confirmed"],
-                                            entrances=[dict(kind="business_signal", value="取消 OBJ-001")])],
+                                            matches=[dict(op="token", normalize="whitespace", entrances=["取消 OBJ-001"])])],
                                  requirement="Synthetic agreement: obtain current evidence before preparing an attachment",
                                  applicability="Only the isolated example business scope",
                                  boundary="No database access permission and no approval withdrawal",
@@ -73,7 +78,7 @@ def main():
             agreement = host.tool("memory_reference_record", reference)
             assert agreement["indexed"]
             assert agreement["trigger_preview"]["entrances"] == [
-                {"cue_id": "confirm", "kind": "business_signal", "value": "取消 OBJ-001"},
+                {"cue_id": "confirm", "op": "token", "case_sensitive": False, "normalize": "whitespace", "value": "取消 OBJ-001"},
             ], agreement
             query = dict(scope=scope, project=str(project), task="Compare the current cancellation scenario",
                          questions="Which observed constraints challenge the current assumption?",
@@ -185,14 +190,14 @@ def main():
 
             alias_edit = json.loads(json.dumps(revision))
             alias_edit.update(previous_id=replacement["id"], request_id="fixture-entrances")
-            entrances = [dict(kind="business_signal", value=f"取消 OBJ-00{i}") for i in range(2, 7)]
-            alias_edit["experience"]["cues"][0]["entrances"] = entrances
+            entrances = [f"取消 OBJ-00{i}" for i in range(2, 7)]
+            alias_edit["experience"]["cues"][0]["matches"][0]["entrances"] = entrances
             refreshed = host.tool("memory_experience_record", alias_edit)
             assert refreshed["reused"] and refreshed["id"] == replacement["id"], refreshed
             refreshed_preview = refreshed["trigger_preview"]
             assert refreshed_preview["entrance_count"] == 5, refreshed_preview
-            assert [item["value"] for item in refreshed_preview["entrances"]] == [e["value"] for e in entrances[:4]], refreshed_preview
-            actual = host.tool("memory_read", {"id": refreshed["id"]})["entry"]["profile"]["experience"]["cues"][0]["entrances"]
+            assert [item["value"] for item in refreshed_preview["entrances"]] == entrances[:4], refreshed_preview
+            actual = host.tool("memory_read", {"id": refreshed["id"]})["entry"]["profile"]["experience"]["cues"][0]["matches"][0]["entrances"]
             assert actual == entrances, actual
 
             superseded = host.tool("memory_experience_record", draft)

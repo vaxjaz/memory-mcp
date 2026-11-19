@@ -1,6 +1,7 @@
 package hooks
 
 import (
+"github.com/vaxjaz/memory-mcp/internal/matching"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -15,7 +16,7 @@ func TestReviewBusinessRecordBoundariesAcrossMCPEnvelopes(t *testing.T) {
 	for _, shape := range []string{"rows", "array", "mcp-json", "json-text", "structured", "structured-and-text"} {
 		t.Run(shape, func(t *testing.T) {
 			s, r, p := trialFixture(t)
-			_, err := s.RecordExperience(testCtx, memory.ExperienceWrite{Scope: "project:demo", Project: p, Title: "Synthetic record boundary", Experience: memory.Experience{ObjectIDPrefixes: []string{"WXN"}, Pitfall: "合成批量动作误认为属于每条记录", Counterexample: "合成取消记录与普通查询记录并列返回", Impact: "可能把取消条件绑定另一对象", Applicability: "隔离批量回归", Boundary: "不推断跨记录关联", Evidence: []memory.ExperienceEvidence{{Kind: "business", Reference: "fixture:record-boundary", Observation: "仅隔离测试"}}, Cues: []memory.ExperienceCue{{ID: "cancel", Label: "取消动作", Text: "合成批量返回中另一条记录仅执行普通查询。", EvidenceRefs: []string{"fixture:record-boundary"}, Entrances: []memory.CueEntrance{{Kind: "business_signal", Value: "取消"}}}}}})
+			_, err := s.RecordExperience(testCtx, memory.ExperienceWrite{Scope: "project:demo", Project: p, Title: "Synthetic record boundary", Experience: memory.Experience{ObjectIDPrefixes: []string{"WXN"}, Pitfall: "合成批量动作误认为属于每条记录", Counterexample: "合成取消记录与普通查询记录并列返回", Impact: "可能把取消条件绑定另一对象", Applicability: "隔离批量回归", Boundary: "不推断跨记录关联", Evidence: []memory.ExperienceEvidence{{Kind: "business", Reference: "fixture:record-boundary", Observation: "仅隔离测试"}}, Cues: []memory.ExperienceCue{{ID: "cancel", Label: "取消动作", Text: "合成批量返回中另一条记录仅执行普通查询。", EvidenceRefs: []string{"fixture:record-boundary"}, Matches: []memory.CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"取消"}}}}}}})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -61,7 +62,7 @@ func TestReviewBusinessRecordBoundariesAcrossMCPEnvelopes(t *testing.T) {
 
 func TestReviewDirectAndObservedCueMergeOnceAndE2StillRequiresBody(t *testing.T) {
 	s, r, p := trialFixture(t)
-	write := memory.ExperienceWrite{Scope: "project:demo", Project: p, Title: "Synthetic direct and observed cue", Experience: memory.Experience{ObjectIDPrefixes: []string{"WXN"}, Pitfall: "合成任务误认为备注与日志始终同源", Counterexample: "合成反例中更新备注未改变日志参数", Impact: "合成日志保留旧参数", Applicability: "隔离回馈实验", Boundary: "不代表实际业务规范", Evidence: []memory.ExperienceEvidence{{Kind: "business", Reference: "fixture:mixed-cues", Observation: "仅隔离回归"}}, Cues: []memory.ExperienceCue{{ID: "remark", Label: "备注变化", Text: "合成反例中更新备注未改变日志参数。", EvidenceRefs: []string{"fixture:mixed-cues"}, Entrances: []memory.CueEntrance{{Kind: "code_symbol", Value: "WorkOrder.remark"}}}, {ID: "log", Label: "日志入口", Text: "合成反例中日志参数保留了旧值。", EvidenceRefs: []string{"fixture:mixed-cues"}, Entrances: []memory.CueEntrance{{Kind: "code_symbol", Value: "FeedbackLogBuilder.build"}, {Kind: "business_signal", Value: "生成回馈日志"}}}}}}
+	write := memory.ExperienceWrite{Scope: "project:demo", Project: p, Title: "Synthetic direct and observed cue", Experience: memory.Experience{ObjectIDPrefixes: []string{"WXN"}, Pitfall: "合成任务误认为备注与日志始终同源", Counterexample: "合成反例中更新备注未改变日志参数", Impact: "合成日志保留旧参数", Applicability: "隔离回馈实验", Boundary: "不代表实际业务规范", Evidence: []memory.ExperienceEvidence{{Kind: "business", Reference: "fixture:mixed-cues", Observation: "仅隔离回归"}}, Cues: []memory.ExperienceCue{{ID: "remark", Label: "备注变化", Text: "合成反例中更新备注未改变日志参数。", EvidenceRefs: []string{"fixture:mixed-cues"}, Matches: []memory.CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"WorkOrder.remark"}}}}, {ID: "log", Label: "日志入口", Text: "合成反例中日志参数保留了旧值。", EvidenceRefs: []string{"fixture:mixed-cues"}, Matches: []memory.CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"FeedbackLogBuilder.build"}}, {Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"生成回馈日志"}}}}}}}
 	if _, err := s.RecordExperience(testCtx, write); err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +101,7 @@ func TestReviewDirectAndObservedCueMergeOnceAndE2StillRequiresBody(t *testing.T)
 	}
 	write.Title = "Synthetic independent second experience"
 	write.Experience.Counterexample = "另一合成事务提交失败，关联状态未更新"
-	write.Experience.Cues = []memory.ExperienceCue{{ID: "cancel", Label: "取消状态", Text: "另一合成事务提交失败，关联状态未更新。", EvidenceRefs: []string{"fixture:mixed-cues"}, Entrances: []memory.CueEntrance{{Kind: "business_signal", Value: "取消"}}}}
+	write.Experience.Cues = []memory.ExperienceCue{{ID: "cancel", Label: "取消状态", Text: "另一合成事务提交失败，关联状态未更新。", EvidenceRefs: []string{"fixture:mixed-cues"}, Matches: []memory.CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"取消"}}}}}
 	if _, err := s.RecordExperience(testCtx, write); err != nil {
 		t.Fatal(err)
 	}

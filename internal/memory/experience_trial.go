@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
-	"strings"
 	"time"
 )
 
@@ -110,29 +109,12 @@ type ExperienceMatch struct {
 	CueID    string   `json:"cue_id"`
 	CueLabel string   `json:"-"`
 	CueText  string   `json:"-"`
-	Trigger  string   `json:"trigger,omitempty"`
+    EntranceComparison
 	ID       string   `json:"id"`
 	RootID   string   `json:"root_id"`
 	Entrance string   `json:"entrance"`
 	Objects  []string `json:"objects,omitempty"`
 	entry    *Entry
-}
-
-func literalExperienceMatch(text, term string) bool {
-	if strings.ContainsAny(term, "/\\") {
-		return strings.Contains(normalizedResource(text), normalizedResource(term))
-	}
-	ascii := true
-	for _, r := range term {
-		if r > 127 {
-			ascii = false
-			break
-		}
-	}
-	if ascii {
-		return identifierMatch(text, term)
-	}
-	return strings.Contains(strings.ToLower(text), strings.ToLower(term))
 }
 
 type ExperienceChallenge struct {

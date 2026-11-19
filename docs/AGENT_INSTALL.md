@@ -1,6 +1,6 @@
 # Install memory-mcp
 
-When an existing library predates schema 6, complete the [cue migration](#upgrade-to-the-cue-schema) before switching its service.
+When an existing library predates schema 7, complete the [cue migration](#upgrade-to-the-cue-schema) before switching its service.
 
 When the user requests installation/upgrade, identify the actual host and execution OS, service name, original data_dir, real project directory and stable scope from configuration. This document does not grant permission by itself. Never guess from the model name or create a replacement empty library.
 
@@ -23,18 +23,18 @@ memory_experience_record saves verified failure features; memory_reference_recor
 
 ## Upgrade to the cue schema
 
-Version 0.6.3 development builds use database schema 6 and integration protocol 7. Existing libraries must complete this step **before** setup or serve. New empty libraries start at schema 6.
+Version 0.6.3 development builds use database schema 7 and integration protocol 8. Existing libraries must complete this step **before** setup or serve. New empty libraries start at schema 7.
 
 1. Run the read-only preview.
 
        memory-mcp migrate --data-dir <original-library>
 
-   Review current_entries_needing_cues. The list contains existing experience and agreement IDs that have no cues. Existing cues are converted without changing their stored facts. Legacy selector fields are removed, and existing object identifier prefixes move to object_id_prefixes.
+   Review current_entries_needing_cues. The list contains existing experience and agreement IDs that have no cues. Schema 6 libraries keep their record IDs, evidence, cue IDs and delivery history. The migration replaces each cue's old typed entrances with matches groups containing literal strings and explicit operations. From schema 5 or earlier it also removes old selector fields and moves old object prefixes to object_id_prefixes.
 2. Stop every writer sharing the library. Back up the complete data directory and client configuration, then run migration with a new SQLite backup destination.
 
        memory-mcp migrate --data-dir <original-library> --apply --backup <new-backup.db>
 
-3. Run setup with the existing service name, data directory and project binding. The listed records remain readable as historical evidence. To activate one, verify its sources, create appropriate cues, and resubmit the same kind of record with that entry's ID as previous_id.
+3. Run setup with the existing service name, data directory and project binding. The listed records remain readable as historical evidence. To activate one, verify its sources, create appropriate cues, and resubmit the same kind of record with that entry's ID as previous_id. For new writes, copy the **Choose cue entrance matching** example from `memory-mcp guide`.
 
 ## Customize tool probes
 

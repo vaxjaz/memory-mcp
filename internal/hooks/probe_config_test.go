@@ -10,7 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/vaxjaz/memory-mcp/internal/memory"
+	"github.com/vaxjaz/memory-mcp/internal/matching"
+"github.com/vaxjaz/memory-mcp/internal/memory"
 )
 
 func saveProbeFixture(t *testing.T, dir string, config probeConfig) {
@@ -87,7 +88,7 @@ func TestWriteProbeExplainsPathAndTextRejections(t *testing.T) {
 
 	saveProbeFixture(t, store.Dir, probeConfig{Projects: map[string][]probeRule{
 		scope: {{Tool: "Write", Mode: "replace", TextFields: []string{"content"},
-			When: &probeCondition{Field: "input.file_path", Op: "suffix", Value: ".sql"}}},
+			When: &probeCondition{Field: "input.file_path", Rule: matching.Rule{Op:"suffix"}, Value: ".sql"}}},
 	}})
 	otherRepo := t.TempDir()
 	for path, block := range map[string]bool{"report.sql": true, "report.txt": false} {
@@ -176,7 +177,7 @@ func TestCustomProbeDispatchAndScope(t *testing.T) {
 	_, err = store.RecordExperience(testCtx, memory.ExperienceWrite{
 		Scope: "project:other", Project: other, Title: "Other scope test",
 		Experience: memory.Experience{
-			Cues: []memory.ExperienceCue{{ID: "admission", Label: "准入覆盖", Text: "Fixture counterexample", EvidenceRefs: []string{"other-scope"}, Entrances: []memory.CueEntrance{{Kind: "business_signal", Value: "LYN 创建准入"}}}}, Pitfall: "Fixture inference", Counterexample: "Fixture counterexample",
+			Cues: []memory.ExperienceCue{{ID: "admission", Label: "准入覆盖", Text: "Fixture counterexample", EvidenceRefs: []string{"other-scope"}, Matches: []memory.CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"LYN 创建准入"}}}}}, Pitfall: "Fixture inference", Counterexample: "Fixture counterexample",
 			Impact: "Fixture risk", Applicability: "Synthetic scope regression", Boundary: "Fixture only",
 			Evidence: []memory.ExperienceEvidence{{Kind: "runtime", Reference: "other-scope", Observation: "Isolated fixture"}},
 		},

@@ -34,7 +34,10 @@ def main():
         probes = {"context_facts": {scope: [
             {"name": "authenticated", "mcp_tool": "login",
              "key": ["input.service", "input.connection_id"],
-             "when": {"field": "result.ok", "op": "eq", "value": True}, "ttl_seconds": 60},
+             "when": {"all": [
+                 {"field": "result.ok", "op": "eq", "value": True},
+                 {"field": "result.state", "op": "contains", "value": "ready", "case_sensitive": False},
+             ]}, "ttl_seconds": 60},
         ]}, "projects": {scope: [
             {"mcp_tool": "warehouse_query", "mode": "replace", "branches": [
                 {"id": "change", "text_fields": ["sql", "note"], "when": {"all": [
@@ -74,8 +77,7 @@ def main():
                                       boundary="No database was queried",
                                       evidence=[dict(kind="runtime", reference="context-fixture", observation=body)],
                                       cues=[dict(cue_id="query", label="Context", text=body, evidence_refs=["context-fixture"],
-                                                 entrances=[dict(kind="code_symbol", value=v) for v in (
-                                                     "SettlementTarget", "ORDER UPDATE", "information_schema")])])))
+                                                 matches=[dict(op="token", entrances=["SettlementTarget", "ORDER UPDATE", "information_schema"])])])))
             assert "contextual_tool_probes" in host.tool("memory_bootstrap", {})["features"]
             identity = {"service": "fixture", "connection_id": "one"}
 
@@ -84,7 +86,8 @@ def main():
 
             def complete(call, success, **event):
                 return hook("PostToolUse", tool_name=login, tool_use_id=call, tool_input=identity,
-                            tool_response={"structuredContent": {"ok": success, "secret": "DO_NOT_STORE_RESPONSE"}}, **event)
+                            tool_response={"structuredContent": {"ok": success, "state": "LOGIN_READY",
+                                                                 "secret": "DO_NOT_STORE_RESPONSE"}}, **event)
 
             def run(sql="UPDATE SettlementTarget", connection="one", service="fixture", note="", **event):
                 dry_run = event.pop("dry_run", False)

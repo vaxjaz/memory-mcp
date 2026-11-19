@@ -3,9 +3,14 @@ package memory
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
+	"strings"
+
+	"github.com/vaxjaz/memory-mcp/internal/matching"
 )
 
 type MigrationEntry struct {
@@ -31,7 +36,7 @@ func InspectCueMigration(ctx context.Context, dir string) (MigrationReport, erro
 		return report, err
 	}
 	defer store.Close()
-	if err := store.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&report.FromSchema); err != nil {
+	if report.FromSchema, err = store.LibrarySchema(ctx); err != nil {
 		return report, err
 	}
 	if report.FromSchema > SchemaVersion {
@@ -123,4 +128,130 @@ UPDATE entries SET needs_review=1 WHERE current=1 AND id IN(
 		}
 	}
 	return nil
+}
+
+func migrateGroupedCues(tx *sql.Tx) error {
+	// This table is derived. migrateRecall rebuilds the new group-based index
+	// in the same transaction as the profile and schema changes.
+	if _, err := tx.Exec("DROP TABLE IF EXISTS experience_entrances"); err != nil {
+		return err
+	}
+	cursor := ""
+	for {
+		rows, err := tx.Query(`
+SELECT entry_id,profile_json FROM entry_profiles WHERE entry_id>? AND
+(json_type(profile_json,'$.experience.cues')='array' OR json_type(profile_json,'$.agreement.cues')='array')
+ORDER BY entry_id LIMIT 128`, cursor)
+		if err != nil {
+			return err
+		}
+		var batch [][2]string
+		for rows.Next() {
+			var row [2]string
+			if err = rows.Scan(&row[0], &row[1]); err != nil {
+				rows.Close()
+				return err
+			}
+			batch = append(batch, row)
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil || len(batch) == 0 {
+			return err
+		}
+		for _, row := range batch {
+			cursor = row[0]
+			raw, changed, err := groupProfileCues([]byte(row[1]))
+			if err != nil {
+				return fmt.Errorf("migrate cue entrances for %s: %w", row[0], err)
+			}
+			if changed {
+				if _, err = tx.Exec("UPDATE entry_profiles SET profile_json=? WHERE entry_id=?", string(raw), row[0]); err != nil {
+					return err
+				}
+			}
+		}
+	}
+}
+
+func groupProfileCues(raw []byte) ([]byte, bool, error) {
+	var profile map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &profile); err != nil {
+		return nil, false, err
+	}
+	changed := false
+	for _, field := range []string{"experience", "agreement"} {
+		if len(profile[field]) == 0 {
+			continue
+		}
+		var owner map[string]json.RawMessage
+		if err := json.Unmarshal(profile[field], &owner); err != nil {
+			return nil, false, err
+		}
+		if len(owner["cues"]) == 0 {
+			continue
+		}
+		var cues []map[string]json.RawMessage
+		if err := json.Unmarshal(owner["cues"], &cues); err != nil {
+			return nil, false, err
+		}
+		converted := false
+		for _, cue := range cues {
+			old, exists := cue["entrances"]
+			if !exists {
+				continue
+			}
+			if _, exists := cue["matches"]; exists {
+				return nil, false, errors.New("cue contains both entrance schemas")
+			}
+			var entries []struct {
+				Kind  string `json:"kind"`
+				Value string `json:"value"`
+			}
+			if err := json.Unmarshal(old, &entries); err != nil {
+				return nil, false, err
+			}
+			groups := make([]CueMatch, 0, len(entries))
+			for _, entrance := range entries {
+				rule := comparisonForOldEntrance(entrance.Kind, entrance.Value)
+				// Keep order, so the reported matching alias stays the same.
+				last := len(groups) - 1
+				if last >= 0 && groups[last].Rule == rule {
+					if !slices.Contains(groups[last].Entrances, entrance.Value) {
+						groups[last].Entrances = append(groups[last].Entrances, entrance.Value)
+					}
+				} else {
+					groups = append(groups, CueMatch{Rule: rule, Entrances: []string{entrance.Value}})
+				}
+			}
+			cue["matches"], _ = json.Marshal(groups)
+			delete(cue, "entrances")
+			converted = true
+		}
+		if converted {
+			owner["cues"], _ = json.Marshal(cues)
+			profile[field], _ = json.Marshal(owner)
+			changed = true
+		}
+	}
+	if !changed {
+		return raw, false, nil
+	}
+	out, err := json.Marshal(profile)
+	return out, true, err
+}
+
+func comparisonForOldEntrance(kind, value string) matching.Rule {
+	if kind == "business_signal" {
+		return matching.Rule{Op: "token", Normalize: "whitespace"}
+	}
+	if strings.ContainsAny(value, "/\\") {
+		return matching.Rule{Op: "contains", Normalize: "path"}
+	}
+	for _, char := range value {
+		if char > 127 {
+			return matching.Rule{Op: "contains"}
+		}
+	}
+	return matching.Rule{Op: "token"}
 }

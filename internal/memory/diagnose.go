@@ -39,6 +39,12 @@ func OpenReadOnly(dir string) (*Store, error) {
 	return &Store{db: db, Dir: absolute, readOnly: true}, nil
 }
 
+func (s *Store) LibrarySchema(ctx context.Context) (int, error) {
+	var version int
+	err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version)
+	return version, err
+}
+
 type ProbeEntry struct {
 	ID             string       `json:"id"`
 	IDLength       int          `json:"id_length"`

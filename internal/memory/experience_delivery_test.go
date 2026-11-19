@@ -1,6 +1,7 @@
 package memory
 
 import (
+"github.com/vaxjaz/memory-mcp/internal/matching"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -18,8 +19,8 @@ func deliveryFixture(t *testing.T) (*Store, string, ExperienceWrite) {
 	in.Experience.Counterexample = "隔离实验中备注更新后日志仍取旧文本；另一取值入口读取独立参数。"
 	in.Experience.Evidence = []ExperienceEvidence{{Kind: "business", Reference: "fixture:counterexample", Observation: "合成实验只验证投递协议，不是真实业务事故"}}
 	in.Experience.Cues = []ExperienceCue{
-		{ID: "remark", Label: "备注变化", Text: "隔离实验中备注更新后日志仍取旧文本。", EvidenceRefs: []string{"fixture:counterexample"}, Entrances: []CueEntrance{{Kind: "code_symbol", Value: "WorkOrder.remark"}, {Kind: "file", Value: "RemarkInput.java"}, {Kind: "business_signal", Value: "调整回馈备注"}}},
-		{ID: "log_input", Label: "取值入口", Text: "隔离实验中日志取值入口读取独立参数，未接入更新后的备注。", EvidenceRefs: []string{"fixture:counterexample"}, Entrances: []CueEntrance{{Kind: "code_symbol", Value: "FeedbackLogBuilder.build"}, {Kind: "file", Value: "FeedbackLogBuilder.java"}, {Kind: "business_signal", Value: "生成回馈日志"}}},
+		{ID: "remark", Label: "备注变化", Text: "隔离实验中备注更新后日志仍取旧文本。", EvidenceRefs: []string{"fixture:counterexample"}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"WorkOrder.remark"}}, {Rule:matching.Rule{Op:"token"},Entrances:[]string{"RemarkInput.java"}}, {Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"调整回馈备注"}}}},
+		{ID: "log_input", Label: "取值入口", Text: "隔离实验中日志取值入口读取独立参数，未接入更新后的备注。", EvidenceRefs: []string{"fixture:counterexample"}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"FeedbackLogBuilder.build"}}, {Rule:matching.Rule{Op:"token"},Entrances:[]string{"FeedbackLogBuilder.java"}}, {Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"生成回馈日志"}}}},
 	}
 	if _, err := s.RecordExperience(ctx, in); err != nil {
 		t.Fatal(err)
@@ -251,7 +252,7 @@ func TestDeliveryA11A27A29(t *testing.T) {
 	in.PreviousID = o.Items[0].ID
 	in.Experience.Cues = nil
 	for i := 0; i < 4; i++ {
-		in.Experience.Cues = append(in.Experience.Cues, ExperienceCue{ID: fmt.Sprintf("fact_%d", i), Label: "隔离关联", Text: fmt.Sprintf("合成条件%d：%s。", i, strings.Repeat("反例", 45)), EvidenceRefs: []string{"fixture:counterexample"}, Entrances: []CueEntrance{{Kind: "business_signal", Value: fmt.Sprintf("业务关联%d", i)}}})
+		in.Experience.Cues = append(in.Experience.Cues, ExperienceCue{ID: fmt.Sprintf("fact_%d", i), Label: "隔离关联", Text: fmt.Sprintf("合成条件%d：%s。", i, strings.Repeat("反例", 45)), EvidenceRefs: []string{"fixture:counterexample"}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{fmt.Sprintf("业务关联%d", i)}}}})
 	}
 	if _, e := s.RecordExperience(ctx, in); e != nil {
 		t.Fatal(e)
@@ -429,7 +430,7 @@ func TestDeliveryA21A24A28A39Atomic(t *testing.T) {
 	observeDelivery(t, s, "body", o)
 	alias := in
 	alias.Experience.Cues = append([]ExperienceCue(nil), in.Experience.Cues...)
-	alias.Experience.Cues[0].Entrances = append(append([]CueEntrance(nil), in.Experience.Cues[0].Entrances...), CueEntrance{Kind: "config", Value: "remark.sync.enabled"})
+	alias.Experience.Cues[0].Matches = append(append([]CueMatch(nil), in.Experience.Cues[0].Matches...), CueMatch{Rule:matching.Rule{Op:"token"},Entrances:[]string{"remark.sync.enabled"}})
 	saved, err := s.RecordExperience(ctx, alias)
 	if err != nil || saved.ID != o.Items[0].ID || !saved.Reused {
 		t.Fatal("A21", saved, err)
@@ -477,14 +478,14 @@ func TestDeliveryA21A24A28A39Atomic(t *testing.T) {
 		t.Fatal("failed index retired body")
 	}
 	// Pure business experience required no source file/class and is searchable.
-	if in.Experience.Evidence[0].Path != "" || in.Experience.Cues[0].Entrances[0].Kind == "" {
+	if in.Experience.Evidence[0].Path != "" || in.Experience.Cues[0].Matches[0].Op == "" {
 		t.Fatal("A24 fixture requires code or omitted its entrance")
 	}
 }
 
 func TestDeliveryA21CodeReferenceRelocation(t *testing.T) {
 	s, p, in := experienceFixture(t)
-	in.Experience.Cues = []ExperienceCue{{ID: "admission", Label: "准入入口", Text: "合成反例中，本地入口未覆盖另一调用方。", EvidenceRefs: []string{in.Experience.Evidence[0].Reference}, Entrances: []CueEntrance{{Kind: "code_symbol", Value: "canDispatchLynOrder"}}}}
+	in.Experience.Cues = []ExperienceCue{{ID: "admission", Label: "准入入口", Text: "合成反例中，本地入口未覆盖另一调用方。", EvidenceRefs: []string{in.Experience.Evidence[0].Reference}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"canDispatchLynOrder"}}}}}
 	saved, err := s.RecordExperience(ctx, in)
 	if err != nil {
 		t.Fatal(err)
@@ -500,7 +501,7 @@ func TestDeliveryA21CodeReferenceRelocation(t *testing.T) {
 	in.Experience.Evidence[0].SHA256 = ""
 	in.Experience.Evidence[0].Reference = "fixture:relocated-commit-line"
 	in.Experience.Cues[0].EvidenceRefs = []string{in.Experience.Evidence[0].Reference}
-	in.Experience.Cues[0].Entrances = append(in.Experience.Cues[0].Entrances, CueEntrance{Kind: "config", Value: "admission.fixture.enabled"})
+	in.Experience.Cues[0].Matches = append(in.Experience.Cues[0].Matches,CueMatch{Rule:matching.Rule{Op:"token"},Entrances:[]string{"admission.fixture.enabled"}})
 	again, err := s.RecordExperience(ctx, in)
 	if err != nil || again.ID != saved.ID || !again.Reused {
 		t.Fatal(again, err)

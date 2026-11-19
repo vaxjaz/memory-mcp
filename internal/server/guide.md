@@ -14,7 +14,7 @@ After a successful new write or revision, including an entrance-only update, tel
 
 To verify a direct trigger before calling it ready, use doctor --probe EVENT.json --expect RECORD_ID or an actual hook record that lists that cue. A result of a lookup alone verifies retrieval, separate from a direct trigger. The probe check is read-only and reports where to correct a miss. See **Check a trigger before using it** below.
 
-Use cues[].entrances for distinctive trigger phrases and identifiers. Optional object_id_prefixes belongs to the same-input business-result association only. A newer client can inspect an older library with memory-mcp migrate. When the migration report lists a record without cues, read its evidence, verify applicability, then submit a new cue with previous_id to activate the revised record.
+Use cues[].matches[].entrances for distinctive trigger phrases and identifiers. Optional object_id_prefixes belongs to the same-input business-result association only. Run memory-mcp migrate to inspect an older library. When the report lists a record without cues, verify its evidence and submit a revised cue with previous_id.
 
 Lookup task/questions come from the whole current task and concrete uncertainty. Supply 1-4 independent grounded queries, terms with match=all (default) or any. keywords remains compatible. Similar words and source locations do not establish applicability. Check current evidence; no hit does not prove no risk. Up to three complete items (default two) fit one JSON text body <=8 KiB. Follow next_cursor or refine queries; changed queries/corpus require restarting. Legacy excerpts are navigation; read freely for full historical source.
 
@@ -96,11 +96,35 @@ The following example uses fixture field names. Confirm the fields of the actual
 }
 ```
 
-Use input.<field> to read tool input and result.<field> in an observer to read the result object. The latter can be a direct object, MCP structuredContent or a single JSON-object text block. all, any and not can nest. Operators are exists, eq, prefix, suffix and token. eq compares a string, boolean or number without coercion. prefix and suffix are case-sensitive. token uses case-insensitive whole ASCII identifier matching. A comparison with a missing value or missing fact is unknown. Negating unknown keeps it unknown. Only true branches scan.
+Use input.<field> to read tool input and result.<field> in an observer to read the result object. The latter can be a direct object, MCP structuredContent or a single JSON-object text block. all, any and not can nest. Field operators are exists, eq, prefix, suffix, contains and token. eq compares a string, boolean or number without coercion. For strings, token is case-insensitive by default and the other operators are case-sensitive. Set case_sensitive explicitly to change that. A comparison with a missing value or missing fact is unknown. exists reports whether a field has a value. Negating unknown keeps it unknown. Only true branches scan.
 
 An observer needs matching native call IDs and an observed input boundary. Its key is an ordered tuple of up to four scalars; large IDs belong in strings. Facts are scoped by host, project, session/agent and context generation. Default lifetime is input; session retains an observed fact across inputs up to its TTL. TTL defaults to 120 seconds and is capped at 600. A late result cannot become a new input's fact. Only a hash of the key and the predicate outcome are stored; the original result is not saved.
 
 After adding a producer or consumer tool, run setup and restart to install the native matchers. doctor shows probe_context_fact_rules and checks Pre/Post dispatch configuration. doctor --session shows custom_probe_condition with branch outcomes passed, not_met or unknown and shows whether a result could be associated with its call. A result observer affects later calls.
+
+### Choose cue entrance matching
+
+A cue has matches groups. Each group holds the comparison options and an entrances array of literal strings. Any matching group can deliver the same cue. The strings are saved with their original case. Cue groups default to case_sensitive false and require an explicit op.
+
+```json
+{
+  "cue_id": "settlement_code",
+  "label": "Settlement field",
+  "text": "The two isolated environments returned different values for the same field.",
+  "evidence_refs": ["verified-source"],
+  "matches": [
+    {
+      "op": "token",
+      "case_sensitive": false,
+      "entrances": ["work_order_feedback_fix_second", "work_order_feedback_fix_third"]
+    }
+  ]
+}
+```
+
+Replace verified-source with the exact reference of your submitted evidence. Start with one group using token for known identifiers. token looks for the literal text with ASCII identifier boundaries. Underscores belong to the identifier. If you deliberately want a broader match, add a group such as {"op":"contains","case_sensitive":true,"entrances":["fix_Second"]}. It matches work_order_feedback_fix_Second and fix_Second_backup within one scanned field. eq compares the entire field. prefix and suffix compare the ends of the entire field.
+
+The optional normalize setting is path for matching slash styles or whitespace for ignoring Unicode whitespace. Rules keep punctuation unless it is a path separator being normalized. when conditions and result observers share these operations. For example, a when condition with field input.file_path, op suffix, value .sql and case_sensitive false accepts both .sql and .SQL. Context-fact lookup keys still compare exactly.
 
 ### Check a trigger before using it
 
@@ -114,6 +138,6 @@ Save a small representative PreToolUse sample with the event's tool_name and too
 memory-mcp doctor --host zcode --data-dir LIBRARY --project PROJECT --probe EVENT.json --expect RECORD_ID
 ```
 
-Use the full record ID from the write receipt. To require a specific cue within it, add --expect-cue CUE_ID. The example contains work_order_feedback_fix_third as one ASCII identifier. Use that full column for a direct match. A cue containing just fix_third matches the standalone identifier. Underscores belong to the identifier. A period can separate configuration key segments. Keep lookup and trigger checks separate.
+Use the full record ID from the write receipt. To require a specific cue within it, add --expect-cue CUE_ID. The example contains work_order_feedback_fix_third as one ASCII identifier. Register the full name with token, or use contains with a deliberate substring. Probe candidates and the trigger preview show the effective op, case_sensitive and normalization. Keep lookup and trigger checks separate.
 
 If the result is direct_match, the expected entry matched the sample. For a miss, next gives the first corrective step and steps shows branch conditions and scanned field metadata. Use --session SESSION_ID or the actual event identity to include saved facts from that session. The check examines on-disk dispatch configuration and uses the real matching path; use doctor --session after a native action to verify actual client delivery. The check executes no tool and writes no hook event, fact, challenge or receipt.

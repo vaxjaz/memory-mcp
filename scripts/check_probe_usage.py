@@ -36,7 +36,7 @@ def main():
                 applicability="Isolated CLI test", boundary="No business tool executed",
                 evidence=[dict(kind="runtime", reference="fixture", observation="Verified in the fixture")],
                 cues=[dict(cue_id="write", label="Fixture", text="The synthetic operation has an observable entrance.",
-                           evidence_refs=["fixture"], entrances=[dict(kind="code_symbol", value=entrance)])]))
+                           evidence_refs=["fixture"], matches=[dict(op="token", entrances=[entrance])])]))
         def snapshot():
             with closing(sqlite3.connect((data / "memory.db").as_uri() + "?mode=ro", uri=True)) as db:
                 return tuple(db.iterdump())
@@ -61,7 +61,7 @@ def main():
             assert snapshot() == before
 
             draft["previous_id"] = specific["id"]
-            draft["experience"]["cues"][0]["entrances"][0]["value"] = full
+            draft["experience"]["cues"][0]["matches"][0]["entrances"][0] = full
             updated = host.tool("memory_experience_record", draft)
             assert updated["id"] == specific["id"], updated
             before = snapshot()
@@ -74,6 +74,27 @@ def main():
             assert outside["steps"][0]["detail"]["outcome"] == "path_outside_project", outside
             assert check(updated["id"], path="example.txt")["steps"][0]["detail"]["outcome"] == "extension_mismatch"
             assert snapshot() == before and config.is_file()
+
+            draft["previous_id"] = updated["id"]
+            draft["experience"]["cues"][0]["matches"] = [
+                {"op": "contains", "case_sensitive": True, "entrances": ["fix_Second", "FIX_SECOND"]},
+            ]
+            sensitive = host.tool("memory_experience_record", draft)
+            assert sensitive["id"] == updated["id"], sensitive
+            assert [a["value"] for a in sensitive["trigger_preview"]["entrances"]] == ["fix_Second", "FIX_SECOND"]
+            assert check(sensitive["id"], content="UPDATE table SET work_order_feedback_fix_second=1")["outcome"] == "cue_missed"
+            upper = check(sensitive["id"], content="UPDATE table SET work_order_feedback_fix_Second=1")
+            assert upper["outcome"] == "direct_match", upper
+            chosen = next(row for row in upper["candidates"] if row["id"] == sensitive["id"])
+            assert chosen["op"] == "contains" and chosen["case_sensitive"] and chosen["entrance"] == "fix_Second", chosen
+
+            config_rules = json.loads(rules.read_text(encoding="utf-8"))
+            rule = config_rules["projects"][scope][0]
+            del rule["extensions"], rule["path_field"]
+            rule["when"] = {"field": "input.file_path", "op": "suffix", "value": ".sql", "case_sensitive": False}
+            rules.write_text(json.dumps(config_rules), encoding="utf-8")
+            uppercase_suffix = check(sensitive["id"], path="EXAMPLE.SQL", content="UPDATE table SET work_order_feedback_FIX_SECOND=1")
+            assert uppercase_suffix["outcome"] == "direct_match", uppercase_suffix
         finally:
             host.close()
     print("PASS: expected cue, whole identifier correction, actual routing, input diagnostics, and unchanged library")

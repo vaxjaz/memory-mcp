@@ -1,10 +1,10 @@
 # Experience delivery
 
-The 0.6.3 development build uses integration protocol 7 and database schema 6.
+The 0.6.3 development build uses integration protocol 8 and database schema 7.
 
 ## Writes and identity
 
-Experiences contain pitfall, counterexample, impact, applicability, boundary, 1-3 evidence locators and 1-12 cues. Each cue has stable cue_id, label (<=24 Unicode characters), a complete historical sentence (<=160), 1-3 evidence_refs present in the body and 1-12 directly evidenced entrances (code_symbol/file/config/business_signal). Pure business cases require no source file. Multiple aliases for one association share one cue. Do not turn dependencies into associations. The host verifies meaning; length and locators cannot certify semantic truth.
+Experiences contain pitfall, counterexample, impact, applicability, boundary, 1-3 evidence locators and 1-12 cues. Each cue has stable cue_id, label (<=24 Unicode characters), a complete historical sentence (<=160), 1-3 evidence_refs present in the body and 1-12 directly evidenced entrance strings across its matches groups. A group defines op, optional case_sensitive and optional normalize. Pure business cases require no source file. Multiple aliases for one association share one cue. Do not turn dependencies into associations. The host verifies meaning; length and locators cannot certify semantic truth.
 
 Visible experience facts stay <=3000 UTF-8 bytes, without truncation. Every cue fact is included in the first body; a material new risk cannot hide in a short reminder. Visible DTO omits recognition arrays, entrances, cue metadata and file hashes. Evidence and concrete source-drift indicators remain available. Titles are identity/navigation, not substitutes for a counterexample.
 
@@ -40,7 +40,7 @@ Use tool-probes.json in the original memory data directory to select literal too
 
 MCP calls no model. Hook process startup, SQLite, tool round trips and appended context cost time/tokens; there is no overwriteable memory slot. Narrow business observations preserve only identifier hashes and candidate IDs, and are invalidated independently on new inputs/context changes. Unknown tools, missing native IDs, absent hooks and unreported pruning remain gaps.
 
-Schema 6 requires an explicit upgrade. Inspect the library through memory-mcp migrate before setup. Existing cues retain their IDs and activation. Records without cues are marked for review and enter recall as historical evidence until revised with verified cues. The migration preserves source entries, revision links, evidence, bindings, policies and delivery history. See [migration steps](AGENT_INSTALL.md#upgrade-to-the-cue-schema).
+Schema 7 requires an explicit upgrade. Inspect the library through memory-mcp migrate before setup. Existing cues retain their IDs and activation. Records without cues are marked for review and enter recall as historical evidence until revised with verified cues. The migration preserves source entries, revision links, evidence, bindings, policies and delivery history. See [migration steps](AGENT_INSTALL.md#upgrade-to-the-cue-schema).
 
 See DELIVERY_ACCEPTANCE.md for actual measurements and unverified native/model boundaries. Deterministic replay is not evidence that an autonomous model used a counterexample.
 

@@ -1,5 +1,7 @@
 # 经验正文与关联点增量提醒：实施方案
 
+> Historical design notes. For the current grouped cue schema and examples, see [the installation guide](AGENT_INSTALL.md) and the embedded `memory-mcp guide`.
+
 状态：已按本方案实现 0.6.1-delivery.1。本文保留原始方案与基线快照；当前版本的实际验证与限制见 [DELIVERY_ACCEPTANCE.md](DELIVERY_ACCEPTANCE.md)。0.6.2 的 SQL 探针和 ZCode 回执规则见 [EXPERIENCE_TRIAL.md](EXPERIENCE_TRIAL.md)。
 
 编写日期：2026-11-17；最终校核：2026-11-18。目标代码库：`memory-mcp-upgrade`；经验 scope：`project:vaxjaz/vax-plan`。

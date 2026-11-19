@@ -1,6 +1,7 @@
 package hooks
 
 import (
+"github.com/vaxjaz/memory-mcp/internal/matching"
 	"encoding/json"
 	"regexp"
 	"strings"
@@ -13,7 +14,7 @@ func TestBusinessResultObservationWakesOnlySameObjectAndInput(t *testing.T) {
 	s, r, p := trialFixture(t)
 	saved, err := s.RecordAgreement(testCtx, memory.AgreementWrite{Scope: "project:demo", Project: p, Title: "isolated agreement reference", Agreement: memory.Agreement{
 		ObjectIDPrefixes: []string{"WXN"},
-		Cues:             []memory.ExperienceCue{{ID: "cancel", Label: "取消前核验", Text: "仅为隔离测试的核验约定", EvidenceRefs: []string{"fixture:confirmed-agreement"}, Entrances: []memory.CueEntrance{{Kind: "business_signal", Value: "取消 WXN-001"}}}},
+		Cues:             []memory.ExperienceCue{{ID: "cancel", Label: "取消前核验", Text: "仅为隔离测试的核验约定", EvidenceRefs: []string{"fixture:confirmed-agreement"}, Matches: []memory.CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"取消 WXN-001"}}}}},
 		Requirement:      "仅为隔离测试的核验约定", Applicability: "隔离工单处理", Boundary: "不覆盖审批撤回，不授予执行权限",
 		Authority: "isolated fixture owner", ConfirmationReference: "fixture:confirmed-agreement",
 		Evidence: []memory.ExperienceEvidence{{Kind: "business", Reference: "fixture:confirmed-agreement", Observation: "explicitly synthetic test agreement"}},

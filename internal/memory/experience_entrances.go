@@ -6,6 +6,8 @@ import (
 	"errors"
 	"sort"
 	"strings"
+
+"github.com/vaxjaz/memory-mcp/internal/matching"
 )
 
 func indexExperienceEntrances(ctx context.Context, tx *sql.Tx, e Entry) error {
@@ -30,13 +32,15 @@ func indexExperienceEntrances(ctx context.Context, tx *sql.Tx, e Entry) error {
 			return err
 		}
 	}
-	for _, c := range cues {
-		for _, a := range c.Entrances {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO experience_entrances VALUES(?,?,?,?,?,?)", e.ID, c.ID, a.Kind, a.Value, humanSignalKey(normalizedResource(a.Value)), e.Scope); err != nil {
-				return err
-			}
-		}
-	}
+    for _, c := range cues {
+        for index, group := range c.Matches {
+            for _, value := range group.Entrances {
+                if _, err := tx.ExecContext(ctx, "INSERT INTO experience_entrances VALUES(?,?,?,?,?,?)", e.ID,c.ID,index,value,humanSignalKey(normalizedResource(value)),e.Scope); err != nil {
+                    return err
+                }
+            }
+        }
+    }
 	return nil
 }
 
@@ -65,9 +69,9 @@ func (s *Store) MatchExperiences(ctx context.Context, scope string, clues ...str
 	if len(ids) > 2000 {
 		return nil, errors.New("entrance scan limit; refusing incomplete candidate list")
 	}
-	texts := make([]humanSignalText, len(clues))
+	texts := make([]*matching.Text, len(clues))
 	for i, field := range clues {
-		texts[i] = newHumanSignalText(field)
+		texts[i] = matching.NewText(field)
 	}
 	for _, id := range ids {
 		r, er := s.Read(ctx, id)
@@ -78,25 +82,20 @@ func (s *Store) MatchExperiences(ctx context.Context, scope string, clues ...str
 		if !e.Current || e.NeedsReview || e.State.State != "active" || profileExpired(e.Profile) {
 			continue
 		}
-		for _, c := range entryCues(e) {
-			for _, a := range c.Entrances {
-				matched := false
-				for _, text := range texts {
-					if a.Kind == "business_signal" {
-						matched = text.matches(a.Value)
-					} else {
-						matched = literalExperienceMatch(text.original, a.Value)
-					}
-					if matched {
-						break
-					}
-				}
-				if matched {
-					out = append(out, ExperienceMatch{ID: e.ID, RootID: e.RootID, CueID: c.ID, CueLabel: c.Label, CueText: c.Text, Entrance: a.Value, Trigger: a.Kind, entry: &e})
-					break
-				}
-			}
-		}
+    cues:
+        for _, c := range entryCues(e) {
+            for _, group := range c.Matches {
+                for _, value := range group.Entrances {
+                    for _, text := range texts {
+                        if group.MatchText(text,value,false) {
+                            out=append(out,ExperienceMatch{ID:e.ID,RootID:e.RootID,CueID:c.ID,CueLabel:c.Label,
+                                CueText:c.Text,Entrance:value,EntranceComparison:group.comparison(),entry:&e})
+                            continue cues
+                        }
+                    }
+                }
+            }
+        }
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].ID != out[j].ID {

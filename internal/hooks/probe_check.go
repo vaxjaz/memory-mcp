@@ -105,6 +105,18 @@ func checkProbe(ctx context.Context, store *memory.Store, o probeCheckOptions, e
 		}
 		return report, nil
 	}
+	version, err := store.LibrarySchema(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if version != memory.SchemaVersion {
+		report["schema_version"] = version
+		report["supported_schema"] = memory.SchemaVersion
+		if version < memory.SchemaVersion {
+			return result("schema_upgrade_required", "Run memory-mcp migrate to inspect the existing library before trying the probe check.")
+		}
+		return result("schema_too_new", "Use the program version that supports this library schema.")
+	}
 	scope, err := store.HookResolve(ctx, e.CWD)
 	if err != nil || o.Scope != "" && o.Scope != scope {
 		return result("project_binding_mismatch", "Use the sample's actual cwd and the matching library/scope from the existing setup.")
@@ -196,7 +208,7 @@ func checkProbe(ctx context.Context, store *memory.Store, o probeCheckOptions, e
 	if next := probeInputAdvice(steps); next != "" {
 		return result("cue_missed", next)
 	}
-	return result("cue_missed", "Check the saved entrance against the scanned field. ASCII code/config entrances use whole identifier boundaries. Register the actual full identifier and rerun this check.")
+	return result("cue_missed", "Compare the saved entrance and its operation/case policy with the scanned field. For token use the full identifier; for a deliberate substring use contains. Rerun this check.")
 }
 
 func probeInputAdvice(steps []probeCheckStep) string {

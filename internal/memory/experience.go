@@ -67,7 +67,8 @@ type TriggerPreview struct {
 
 type PreviewEntrance struct {
 	CueID string `json:"cue_id"`
-	CueEntrance
+	Value string `json:"value"`
+	EntranceComparison
 }
 
 type EvidenceLocation struct {
@@ -290,12 +291,14 @@ func PreviewTriggers(e Entry) TriggerPreview {
 	default:
 		out.RecordStatus = "no_entrances"
 		const maxPreviewEntrances = 4
-		for _, cue := range entryCues(e) {
-			out.EntranceCount += len(cue.Entrances)
-			for _, entrance := range cue.Entrances[:min(len(cue.Entrances), maxPreviewEntrances-len(out.Entrances))] {
-				out.Entrances = append(out.Entrances, PreviewEntrance{CueID: cue.ID, CueEntrance: entrance})
-			}
-		}
+        for _, cue := range entryCues(e) {
+            for _, group := range cue.Matches {
+                out.EntranceCount += len(group.Entrances)
+                for _, entrance := range group.Entrances[:min(len(group.Entrances), maxPreviewEntrances-len(out.Entrances))] {
+                    out.Entrances = append(out.Entrances, PreviewEntrance{CueID:cue.ID, Value:entrance, EntranceComparison:group.comparison()})
+                }
+            }
+        }
 		if out.EntranceCount > 0 {
 			out.RecordStatus = "eligible"
 		}
