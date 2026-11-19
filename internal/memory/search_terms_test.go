@@ -90,3 +90,42 @@ func TestOverlongContextSearchKeepsDirectoryAndExplicitlyReportsNoSearch(t *test
 		t.Fatal("direct search lost its total-length bound")
 	}
 }
+
+func TestHistoricalSearchPaginationKeepsRawSortKeys(t *testing.T) {
+	s := testStore(t)
+	for _, fixture := range []struct{ name, id, created string }{
+		{"short-id", "legacy-anchor", "2026-11-02T10:00:00Z"},
+		{"legacy-date", strings.Repeat("f", 32), "2026-11-02 10:00:00"},
+		{"empty-date", strings.Repeat("f", 31) + "e", ""},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			scope := "project:" + fixture.name
+			olderTime := "2026-10-01T10:00:00Z"
+			if fixture.created == "" {
+				olderTime = ""
+			}
+			for _, record := range [][2]string{{fixture.id, fixture.created}, {"earlier-" + fixture.name, olderTime}} {
+				id, created := record[0], record[1]
+				if _, err := s.db.ExecContext(ctx, `
+INSERT INTO entries(id,root_id,previous_id,kind,scope,title,body,origin,source_ref,host,model,session,created_at,current,needs_review)
+VALUES(?,?, '','record',?,'Legacy cursor fixture','legacy_cursor_marker','user_supplied','isolated fixture','','','',?,1,0)
+`, id, id, scope, created); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, query := range []string{"", "legacy_cursor_marker"} {
+				input := SearchInput{Scope: scope, Query: query, Limit: 1}
+				first, err := s.SearchPage(ctx, input)
+				if err != nil || !first.HasMore || first.NextCursor == "" || first.Results[0].ID != fixture.id {
+					t.Fatal(first, err)
+				}
+				input.Cursor = first.NextCursor
+				second, err := s.SearchPage(ctx, input)
+				if err != nil || second.HasMore || second.NextCursor != "" || len(second.Results) != 1 ||
+					second.Results[0].ID != "earlier-"+fixture.name {
+					t.Fatal(second, err)
+				}
+			}
+		})
+	}
+}

@@ -252,7 +252,7 @@ def main():
         if args.scenario=='iserror':
             state['native_failure_event_observed']=state['faulted_challenges']>0
             state['native_transport_pass']=bool(state.get('exit_code')==0 and state['stage']==4 and state['generated_receipts']==1 and state['native_body_receipts']==0 and state['native_cue_records']==0)
-            state['failure_boundary']='No false delivery credit. This Codex build emits no matching failure event; the technical deadline, not immediate event release, is the fallback.'
+            state['failure_boundary']='No false delivery credit. This Codex build emits no matching failure event. An existing challenge does not request another lookup during retries.'
         if args.scenario=='lifecycle':state['native_transport_pass']=bool(state.get('exit_code')==0 and state.get('continued_block_count')==1 and state.get('native_compact_generation_changed') and state['native_body_receipts']==2 and state['stage']==12)
         if args.scenario=='business':
             state['business_envelope']=args.business_envelope

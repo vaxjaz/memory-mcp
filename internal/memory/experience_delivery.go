@@ -60,6 +60,8 @@ CREATE TABLE IF NOT EXISTS experience_body_deliveries(consumer TEXT NOT NULL,roo
 CREATE TABLE IF NOT EXISTS experience_cue_deliveries(consumer TEXT NOT NULL,root_id TEXT NOT NULL,entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,cue_id TEXT NOT NULL,status TEXT NOT NULL,emission_id TEXT NOT NULL,owner TEXT NOT NULL,PRIMARY KEY(consumer,entry_id,cue_id));
 CREATE TABLE IF NOT EXISTS experience_response_receipts(id TEXT PRIMARY KEY,scope TEXT NOT NULL,project TEXT NOT NULL,challenge_id TEXT NOT NULL,items_digest TEXT NOT NULL,items_json TEXT NOT NULL,observed_consumer TEXT NOT NULL DEFAULT '',call_id TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS experience_lookup_calls(host TEXT NOT NULL,scope TEXT NOT NULL,session TEXT NOT NULL,call_id TEXT NOT NULL,tool TEXT NOT NULL,project TEXT NOT NULL,generation TEXT NOT NULL,consumer TEXT NOT NULL,challenge_id TEXT NOT NULL,receipt_id TEXT NOT NULL DEFAULT '',PRIMARY KEY(host,scope,session,call_id));
+CREATE INDEX IF NOT EXISTS experience_response_receipts_challenge ON experience_response_receipts(challenge_id);
+CREATE INDEX IF NOT EXISTS experience_lookup_calls_challenge ON experience_lookup_calls(challenge_id);
 CREATE TABLE IF NOT EXISTS experience_entrances(entry_id TEXT NOT NULL REFERENCES entries(id) ON DELETE CASCADE,cue_id TEXT NOT NULL,match_group INTEGER NOT NULL,value TEXT NOT NULL,match_key TEXT NOT NULL,scope TEXT NOT NULL,PRIMARY KEY(entry_id,cue_id,match_group,value));
 INSERT INTO experience_delivery_protocol VALUES(1,1) ON CONFLICT(id)DO NOTHING;`); err != nil {
 		return err
@@ -161,13 +163,6 @@ func (s *Store) ChallengeExperience(ctx context.Context, host, scope, session, n
 		return out, err
 	}
 	project = binding
-	consumer, generation, err := s.deliveryContext(ctx, host, scope, session, project)
-	if errors.Is(err, sql.ErrNoRows) {
-		return out, nil
-	}
-	if err != nil {
-		return out, err
-	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return out, err
@@ -178,6 +173,16 @@ func (s *Store) ChallengeExperience(ctx context.Context, host, scope, session, n
 	if _, err = tx.ExecContext(ctx, "UPDATE experience_delivery_protocol SET version=version WHERE id=1"); err != nil {
 		return out, err
 	}
+	var generation string
+	err = tx.QueryRowContext(ctx, "SELECT generation FROM experience_epochs WHERE host=? AND scope=? AND session=?", host, scope, session).Scan(&generation)
+	if errors.Is(err, sql.ErrNoRows) {
+		return out, nil
+	}
+	if err != nil {
+		return out, err
+	}
+	consumer := deliveryConsumer(host, scope, session, project, generation)
+
 	var facts []DeliveryFact
 	for _, m := range matches {
 		var valid int
@@ -220,25 +225,36 @@ func (s *Store) ChallengeExperience(ctx context.Context, host, scope, session, n
 		}
 		sort.Strings(keys)
 		candidateKey := digestText(strings.Join(keys, "\n"))
-		var id, created string
-		var faulted bool
-		err = tx.QueryRowContext(ctx, "SELECT id,created_at,faulted FROM experience_challenges WHERE consumer=? AND candidate_key=?", consumer, candidateKey).Scan(&id, &created, &faulted)
+		var id string
+		err = tx.QueryRowContext(ctx, "SELECT id FROM experience_challenges WHERE consumer=? AND candidate_key=?", consumer, candidateKey).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			// A confirmed page can remove part of the original candidate set;
+			// another cue can refer to the same experience body.
+			// Continue the existing lookup when it already covers every remaining body.
+			ids := make([]string, 0, len(selected))
+			for _, match := range selected {
+				ids = append(ids, match.ID)
+			}
+			wanted, _ := json.Marshal(ids)
+			err = tx.QueryRowContext(ctx, `
+SELECT c.id FROM experience_challenges c WHERE c.consumer=? AND NOT EXISTS (
+  SELECT 1 FROM json_each(?) wanted WHERE NOT EXISTS (
+    SELECT 1 FROM json_each(c.ids_json) prior WHERE json_extract(prior.value,'$.id')=wanted.value
+  )
+) ORDER BY c.created_at DESC,c.id LIMIT 1`, consumer, string(wanted)).Scan(&id)
+		}
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			return out, err
 		}
 		if err == nil {
-			at, e := time.Parse(time.RFC3339Nano, created)
-			// A stuck technical request fails open. It never becomes a delivery and
-			// never schedules another reminder on new turns or elapsed cooldowns.
-			if faulted || e != nil || time.Since(at) > ExperienceChallengeTTL {
-				out.Outcome = "fault_fail_open_not_delivered"
-				return out, tx.Commit()
+			status, err := readChallengeStatus(ctx, tx, id)
+			if err != nil {
+				return out, err
 			}
-			out.ID = id
-			out.Matches = selected
-			out.Outcome = "query_required"
+			out.ID, out.Matches, out.Outcome = id, selected, status.Stage
 			return out, tx.Commit()
 		}
+
 		id = experienceNonce()
 		if id == "" {
 			return out, errors.New("cannot create challenge")
@@ -249,7 +265,7 @@ func (s *Store) ChallengeExperience(ctx context.Context, host, scope, session, n
 		}
 		out.ID = id
 		out.Matches = selected
-		out.Outcome = "query_required"
+		out.Outcome = ChallengeQueryRequired
 		return out, tx.Commit()
 	}
 	emission := experienceNonce()

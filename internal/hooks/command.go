@@ -41,9 +41,10 @@ func Run(ctx context.Context, args []string) error {
 	dry := fs.Bool("dry-run", false, "show setup targets without writing config or opening the database")
 	checkText := fs.Bool("check-text", false, "doctor: scan stored text for invalid UTF-8/U+FFFD without changing it")
 	var session string
-	var probeFile, expectedRecord, expectedCue string
+	var probeFile, expectedRecord, expectedCue, challengeID string
 	if cmd == "doctor" {
 		fs.StringVar(&session, "session", "", "limit recent hook events to this exact session ID")
+		fs.StringVar(&challengeID, "challenge", "", "read-only delivery status for a full challenge ID")
 		fs.StringVar(&probeFile, "probe", "", "read-only probe check from event JSON file, or - for stdin")
 		fs.StringVar(&expectedRecord, "expect", "", "with --probe, check whether this full record ID directly matches")
 		fs.StringVar(&expectedCue, "expect-cue", "", "with --expect, check this specific cue ID")
@@ -57,6 +58,9 @@ func Run(ctx context.Context, args []string) error {
 	}
 	if fs.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
+	}
+	if challengeID != "" && probeFile != "" {
+		return errors.New("--challenge and --probe are separate read-only checks")
 	}
 	if expectedRecord != "" && probeFile == "" || expectedCue != "" && expectedRecord == "" {
 		return errors.New("--expect requires --probe and --expect-cue requires --expect")
@@ -110,6 +114,23 @@ func Run(ctx context.Context, args []string) error {
 		if err != nil {
 			return fail(err)
 		}
+	}
+	if challengeID != "" {
+		store, err := memory.OpenReadOnly(*dir)
+		if err != nil {
+			return err
+		}
+		defer store.Close()
+		status, err := store.ExperienceChallengeStatus(ctx, challengeID)
+		if err != nil {
+			return err
+		}
+		if *scope != "" && status.Scope != *scope || session != "" && status.Session != session {
+			return errors.New("challenge does not match the requested scope or session")
+		}
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		return encoder.Encode(status)
 	}
 	if probeFile != "" {
 		return runProbeCheck(ctx, probeCheckOptions{File: probeFile, Adapter: adapter, Config: *config, Dir: *dir,

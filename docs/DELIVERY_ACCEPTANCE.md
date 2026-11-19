@@ -122,3 +122,9 @@ Migration from the actual dev.10 binary preserves schema 8 entries, existing mat
 The Windows executable's real MCP tool catalog lists admission as required for experience writes. Isolated stdio tests reject missing, null, blank and mismatched admission with an identical SQLite snapshot before and after each rejected call. New writes and previous_id revisions pass with a specific future judgment and an exact evidence reference. The extra text stays out of the stored body.
 
 The actual dev.11 executable created a disposable schema 9 library and a request ID. Dev.12 opens it directly, reads the old entry unchanged, rejects the bare retry, and returns the original record for an admitted retry. These tests verify the server boundary. They do not measure how a live model classifies a correction.
+
+## 0.6.3-dev.13 challenge retries and historical cursors
+
+Two simultaneous Windows hook processes issuing matching test/dev tool calls now receive one forced lookup and share one challenge. Distinct candidate sets are still eligible for their own lookup. A challenge stays pending if the server generates a result without an observed Post receipt. Covered retries proceed across process restart and session resume, and the eventual receipt credits only the actual returned records. A partial result continues with the original challenge and cursor. Doctor reads one challenge by ID and exposes the current stage without changing SQLite.
+
+The dev.12 Windows executable reproduced invalid next_cursor responses across short legacy IDs, old timestamp formatting and an empty timestamp. Dev.13 uses the original stored sort key for pagination. The executable reaches the last page for both empty and fixed-keyword queries, and the 33-record cleanup inventory returns all 33 distinct IDs. Ranked lookup paging and changed-filter rejection remain covered separately.

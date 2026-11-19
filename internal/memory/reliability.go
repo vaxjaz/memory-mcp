@@ -87,7 +87,7 @@ func decodeCursor(value, filter string) (pageCursor, error) {
 	if err != nil {
 		return c, errors.New("invalid pagination cursor")
 	}
-	if err = json.Unmarshal(b, &c); err != nil || c.Version != 1 || c.Filter != filter || len(c.ID) != 32 || c.Sort == "" {
+	if err = json.Unmarshal(b, &c); err != nil || c.Version != 1 || c.Filter != filter || c.ID == "" {
 		return c, errors.New("invalid cursor or changed query; start a fresh search/read")
 	}
 	return c, nil

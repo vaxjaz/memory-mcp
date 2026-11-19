@@ -13,7 +13,7 @@ type CleanupInput struct {
 	RequestID        string                    `json:"request_id,omitempty" jsonschema:"confirm only: stable ID for this exact submission"`
 	Action           string                    `json:"action" jsonschema:"inspect, configure, preview, confirm, read_plan, apply, undo, defer, acknowledge or recheck_sources. Apply/undo ONLY after user reviews and explicitly approves the exact displayed plan."`
 	Scope            string                    `json:"scope"`
-	Cursor           string                    `json:"cursor,omitempty"`
+	Cursor           string                    `json:"cursor,omitempty" jsonschema:"inspect only: pass inventory.next_cursor for the next inventory page. For inventory.review_next_cursor use memory_search with the same scope and needs_review=true."`
 	Operations       []memory.CleanupOperation `json:"operations,omitempty"`
 	PlanID           string                    `json:"plan_id,omitempty"`
 	Policy           *memory.MaintenanceConfig `json:"policy,omitempty" jsonschema:"Translate an actual user instruction such as every N changes, after N more changes, or disable; echo settings to user"`

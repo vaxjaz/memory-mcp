@@ -22,7 +22,6 @@ func TestReviewBusinessRecordBoundariesAcrossMCPEnvelopes(t *testing.T) {
 			}
 			start := event("UserPromptSubmit", p, "record-boundary", "")
 			start.TurnID = "turn"
-			handle(t, r, start)
 			post := event("PostToolUse", p, start.Session, "")
 			post.TurnID = "turn"
 			post.Tool = "mcp__office__query_orders"
@@ -40,10 +39,12 @@ func TestReviewBusinessRecordBoundariesAcrossMCPEnvelopes(t *testing.T) {
 			case "mcp-json":
 				post.Response = map[string]any{"content": []any{map[string]any{"type": "text", "text": string(encoded)}}}
 			}
-			if out := handle(t, r, post); len(out) != 0 {
-				t.Fatal("source injected context", out)
-			}
 			for _, id := range []string{"WXN-002", "WXN-001", "WXN-003"} {
+                // Each row must match on its own before any shared challenge exists.
+                start.Session = "record-boundary-"+id
+                post.Session = start.Session
+                handle(t,r,start)
+                if out:=handle(t,r,post);len(out)!=0 {t.Fatal("source injected context",out)}
 				q := event("PreToolUse", p, start.Session, "")
 				q.TurnID = "turn"
 				q.Tool = "mcp__mysql__query"

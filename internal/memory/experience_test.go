@@ -1,8 +1,8 @@
 package memory
 
 import (
-"github.com/vaxjaz/memory-mcp/internal/matching"
 	"encoding/json"
+	"github.com/vaxjaz/memory-mcp/internal/matching"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +22,7 @@ func experienceFixture(t *testing.T) (*Store, string, ExperienceWrite) {
 		t.Fatal(err)
 	}
 	in := ExperienceWrite{Scope: "project:demo", Project: project, Title: "多入口准入覆盖风险", Admission: &ExperienceAdmission{FutureDecision: "跨入口改动时逐个核对调用路径是否覆盖。", EvidenceRef: "isolated fixture; not production"}, Experience: Experience{
-		Cues:           []ExperienceCue{{ID: "admission", Label: "核验多个入口", Text: "隔离实验发现另一入口不经过本次检查。", EvidenceRefs: []string{"isolated fixture; not production"}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"canDispatchLynOrder"}}, {Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"LYN 创建准入"}}}}},
+		Cues:           []ExperienceCue{{ID: "admission", Label: "核验多个入口", Text: "隔离实验发现另一入口不经过本次检查。", EvidenceRefs: []string{"isolated fixture; not production"}, Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"canDispatchLynOrder"}}, {Rule: matching.Rule{Op: "token", Normalize: "whitespace"}, Entrances: []string{"LYN 创建准入"}}}}},
 		Pitfall:        "在眼前调用处添加校验就能覆盖所有入口",
 		Counterexample: "调查发现另一个入口不经过该调用处；本测试仅验证机制，不宣称模型推理正确",
 		Impact:         "要求全入口一致的规则可能只在部分入口生效",
@@ -98,7 +98,7 @@ func TestExperienceAdmissionRejectsDriftAndEscapingSources(t *testing.T) {
 		t.Fatal("accepted unsupported generic lesson")
 	}
 	in.Experience.Counterexample = "explicit observed counterexample"
-	in.Experience.Cues[0].Matches = []CueMatch{{Rule:matching.Rule{Op:"contains"},Entrances:[]string{"代码"}}}
+	in.Experience.Cues[0].Matches = []CueMatch{{Rule: matching.Rule{Op: "contains"}, Entrances: []string{"代码"}}}
 	if _, err := s.RecordExperience(ctx, in); err == nil {
 		t.Fatal("accepted generic automatic anchor")
 	}
@@ -150,25 +150,29 @@ func TestExperienceChallengeUsesNativeDeliveryNotTurnOrGeneration(t *testing.T) 
 	matches, _ := s.MatchExperiences(ctx, in.Scope, "LYN 创建准入")
 	s.ExperienceStartTurn(ctx, "codex", in.Scope, "session", "turn-1", "event-1")
 	c, err := s.ChallengeExperience(ctx, "codex", in.Scope, "session", "turn-1", project, matches)
-	if err != nil || c.ID == "" {
+	if err != nil || c.ID == "" || c.Outcome != ChallengeQueryRequired {
 		t.Fatal(c, err)
 	}
 	s.ExperienceStartTurn(ctx, "codex", in.Scope, "session", "turn-2", "event-2")
 	again, _ := s.ChallengeExperience(ctx, "codex", in.Scope, "session", "turn-2", project, matches)
-	if again.ID != c.ID {
+	if again.ID != c.ID || again.Outcome != "query_requested" {
 		t.Fatal("new turn reset delivery/challenge")
 	}
 	input := ExperienceLookup{Scope: in.Scope, Task: "current task reconstructed from conversation", Questions: "check current conditions", Keywords: []string{"LYN"}, ChallengeID: c.ID}
 	if err = s.BeginExperienceLookup(ctx, "codex", in.Scope, "session", project, "lookup-1", "lookup", c.ID); err != nil {
 		t.Fatal(err)
 	}
+	inflight, err := s.ExperienceChallengeStatus(ctx, c.ID)
+	if err != nil || inflight.Stage != "lookup_in_progress" {
+		t.Fatal(inflight, err)
+	}
 	out, err := s.LookupExperience(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
 	still, _ := s.ChallengeExperience(ctx, "codex", in.Scope, "session", "turn-2", project, matches)
-	if still.ID != c.ID {
-		t.Fatal("generated response released gate")
+	if still.ID != c.ID || still.Outcome != "response_pending_observation" {
+		t.Fatal("generated response became delivery or required another lookup", still)
 	}
 	if err = s.ObserveExperienceLookup(ctx, "codex", in.Scope, "session", "lookup-1", "lookup", out); err != nil {
 		t.Fatal(err)
@@ -177,7 +181,15 @@ func TestExperienceChallengeUsesNativeDeliveryNotTurnOrGeneration(t *testing.T) 
 	if allowed.ID != "" || allowed.Context != "" {
 		t.Fatal("native receipt not recognized", allowed)
 	}
+	confirmed, err := s.ExperienceChallengeStatus(ctx, c.ID)
+	if err != nil || confirmed.Stage != "delivered" {
+		t.Fatal(confirmed, err)
+	}
 	s.ExperienceAfterCompact(ctx, "codex", in.Scope, "session")
+	stale, err := s.ExperienceChallengeStatus(ctx, c.ID)
+	if err != nil || stale.Stage != "stale_context" {
+		t.Fatal(stale, err)
+	}
 	fresh, _ := s.ChallengeExperience(ctx, "codex", in.Scope, "session", "turn-2", project, matches)
 	if fresh.ID == "" || fresh.ID == c.ID {
 		t.Fatal("compact reused old delivery")
@@ -190,33 +202,42 @@ func TestExperienceChallengeConcurrencyAndExpiry(t *testing.T) {
 	matches, _ := s.MatchExperiences(ctx, in.Scope, "LYN 创建准入")
 	s.ExperienceStartTurn(ctx, "zcode", in.Scope, "session", "", "native-event")
 	var wg sync.WaitGroup
-	ids := make(chan string, 8)
-	for i := 0; i < 8; i++ {
+	results := make(chan ExperienceChallenge, 8)
+	for i := 0; i < cap(results); i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			c, err := s.ChallengeExperience(ctx, "zcode", in.Scope, "session", "", project, matches)
 			if err != nil {
-				ids <- err.Error()
-			} else {
-				ids <- c.ID
+				t.Error(err)
 			}
+			results <- c
 		}()
 	}
 	wg.Wait()
-	close(ids)
+	close(results)
 	first := ""
-	for id := range ids {
+	requests := 0
+	for c := range results {
 		if first == "" {
-			first = id
+			first = c.ID
 		}
-		if id == "" || id != first {
-			t.Fatal("parallel searches created independent gates", id, first)
+		if c.ID == "" || c.ID != first {
+			t.Fatal("parallel searches created independent gates", c.ID, first)
+		}
+		if c.Outcome == ChallengeQueryRequired {
+			requests++
+		} else if c.Outcome != "query_requested" {
+			t.Fatal(c)
 		}
 	}
+	if requests != 1 {
+		t.Fatalf("parallel search requested lookup %d times", requests)
+	}
+
 	s.db.ExecContext(ctx, "UPDATE experience_challenges SET created_at=?", time.Now().Add(-3*time.Minute).UTC().Format(time.RFC3339Nano))
 	expired, err := s.ChallengeExperience(ctx, "zcode", in.Scope, "session", "", project, matches)
-	if err != nil || expired.ID != "" || expired.Outcome != "fault_fail_open_not_delivered" {
+	if err != nil || expired.ID != first || expired.Outcome != "expired_not_delivered" {
 		t.Fatal(expired, err)
 	}
 	var completed bool

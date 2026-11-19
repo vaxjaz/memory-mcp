@@ -82,7 +82,7 @@ func TestDeliveryA01ToA10A18A23A26A34A37A38A41A42(t *testing.T) {
 	if lookup.ChallengeOutcome != "response_generated" || len(lookup.Items) != 1 || strings.Contains(string(bytes), "entrances") || strings.Contains(string(bytes), "anchor_prefixes") {
 		t.Fatal("A03/A34", string(bytes))
 	}
-	if c := probeDelivery(t, s, p, "WorkOrder.remark"); c.ID != first.ID {
+	if c := probeDelivery(t, s, p, "WorkOrder.remark"); c.ID != first.ID || c.Outcome != "response_pending_observation" {
 		t.Fatal("A12 generation falsely delivered")
 	}
 	observeDelivery(t, s, "first", lookup)
@@ -179,7 +179,7 @@ func TestDeliveryA16ActualPageOnly(t *testing.T) {
 		t.Fatal("unreturned page credited", delivered)
 	}
 	remaining := probeDelivery(t, s, p, "WorkOrder.remark")
-	if remaining.ID == "" || len(remaining.Matches) != 1 || remaining.Matches[0].ID == page.Items[0].ID {
+	if remaining.ID != c.ID || remaining.Outcome != "partial_delivery" || len(remaining.Matches) != 1 || remaining.Matches[0].ID == page.Items[0].ID {
 		t.Fatal("A16 unreturned candidate lost", remaining)
 	}
 	if err = s.BeginExperienceLookup(ctx, "codex", in.Scope, "consumer", p, "page-2", "lookup", c.ID); err != nil {

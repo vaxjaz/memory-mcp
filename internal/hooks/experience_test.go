@@ -56,16 +56,16 @@ func TestExperienceHookSelectiveWakeupAndNoTranscript(t *testing.T) {
 	if len(token) != 2 {
 		t.Fatal(reason)
 	}
-	if next := handle(t, r, e); next["decision"] != "block" {
-		t.Fatal("first deny permanently opened session")
+	if next := handle(t, r, e); len(next) != 0 {
+		t.Fatal("same challenge requested lookup twice", next)
 	}
 	bootstrap := e
 	bootstrap.Tool = "mcp__decision_memory__memory_bootstrap"
 	if len(handle(t, r, bootstrap)) != 0 {
 		t.Fatal("memory tool blocked")
 	}
-	if next := handle(t, r, e); next["decision"] != "block" {
-		t.Fatal("bootstrap granted lookup completion")
+	if state, err := s.ExperienceChallengeStatus(testCtx, token[1]); err != nil || state.Stage != "query_requested" {
+		t.Fatal("bootstrap affected challenge state", state, err)
 	}
 	lookup, err := s.LookupExperience(testCtx, memory.ExperienceLookup{Scope: "project:demo", Task: "本次创建准入需求", Questions: "当前入口是否完整覆盖", Keywords: []string{"LYN"}, ChallengeID: token[1]})
 	if err != nil || len(lookup.Items) != 1 {

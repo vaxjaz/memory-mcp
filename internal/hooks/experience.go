@@ -151,14 +151,18 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		if err != nil {
 			return empty, err
 		}
-		info, _ := json.Marshal(map[string]any{"tool": e.Tool, "candidate_ids": matches, "outcome": challenge.Outcome, "probe_ms": time.Since(start).Milliseconds()})
+		detail := map[string]any{"tool": e.Tool, "candidate_ids": matches, "outcome": challenge.Outcome, "probe_ms": time.Since(start).Milliseconds()}
+		if challenge.ID != "" {
+			detail["challenge_id"] = challenge.ID
+		}
+		info, _ := json.Marshal(detail)
 		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "experience_probe", string(info))
 		if challenge.Context != "" {
 			out := contextOutput(e.Name, challenge.Context)
 			out["_cue_emission"] = challenge.EmissionID
 			return out, nil
 		}
-		if challenge.ID == "" {
+		if challenge.Outcome != memory.ChallengeQueryRequired {
 			return empty, nil
 		}
 		reason := fmt.Sprintf("当前操作命中经验入口。请结合完整任务和当前疑问调用 %s.memory_experience_lookup(scope=%q, task=当前任务, questions=当前疑问, queries=自主检索式, challenge_id=%q)，再重试。", r.serverName(), scope, challenge.ID)

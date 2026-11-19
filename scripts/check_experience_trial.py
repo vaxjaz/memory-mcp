@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Actual stdio executable + disposable native-event replays. No model claims."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import json
 from pathlib import Path
@@ -57,6 +58,12 @@ def check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool):
     started = hook("SessionStart", session="start-banner")[1]["hookSpecificOutput"]["additionalContext"]
     assert "记忆经验" in started and "Fixture requires" not in started, started
 
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        same = list(pool.map(lambda tool: hook("PreToolUse", session="parallel-same-candidate",
+                                              tool_name=tool, tool_input={"sql": sql})[1],
+                             (sql_tool, "mcp__second-instance__mysql_query")))
+    assert sum(result.get("decision") == "block" for result in same) == 1, same
+
     blocked = hook("PreToolUse", session="missing-result", tool_name=sql_tool, tool_input={"sql": sql})[1]
     token = re.search(r'challenge_id="([a-f0-9]{32})"', blocked["reason"]).group(1)
     lookup_name = "mcp__decision-memory__memory_experience_lookup"
@@ -73,6 +80,7 @@ def check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool):
 
     with closing(sqlite3.connect(data / "memory.db")) as db:
         runs = list(db.execute("SELECT result, detail FROM hook_runs"))
+        assert db.execute("SELECT count(*) FROM experience_challenges WHERE session='parallel-same-candidate'").fetchone() == (1,)
         delivered = db.execute("SELECT count(*) FROM experience_body_deliveries").fetchone()[0]
         observed = db.execute("SELECT receipt_id FROM experience_lookup_calls WHERE call_id='lookup-with-no-result'").fetchone()
     assert delivered == 0 and observed == ("",), (delivered, observed)
@@ -267,7 +275,7 @@ def main():
                 assert "A local caller" not in reason and "One entry may miss" not in reason
                 token = re.search(r'challenge_id="([a-f0-9]{32})"', reason).group(1)
                 again = hook("PreToolUse", **payload)
-                assert again[0] == 2 or again[1].get("decision") == "block"
+                assert again[:3] == (0, {}, ""), again
                 host.tool("memory_experience_lookup", dict(scope=scope, task="", questions="coverage",
                           keywords=["LYN"], challenge_id=token), expect_error=True)
                 lookup_args = dict(scope=scope,
@@ -284,8 +292,18 @@ def main():
                 assert response["items"][0]["id"] == saved["id"]
                 assert response["items"][0]["locations"][0]["lines"] == [2]
                 assert response["challenge_outcome"] == "response_generated"
-                assert hook("PreToolUse", **payload)[0] in (0,2)
+                waiting = hook("PreToolUse", **payload)
+                assert waiting[:3] == (0, {}, ""), waiting
+                with closing(sqlite3.connect(data / "memory.db")) as db:
+                    before_status = tuple(db.iterdump())
+                state = cli("doctor", *options, "--challenge", token)
+                assert state["challenge_id"] == token and state["stage"] == "response_pending_observation" and state["read_only"], state
+                assert state["candidates"] == [{"id": saved["id"], "cue_id": "admission"}], state
+                with closing(sqlite3.connect(data / "memory.db")) as db:
+                    assert tuple(db.iterdump()) == before_status
+                    assert db.execute("SELECT count(*) FROM experience_body_deliveries").fetchone() == (0,)
                 assert hook("PostToolUse",tool_name=lookup_name,tool_use_id="native-1",tool_response=wire)[1]=={}
+                assert cli("doctor", *options, "--challenge", token)["stage"] == "delivered"
                 assert hook("PreToolUse", **payload)[1] == {}
                 assert hook("Stop", last_assistant_message="Do not start an extra model round")[1] == {}
                 with closing(sqlite3.connect(data / "memory.db")) as db:

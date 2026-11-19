@@ -653,6 +653,11 @@ func (s *Store) ReadPage(ctx context.Context, id, referenceCursor string) (ReadR
 		if err != nil {
 			return ReadResult{}, err
 		}
+		switch anchor.Sort {
+		case "supports", "contradicts", "context":
+		default:
+			return ReadResult{}, errors.New("invalid reference cursor")
+		}
 	}
 	// One snapshot prevents a concurrent revision from mixing old/new states.
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
@@ -727,7 +732,7 @@ type SearchInput struct {
 	IncludeGlobal   bool   `json:"include_global,omitempty" jsonschema:"Also include global entries when searching a project; opt in explicitly"`
 	Kind            string `json:"kind,omitempty" jsonschema:"Optional record, case, or hypothesis filter"`
 	Limit           int    `json:"limit,omitempty" jsonschema:"Result limit, default 10, maximum 30"`
-	Cursor          string `json:"cursor,omitempty" jsonschema:"Opaque next_cursor from a prior result; keep scope, query, include_global and kind unchanged"`
+	Cursor          string `json:"cursor,omitempty" jsonschema:"Opaque next_cursor from the prior memory_search result. Keep scope, query and every filter unchanged; only the page size may change."`
 	IncludeEvents   bool   `json:"include_events,omitempty" jsonschema:"Opt in to raw hook input/output events. Normally hidden so captured chat is not mistaken for a business decision."`
 }
 type Hit struct {
@@ -778,9 +783,8 @@ func (s *Store) SearchPage(ctx context.Context, in SearchInput) (SearchPage, err
 		if err != nil {
 			return SearchPage{}, err
 		}
-		if _, err = time.Parse(time.RFC3339Nano, anchor.Sort); err != nil {
-			return SearchPage{}, errors.New("invalid search cursor")
-		}
+		// Seek by the exact values used in ORDER BY. Imported history can
+		// carry a legacy timestamp format or an empty timestamp.
 	}
 	q := "SELECT id,kind,scope,title,body,origin,needs_review,created_at FROM entries WHERE current=1 AND (scope=?"
 	args := []any{in.Scope}
