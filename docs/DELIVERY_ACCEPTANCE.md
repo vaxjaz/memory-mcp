@@ -110,3 +110,9 @@ M = internal/memory/experience_delivery_test.go；H = internal/hooks/lookup_rece
 The Windows ZCode 3.16.3 isolated native fixture used a local mock model and a synthetic login MCP service. Login's Pre and Post had the same call ID. Write's native Pre carried file_path and content and had no context object. The cue used one expression combining a .sql suffix, case-insensitive UPDATE, a fix_third substring, and the observed login result. The first Write requested a lookup, the native lookup Post recorded delivery, and the retry wrote the fixture file. No real SQL or business service ran.
 
 Executable replay verifies matching UPDATE and same-column SELECT, Write path and text from one registration, live field metadata, no state changes from doctor --probe, and result facts with wrong keys, stale results or expired TTL. The old dev.9 executable and a disposable schema 7 library verify migration to schema 8, cue behavior, original spelling, and restoring the backup with dev.9.
+
+## 0.6.3-dev.11 cue prerequisites
+
+Disposable Windows executable tests confirm that a cue with a Write and .sql prerequisite triggers on a matching body, allows a Grep call containing the same word, and does not match when only the filename contains the entrance. The read-only doctor reports prerequisite failure or an unknown path separately from a missed entrance. The same hook tests query prior results by their configured key, including wrong keys, stale results and expiry.
+
+Migration from the actual dev.10 binary preserves schema 8 entries, existing match expressions and delivery history. A dev.10 binary rejects the resulting schema 9 library. The backup can be opened with dev.10.

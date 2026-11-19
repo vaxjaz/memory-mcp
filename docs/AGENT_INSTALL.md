@@ -1,6 +1,6 @@
 # Install memory-mcp
 
-When an existing library predates schema 8, complete the [cue migration](#upgrade-to-the-cue-schema) before switching its service.
+When an existing library predates schema 9, complete the [cue migration](#upgrade-to-the-cue-schema) before switching its service.
 
 When the user requests installation/upgrade, identify the actual host and execution OS, service name, original data_dir, real project directory and stable scope from configuration. This document does not grant permission by itself. Never guess from the model name or create a replacement empty library.
 
@@ -23,13 +23,13 @@ memory_experience_record saves verified failure features; memory_reference_recor
 
 ## Upgrade to the cue schema
 
-Version 0.6.3 development builds use database schema 8 and integration protocol 9. Existing libraries must complete this step **before** setup or serve. New empty libraries start at schema 8.
+Version 0.6.3 development builds use database schema 9 and integration protocol 10. Existing libraries must complete this step **before** setup or serve. New empty libraries start at schema 9.
 
 1. Run the read-only preview.
 
        memory-mcp migrate --data-dir <original-library>
 
-   Schema 7 cue groups already have the new simple expression shape. The migration rebuilds the cue index and retains IDs, cue matches, evidence and delivery history. Review current_entries_needing_cues. The list contains existing experience and agreement IDs that have no cues. Schema 6 libraries keep their record IDs, evidence, cue IDs and delivery history. The migration replaces each cue's old typed entrances with matches groups containing literal strings and explicit operations. From schema 5 or earlier it also removes old selector fields and moves old object prefixes to object_id_prefixes.
+   Upgrading from dev.10 (schema 8) retains all saved match expressions, including expressions with no when. Older programs refuse schema 9 so they cannot ignore a saved prerequisite. Schema 7 cue groups already have the new simple expression shape. The migration rebuilds the cue index and retains IDs, cue matches, evidence and delivery history. Review current_entries_needing_cues. The list contains existing experience and agreement IDs that have no cues. Schema 6 libraries keep their record IDs, evidence, cue IDs and delivery history. The migration replaces each cue's old typed entrances with matches groups containing literal strings and explicit operations. From schema 5 or earlier it also removes old selector fields and moves old object prefixes to object_id_prefixes.
 2. Stop every writer sharing the library. Back up the complete data directory and client configuration, then run migration with a new SQLite backup destination.
 
        memory-mcp migrate --data-dir <original-library> --apply --backup <new-backup.db>
@@ -38,7 +38,7 @@ Version 0.6.3 development builds use database schema 8 and integration protocol 
 
 ## Register a custom tool
 
-Run `memory-mcp guide` or call `memory_bootstrap` for the examples shipped by the actual binary. The bootstrap lists `tool_field_mapping`, `cue_match_expressions` and `tool_result_facts`.
+Run `memory-mcp guide` or call `memory_bootstrap` for the examples shipped by the actual binary. The bootstrap lists `tool_field_mapping`, `cue_match_expressions`, `cue_match_when` and `tool_result_facts`.
 
 1. Run `doctor --probe EVENT.json` against a representative event using the same host, config, data directory and project. Inspect `observed_fields` and the registration template if available. If you lack a sample, register just the tool name, run setup, restart and use the tool once. Read `tool_field_shape` in `doctor --session SESSION_ID` for the actual argument and result field names and types.
 2. Put the registration in `tool-probes.json` under the existing project scope. For example, `{"tool":"Write","fields":{"text":"content","path":"file_path"}}` maps the native input fields for the cue. Use `mcp_tool` for a bare MCP name across servers.
@@ -52,7 +52,7 @@ Back up the existing `tool-probes.json` with the library. Rewrite it before runn
 | Old configuration | New home |
 | --- | --- |
 | `text_fields: ["content"]` and `path_field: "file_path"` | `fields: {"text":"content","path":"file_path"}` on the tool registration. |
-| `extensions: [".sql"]`, `when` and `branches` | Add `all` expressions to interested cues; for a filename use `{"field":"path","op":"suffix","value":".sql"}`. Separate branches are alternatives in `matches`. Set `case_sensitive: true` for old case-sensitive guards you want to preserve. Add an explicit path comparison if the cue should apply only to one repository. |
+| `extensions: [".sql"]`, `when` and `branches` | Add a `when` prerequisite to the relevant cue match; use `all` to combine conditions. for a filename use `{"field":"path","op":"suffix","value":".sql"}`. Separate branches are alternatives in `matches`. Set `case_sensitive: true` for old case-sensitive guards you want to preserve. Add an explicit path comparison if the cue should apply only to one repository. |
 | `mode: "append"` or `"replace"` | A project entry defines the effective mapping. Include every native field the cue needs. Remove the entry to use the preset. |
 | `context_facts` and result `when` | Add `observe` under the producing tool. Put the result comparisons and consumer key in the cue's `fact.match` and `fact.key`. Recreate a short-lived result fact by running the producer again. |
 

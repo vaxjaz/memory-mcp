@@ -62,7 +62,7 @@ def main():
         host = Host(binary, str(data))
         try:
             body = "This synthetic fixture distinguishes query contexts."
-            change = {"all": [
+            change = {"when": {"all": [
                 {"fact": {"name": "authenticated", "key": ["service", "connection"], "match": {"all": [
                     {"field": "ok", "op": "eq", "value": True},
                     {"field": "state", "op": "contains", "value": "ready"},
@@ -70,8 +70,7 @@ def main():
                 {"any": [{"field": "text", "op": "token", "value": "UPDATE"},
                          {"field": "text", "op": "token", "value": "DELETE"}]},
                 {"not": {"field": "dry_run", "op": "eq", "value": True}},
-                {"field": "text", "op": "token", "entrances": ["SettlementTarget", "ORDER UPDATE"]},
-            ]}
+            ]}, "field": "text", "op": "token", "entrances": ["SettlementTarget", "ORDER UPDATE"]}
             read = {"all": [
                 {"field": "text", "op": "token", "value": "SELECT"},
                 {"field": "text", "op": "token", "entrances": ["information_schema"]},

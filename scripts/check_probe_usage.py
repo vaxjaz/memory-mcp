@@ -40,8 +40,8 @@ def main():
             with closing(sqlite3.connect((data / "memory.db").as_uri() + "?mode=ro", uri=True)) as db:
                 return tuple(db.iterdump())
         sample_marker = "NOT_SAVED_PROBE_INPUT"
-        def check(record_id, tool="Write", path="example.sql", content=f"{gate} table SET {full}=1; /* {sample_marker} */"):
-            body = dict(tool_name=tool, tool_input=dict(file_path=str(path), content=content))
+        def check(record_id, tool="Write", path="example.sql", content=f"{gate} table SET {full}=1; /* {sample_marker} */", inputs=None):
+            body = dict(tool_name=tool, tool_input=inputs if inputs is not None else dict(file_path=str(path), content=content))
             response = subprocess.run([binary, "doctor", *options, "--probe=-", "--expect", record_id, "--expect-cue", "write"],
                                       input=json.dumps(body), encoding="utf-8", capture_output=True, check=True)
             assert sample_marker not in response.stdout, response.stdout
@@ -114,9 +114,52 @@ def main():
             bad["experience"]["cues"][0]["matches"][0]["all"][1]["case_sensitiv"] = True
             host.tool("memory_experience_record", bad, expect_error=True)
             assert snapshot() == before
+            match = {
+                "when": {"all": [
+                    {"field": "tool", "op": "eq", "value": "Write"},
+                    {"field": "path", "op": "suffix", "value": ".sql"},
+                ]},
+                "field": "text", "op": "contains", "entrances": [short],
+            }
+            draft["previous_id"] = combined["id"]
+            draft["experience"]["cues"][0]["matches"] = [match]
+            guarded = host.tool("memory_experience_record", draft)
+            assert guarded["id"] == combined["id"] and guarded["trigger_preview"]["entrances"][0]["conditional"], guarded
+
+            before = snapshot()
+            samples = [
+                ("body-hit", "Write", {"file_path": "file.SQL", "content": full}, "direct_match", "matched"),
+                ("same-word-grep", "Grep", {"pattern": full}, "cue_missed", "not_matched"),
+                ("wrong-extension", "Write", {"file_path": "file.vue", "content": full}, "cue_missed", "not_matched"),
+                ("missing-path", "Write", {"content": full}, "cue_missed", "unknown"),
+                ("name-only", "Write", {"file_path": full + ".sql", "content": "ordinary text"}, "cue_missed", "matched"),
+                ("missing-content", "Write", {"file_path": full + ".sql"}, "cue_missed", "matched"),
+            ]
+            for name, tool, args, want_outcome, want_when in samples:
+                report = check(guarded["id"], tool=tool, inputs=args)
+                assert report["outcome"] == want_outcome, (name, report)
+                checks = report["cue_checks"][0]["checks"]
+                assert checks[0]["stage"] == "when" and checks[0]["outcome"] == want_when, (name, report)
+                assert len(checks) == (2 if want_when == "matched" else 1), (name, report)
+                assert report["cue_checks"][0]["checks"][0]["conditions"][0]["field"] == "tool", report
+            assert snapshot() == before
+
+            bad = json.loads(json.dumps(draft))
+            bad["experience"]["cues"][0]["matches"][0]["when"] = {"op": "contains", "entrances": [short]}
+            error = host.tool("memory_experience_record", bad, expect_error=True)
+            assert "use value" in str(error), error
+            assert snapshot() == before
+
+            for name, tool, args, want_outcome, _ in samples:
+                payload = dict(hook_event_name="PreToolUse", cwd=str(project), session_id=name,
+                               tool_name=tool, tool_input=args)
+                actual = subprocess.run([binary, "hook", "--host", "zcode", "--data-dir", str(data)],
+                                        input=json.dumps(payload), encoding="utf-8", capture_output=True, check=True)
+                output = json.loads(actual.stdout) if actual.stdout.strip() else {}
+                assert (output.get("decision") == "block") == (want_outcome == "direct_match"), (name, actual.stdout)
         finally:
             host.close()
-    print("PASS: expected cue, whole identifier correction, actual routing, input diagnostics, and unchanged library")
+    print("PASS: expected cue, whole identifier correction, when prerequisites, input diagnostics, and unchanged library")
 
 
 if __name__ == "__main__":

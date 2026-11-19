@@ -2,23 +2,24 @@ package hooks
 
 import (
 	"encoding/json"
-	"github.com/vaxjaz/memory-mcp/internal/matching"
 	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/vaxjaz/memory-mcp/internal/matching"
 	"github.com/vaxjaz/memory-mcp/internal/memory"
 )
 
 func TestBusinessResultObservationWakesOnlySameObjectAndInput(t *testing.T) {
 	s, r, p := trialFixture(t)
-	saved, err := s.RecordAgreement(testCtx, memory.AgreementWrite{Scope: "project:demo", Project: p, Title: "isolated agreement reference", Agreement: memory.Agreement{
+	draft := memory.AgreementWrite{Scope: "project:demo", Project: p, Title: "isolated agreement reference", Agreement: memory.Agreement{
 		ObjectIDPrefixes: []string{"WXN"},
 		Cues:             []memory.ExperienceCue{{ID: "cancel", Label: "取消前核验", Text: "仅为隔离测试的核验约定", EvidenceRefs: []string{"fixture:confirmed-agreement"}, Matches: []memory.CueMatch{{Rule: matching.Rule{Op: "token", Normalize: "whitespace"}, Entrances: []string{"取消 WXN-001"}}}}},
 		Requirement:      "仅为隔离测试的核验约定", Applicability: "隔离工单处理", Boundary: "不覆盖审批撤回，不授予执行权限",
 		Authority: "isolated fixture owner", ConfirmationReference: "fixture:confirmed-agreement",
 		Evidence: []memory.ExperienceEvidence{{Kind: "business", Reference: "fixture:confirmed-agreement", Observation: "explicitly synthetic test agreement"}},
-	}})
+	}}
+	saved, err := s.RecordAgreement(testCtx, draft)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,6 +73,24 @@ func TestBusinessResultObservationWakesOnlySameObjectAndInput(t *testing.T) {
 	if err != nil || len(page.Results) != 0 {
 		t.Fatal("raw text captured", page, err)
 	}
+	read.TurnID = "turn-b"
+	handle(t, r, read)
+	sql := query.Input["sql"].(string)
+	matches, err := s.ObservedBusinessMatches(testCtx, r.host(), draft.Scope, query.Session, query.TurnID, sql)
+	if err != nil || len(matches) != 1 {
+		t.Fatal("fixture needs an observed entrance before revision", matches, err)
+	}
+	draft.PreviousID = saved.ID
+	draft.Agreement.Cues[0].Matches[0].When = &matching.Expression{Field: "tool", Rule: matching.Rule{Op: "eq"}, Value: "Write"}
+	guarded, err := s.RecordAgreement(testCtx, draft)
+	if err != nil || guarded.ID != saved.ID {
+		t.Fatal("match-only revision should preserve the record ID", guarded, err)
+	}
+	matches, err = s.ObservedBusinessMatches(testCtx, r.host(), draft.Scope, query.Session, query.TurnID, sql)
+	if err != nil || len(matches) != 0 {
+		t.Fatal("cached business result bypassed when", matches, err)
+	}
+
 }
 
 func TestBusinessCluesStayBoundedAndDoNotProbeEveryTool(t *testing.T) {

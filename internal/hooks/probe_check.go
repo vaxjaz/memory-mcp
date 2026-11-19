@@ -216,5 +216,5 @@ func checkProbe(ctx context.Context, store *memory.Store, o probeCheckOptions, e
 	if expected(matches) {
 		return result("context_match", "The candidate came from a stored same-input business observation.")
 	}
-	return result("cue_missed", "Check cue_checks for the first unmatched condition and tool_input for the field mapping. Use a full identifier with token, or use contains for a deliberate substring.")
+	return result("cue_missed", "Check cue_checks for a failed or unknown when prerequisite or a missed entrance, and tool_input for the field mapping. Use a full identifier with token, or use contains for a deliberate substring.")
 }

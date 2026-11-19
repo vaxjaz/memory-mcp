@@ -20,7 +20,7 @@ import (
 	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
 
-const SchemaVersion = 8
+const SchemaVersion = 9
 
 // Entry bodies are free text. These fields track provenance, not semantic truth.
 type Entry struct {
@@ -285,7 +285,7 @@ PRAGMA user_version=2;`)
 	if err = migrateRecall(tx); err != nil {
 		return err
 	}
-	if _, err = tx.Exec("PRAGMA user_version=8"); err != nil {
+	if _, err = tx.Exec("PRAGMA user_version=9"); err != nil {
 		return err
 	}
 	return tx.Commit()

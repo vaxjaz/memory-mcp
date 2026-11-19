@@ -20,7 +20,7 @@ func (s *Store) ExperienceAfterCompact(ctx context.Context, host, scope, session
 // fields or facts. Only plain text entrances can use this result association.
 func plainObservationEntrance(cue ExperienceCue, match ExperienceMatch) bool {
 	for _, group := range cue.Matches {
-		if group.Field == "" && group.Op != "" && slices.Contains(group.Entrances, match.Entrance) &&
+		if group.When == nil && group.Field == "" && group.Op != "" && slices.Contains(group.Entrances, match.Entrance) &&
 			entranceComparison(group.Rule) == match.EntranceComparison {
 			return true
 		}

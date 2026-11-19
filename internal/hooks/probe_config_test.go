@@ -164,6 +164,7 @@ func TestCustomProbeConfigValidationAndPath(t *testing.T) {
 		`{"projects":{"project:demo":[{"tool":"Write|Edit","fields":{"text":"content"}}]}}`,
 		`{"projects":{"project:demo":[{"mcp_tool":"memory_experience_lookup","fields":{"text":"task"}}]}}`,
 		`{"projects":{"project:demo":[{"tool":"Write","path_feld":"file_path"}]}}`,
+		`{"projects":{"project:demo":[{"tool":"Write","when":{"field":"tool","op":"eq","value":"Write"}}]}}`,
 		`{"projects":{}} {}`,
 	} {
 		if err := os.WriteFile(path, []byte(content), 0600); err != nil {

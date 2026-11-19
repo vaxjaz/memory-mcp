@@ -22,11 +22,14 @@ func cueWriteSchema[T any]() *jsonschema.Schema {
 	if err != nil {
 		panic(err)
 	}
-	expr.Description = "One comparison, all, any, not, or fact. Groups are OR alternatives; each successful group needs a positive entrance."
+	expr.Description = "One comparison, all, any, not, or fact, with an optional when prerequisite. Groups are OR alternatives; each successful group needs a positive entrance."
 	stringType := func() *jsonschema.Schema { return &jsonschema.Schema{Type: "string"} }
 	expr.Properties["field"] = &jsonschema.Schema{Type: "string", Description: "A named tool field from the effective registration. Omit to compare entrances against available text fields."}
 	expr.Properties["entrances"] = &jsonschema.Schema{Type: "array", Items: stringType(), Description: "Literal entrance strings with their original spelling. Any one can match."}
 	expr.Properties["value"] = &jsonschema.Schema{Types: []string{"string", "number", "boolean"}, Description: "An additional comparison guard. Use entrances for indexable keywords."}
+	when := ref()
+	when.Description = "Optional prerequisite. It must pass before the rest of this match is evaluated. Compare the native tool name, exposed fields or earlier facts. Use value in the prerequisite and entrances alongside it."
+	expr.Properties["when"] = when
 	expr.Properties["all"] = &jsonschema.Schema{Type: "array", Items: ref()}
 	expr.Properties["any"] = &jsonschema.Schema{Type: "array", Items: ref()}
 	expr.Properties["not"] = ref()

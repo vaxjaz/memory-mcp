@@ -299,7 +299,7 @@ func PreviewTriggers(e Entry) TriggerPreview {
 				group.VisitEntrances(func(leaf *matching.Expression, value string) {
 					out.EntranceCount++
 					if len(out.Entrances) < maxPreviewEntrances {
-						out.Entrances = append(out.Entrances, PreviewEntrance{CueID: cue.ID, Value: value, Field: leaf.Field, Conditional: group.All != nil || group.Any != nil, EntranceComparison: entranceComparison(leaf.Rule)})
+						out.Entrances = append(out.Entrances, PreviewEntrance{CueID: cue.ID, Value: value, Field: leaf.Field, Conditional: group.When != nil || group.All != nil || group.Any != nil, EntranceComparison: entranceComparison(leaf.Rule)})
 					}
 				})
 			}

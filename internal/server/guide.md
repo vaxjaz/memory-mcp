@@ -60,11 +60,14 @@ The following cue matches when Write targets a .sql file and its proposed conten
   "text": "The two isolated environments returned different values for the same field.",
   "evidence_refs": ["verified-source"],
   "matches": [{
-    "all": [
+    "when": {"all": [
+      {"field": "tool", "op": "eq", "value": "Write"},
       {"field": "path", "op": "suffix", "value": ".sql"},
-      {"field": "text", "op": "token", "value": "UPDATE"},
-      {"field": "text", "op": "contains", "entrances": ["fix_second", "fix_third"]}
-    ]
+      {"field": "text", "op": "token", "value": "UPDATE"}
+    ]},
+    "field": "text",
+    "op": "contains",
+    "entrances": ["fix_second", "fix_third"]
   }]
 }
 ```
@@ -72,6 +75,7 @@ The following cue matches when Write targets a .sql file and its proposed conten
 | Match property | Behavior |
 | --- | --- |
 | `matches` | Any matching expression is enough for this cue. A simple expression such as `{"op":"token","entrances":["findCustomer"]}` works with preset and registered tools. |
+| `when` | Optional prerequisite on one match expression. Check the native tool name in `tool`, mapped inputs such as `path`, or an earlier result with `fact`. Use `all`, `any` or `not` for combinations. If it is false or unknown, this expression does not match. |
 | `entrances` | Literal trigger phrases or identifiers. Any string in a leaf can match. A leaf with no `field` searches the exposed strings individually. Each successful alternative needs an entrance. |
 | `value` | A comparison guard on a named field. Use it for an operation, path, switch, or result flag. |
 | `all`, `any`, `not` | Require every condition, at least one condition, or a false child. Missing fields or unavailable facts are unknown, and negating unknown leaves it unknown. |
@@ -79,7 +83,7 @@ The following cue matches when Write targets a .sql file and its proposed conten
 | `eq`, `prefix`, `suffix`, `exists` | Compare the whole value, its beginning, its end, or its presence. `eq` also accepts boolean and number values and preserves their types. `exists` takes no value. |
 | `case_sensitive`, `normalize` | Entrances retain original spelling. String comparisons default to case-insensitive. Set `case_sensitive: true` on a comparison to require exact casing. `normalize: "path"` unifies slash styles, and `"whitespace"` ignores Unicode whitespace. |
 
-For SQL queries, `text` can already be mapped by the mysql_query preset or by the warehouse_query example. To make the cue work for both file writing and queries, add a second expression to `matches` with an exact tool guard for the query and the desired SQL predicates. Add another expression for another distinct trigger. A path comparison interprets the event's filename as text, including a target in a separate documentation repository.
+For SQL queries, `text` can already be mapped by the mysql_query preset or by the warehouse_query example. To make the cue work for both file writing and queries, add a second expression to `matches` with an exact tool guard for the query and the desired SQL predicates. Use `value` inside `when` and put `entrances` beside it. Leave `when` out when an entrance alone should match. A path comparison interprets the event's filename as text, including a target in a separate documentation repository.
 
 ### Previous tool results
 
@@ -107,16 +111,18 @@ In the query cue's `matches`, place the following expression alongside any other
 
 ```json
 {
-  "all": [
+  "when": {"all": [
     {"field": "text", "op": "token", "value": "UPDATE"},
-    {"field": "text", "op": "contains", "entrances": ["fix_third"]},
     {"fact": {"name": "authenticated", "key": ["connection"], "match": {
       "all": [
         {"field": "ok", "op": "eq", "value": true},
         {"field": "state", "op": "eq", "value": "READY"}
       ]
     }}}
-  ]
+  ]},
+  "field": "text",
+  "op": "contains",
+  "entrances": ["fix_third"]
 }
 ```
 
@@ -134,6 +140,6 @@ Save a sample with the client's `tool_name` and `tool_input`. Use `--project` if
 memory-mcp doctor --host zcode --config CONFIG --data-dir LIBRARY --project PROJECT --probe EVENT.json --expect RECORD_ID --expect-cue settlement_code
 ```
 
-Read `outcome` and `next`. For `tool_not_registered`, use `observed_fields` to map the actual paths. For `tool_not_routed`, rerun setup and refresh the client. For `no_scanned_fields` or missing named inputs, check `tool_input.fields` for missing, empty, unsupported or oversized values. For `cue_missed`, check `cue_checks` for the comparisons that failed or lack a value. Try the expected matching sample and a similar sample that should pass without a challenge. Include `--session SESSION_ID` or the native event identity if testing a saved result fact. The probe check executes no tool and writes no hook event, fact, challenge or receipt. It does not verify native dispatch.
+Read `outcome` and `next`. For `tool_not_registered`, use `observed_fields` to map the actual paths. For `tool_not_routed`, rerun setup and refresh the client. For `no_scanned_fields` or missing named inputs, check `tool_input.fields` for missing, empty, unsupported or oversized values. For `cue_missed`, check `cue_checks`. A check with `stage: "when"` reports whether the prerequisite passed, failed, or lacked an input or fact. Its `conditions` give the tested fields. After it passes, the next check reports whether the entrance matched. Try the expected matching sample and a similar sample that should pass without a challenge. Include `--session SESSION_ID` or the native event identity if testing a saved result fact. The probe check executes no tool and writes no hook event, fact, challenge or receipt. It does not verify native dispatch.
 
 After a real operation, use `doctor --session SESSION_ID` to inspect `recent_events`. An `experience_probe` with `candidate_ids` and a `silent` outcome means the cue matched and had no new delivery. A successful lookup can also retrieve a cue absent from the trigger candidates. Inspect the candidates before concluding that a cue triggered.
