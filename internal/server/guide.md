@@ -2,6 +2,13 @@
 
 Follow current user instructions and project rules. The host reconstructs the full visible task, builds grounded queries and judges applicability. MCP performs lexical retrieval, not semantic interpretation, translation or another model call.
 
+## Installation and upgrade for agents
+
+Follow the packaged installation guide when the user requests an install or upgrade. Identify the active client, verified package, actual library and scope. First installation defaults to finding verified pitfalls in project source, tests, fix commits and business history. Replay the relevant code path or test, identify the future decision it changes, and record only evidenced cases.
+
+For an upgrade, stop writers and back up the full library and configuration. Preview the schema and automatically apply a supported migration with a new backup when required. Reuse the existing library, scope and wakeup policy. Enumerate existing records through all pages and have the host trace every existing record to the real project code, including records with existing cues. Verify the behavior with tests, isolated replay or the relevant historical code revision. Use business evidence to verify scope. Semantic distillation of stored text is prohibited. Treat old records as locators and rebuild cues from verified project facts. Preserve unverifiable material and report what blocks its activation. For duplicate consolidation or archival, show the exact cleanup preview and obtain fresh user approval before confirm/apply.
+
+
 After a correction, fix the current task first. Skip experience writing when rereading the original wording resolves the error, such as a missed qualifier, mistaken referent or misunderstood scope. To record an evidenced counterexample or a newly verified boundary, identify which specific future judgment it changes when a similar situation recurs and cite the evidence for that change.
 
 For every memory_experience_record call, put `admission` beside `experience`. Send `{"admission":{"future_decision":"Check each independent entry point before treating the local validation as complete.","evidence_ref":"trace:second-entry-point"}}` as part of the submission. Copy the exact `evidence_ref` from the actual `experience.evidence[].reference` in that same submission. New records and previous_id revisions use the same check. Missing or invalid admission rejects the write and leaves the library unchanged. Admission text is used for validation and stays outside recall and the stored experience body. A submitted reference is evidence to verify, and passing the check does not establish the host's interpretation.
@@ -14,7 +21,7 @@ For a revision, use the full current ID and send the complete revised body. Copy
 
 Use memory_reference_record for compact pointers to existing explicitly confirmed agreements. Include authority, confirmation locator, scope, exceptions and evidence-backed cues. Indexing creates no authority. Changes of meaning/scope require the relevant authorization.
 
-After a successful new write or revision, including an entrance-only update, tell the user in one sentence how to encounter the recorded cue in normal work. Use one or two entrances from trigger_preview and the bound scope. Mention the tool, field or conditions if verified in the active host. A preview reports eligibility and the stored wakeup policy. If an entrance is marked conditional, describe the full saved expression or check it with doctor before stating how to trigger it. Actual delivery still depends on the host dispatching a matching probe and the current delivery state. If the record is ineligible or wakeup is disabled, say so. For additional entrances, read the saved revision by ID. Report an exact submission retry once.
+After a successful new write or revision, report one concrete trigger in normal use for each new or changed cue. State the tool, field, entrance and prerequisites when verified. Use trigger_preview to locate the saved cue and doctor --probe to check the actual event and one near miss. Report an unverified or disabled trigger only when it affects use. Keep the report short and describe an exact retry once.
 
 To verify a direct trigger before calling it ready, use doctor --probe EVENT.json --expect RECORD_ID or an actual hook record that lists that cue. A result of a lookup alone verifies retrieval, separate from a direct trigger. The probe check is read-only and reports where to correct a miss. See **Check a trigger before using it** below.
 
