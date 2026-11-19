@@ -1,8 +1,8 @@
-# Upgrade memory-mcp
+# Install or upgrade memory-mcp 0.6.3
 
-This offline bundle contains platform archives, the exact source, `SOURCE_COMMIT` and inner checksums. Verify the outer archive against the release checksum when available. Select the platform archive and use `build-info` to verify its version, schema and full source commit.
+This offline bundle contains platform archives, the exact source, `SOURCE_COMMIT`, inner checksums and the agent guides under `docs/`. Verify the outer archive against the release checksum when available. Select the platform archive and use `build-info` to verify its version, schema and full source commit.
 
-The agent should execute the requested upgrade using `docs/AGENT_INSTALL.md` in the extracted platform archive. Identify the real client, service, original library and verified scope. Stop all old writers, save a complete pre-upgrade backup and keep the old executable. Preview the schema with `migrate` and automatically apply the supported conversion with `--apply --backup` when required. Convert legacy tool registrations, refresh setup with the original library and bindings, and reconnect the actual client.
+The agent should execute the requested upgrade using the bundled `docs/AGENT_INSTALL.md`. The `docs/AGENT_GUIDE.md` guide is also available inside each platform archive and through `memory-mcp guide`. Identify the real client, service, original library and verified scope. Stop all old writers, save a complete pre-upgrade backup and keep the old executable. Preview the schema with `migrate` and automatically apply the supported conversion with `--apply --backup` when required. Convert legacy tool registrations, refresh setup with the original library and bindings, and reconnect the actual client.
 
 Before activating the migrated cues, audit the existing records with the original scope and follow the full inventory cursor. Trace each rule through the project's existing implementation. Verify its behavior with tests, an isolated replay or the relevant historical code revision. Use business sources to establish domain intent and scope. **Semantic distillation of stored records is prohibited.** The old text locates a case. The evidence determines its revised rule and trigger. For a first installation, follow the default historical-code initialization in the same guide.
 

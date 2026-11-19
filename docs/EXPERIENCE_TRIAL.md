@@ -1,6 +1,6 @@
 # Experience delivery
 
-The 0.6.3 development build uses integration protocol 11 and database schema 9.
+Version 0.6.3 uses integration protocol 11 and database schema 9.
 
 ## Writes and identity
 

@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from package import bundle_tar_mode, verified_source_commit
+from package import bundle_tar_mode, packaged_documentation, verified_source_commit
 
 
 class OfflineBundleTests(unittest.TestCase):
@@ -23,6 +23,19 @@ class OfflineBundleTests(unittest.TestCase):
             with patch('package.subprocess.check_output', return_value='b' * 40):
                 with self.assertRaises(ValueError):
                     verified_source_commit(root, sha)
+
+    def test_agent_documentation_uses_the_embedded_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            install = root / "docs/AGENT_INSTALL.md"
+            install.parent.mkdir()
+            install.write_text("Installation instructions")
+            guide = root / "internal/server/guide.md"
+            guide.parent.mkdir(parents=True)
+            guide.write_text("Embedded agent instructions")
+            docs = packaged_documentation(root)
+            self.assertEqual(docs[Path("docs/AGENT_INSTALL.md")], install)
+            self.assertEqual(docs[Path("docs/AGENT_GUIDE.md")], guide)
 
     def test_unix_archive_is_executable_even_from_nonexecutable_builder_files(self):
         with tempfile.TemporaryDirectory() as root:

@@ -25,6 +25,15 @@ def bundle_tar_mode(info):
     return info
 
 
+def packaged_documentation(root):
+    docs = {path.relative_to(root): path for path in sorted((root / "docs").rglob("*"))
+            if path.is_file()}
+    guide = root / "internal/server/guide.md"
+    if guide.is_file():
+        docs[Path("docs/AGENT_GUIDE.md")] = guide
+    return docs
+
+
 def normalize_version(value):
     value = value.removeprefix("v")
     if not re.fullmatch(r"\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", value):
@@ -98,6 +107,7 @@ def main():
     dist = (args.output_dir or root / "dist").resolve()
     dist.mkdir(parents=True, exist_ok=True)
     licenses = notices(root)
+    docs = packaged_documentation(root)
     artifacts = []
     for target_os, arch in TARGETS:
         name = f"memory-mcp-{version}-{target_os}-{arch}"
@@ -109,7 +119,10 @@ def main():
             subprocess.run([GO, "build", "-buildvcs=false", "-trimpath", "-ldflags", f"-s -w -X main.version={version} -X main.buildCommit={source_commit}",
                             "-o", str(bundle / exe), "./cmd/memory-mcp"], cwd=root, env=env, check=True)
             shutil.copy2(root / "README.md", bundle / "README.md")
-            shutil.copytree(root / "docs", bundle / "docs")
+            for relative, file in docs.items():
+                destination = bundle / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(file, destination)
             (bundle / "SOURCE_COMMIT").write_text(source_commit + "\n")
             (bundle / "THIRD_PARTY_NOTICES.txt").write_text(licenses)
             (bundle / "mcp.example.json").write_text(json.dumps({"mcpServers": {"decision-memory": {
@@ -141,6 +154,8 @@ def main():
         upgrade = dist / f"memory-mcp-{version}-agent-upgrade.zip"
         with zipfile.ZipFile(upgrade, "w", zipfile.ZIP_DEFLATED) as z:
             z.write(upgrade_guide, "UPGRADE_AGENT.md")
+            for relative, file in docs.items():
+                z.write(file, relative)
             z.writestr("SOURCE_COMMIT", source_commit + "\n")
             z.writestr("SHA256SUMS", checksums)
             for artifact in artifacts:

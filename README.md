@@ -1,6 +1,6 @@
 # memory-mcp
 
-Stable release 0.6.2. The 0.6.3 development build uses one cue-based recognition model and adds [project-specific tool probes](docs/AGENT_INSTALL.md#register-a-custom-tool).
+Stable release 0.6.3 uses one cue-based recognition model and supports [project-specific tool probes](docs/AGENT_INSTALL.md#register-a-custom-tool).
 
 Local verified-experience memory. The host understands the current task, constructs queries and judges applicability. MCP stores compact counterexamples and performs local retrieval; it never calls another model.
 
@@ -10,8 +10,8 @@ Specific observed entrances map to stable, evidenced associations (cues). An und
 
 Lookup returns one JSON text copy of complete facts, conditions, exceptions and evidence within 8 KiB, with pagination. Index/entrance metadata stays out of the visible experience DTO. Voluntary lookup/read remains available. Delivery records describe system output, never understanding, applicability, authorization or an obligation to change code. Finding no current problem is a valid result.
 
-The 0.6.3 development build uses integration protocol 11 and schema 9. Libraries with an older schema use the [upgrade procedure](docs/AGENT_INSTALL.md#upgrade-to-the-cue-schema) before setup. Selected SQL tools, including ZCode's mysql_query, probe bounded sql/query/statement fields. Lookup delivery diagnostics distinguish generated, observed and missing results.
+Version 0.6.3 uses integration protocol 11 and schema 9. Libraries with an older schema use the [upgrade procedure](docs/AGENT_INSTALL.md#upgrade-to-the-cue-schema) before setup. Selected SQL tools, including ZCode's mysql_query, probe bounded sql/query/statement fields. Lookup delivery diagnostics distinguish generated, observed and missing results.
 
 Agents initialize a first installation from verified project code and business history. On upgrade, they back up the original library, run the supported format conversion and recheck existing rules against project code. Duplicate consolidation and archival require explicit approval of the cleanup preview. See [first install](docs/AGENT_INSTALL.md#first-install) and [upgrade](docs/AGENT_INSTALL.md#upgrade-to-the-cue-schema).
 
-Start with the [release downloads](https://github.com/vaxjaz/memory-mcp/releases/tag/v0.6.2) and the [installation guide](docs/AGENT_INSTALL.md). See the [upgrade bundle contents](docs/AGENT_UPGRADE_PACKAGE.md), [experience protocol](docs/EXPERIENCE_TRIAL.md), and [acceptance results](docs/DELIVERY_ACCEPTANCE.md).
+Start with the [release downloads](https://github.com/vaxjaz/memory-mcp/releases/tag/v0.6.3) and the [installation guide](docs/AGENT_INSTALL.md). See the [upgrade bundle contents](docs/AGENT_UPGRADE_PACKAGE.md), [experience protocol](docs/EXPERIENCE_TRIAL.md), and [acceptance results](docs/DELIVERY_ACCEPTANCE.md).
