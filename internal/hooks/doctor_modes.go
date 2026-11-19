@@ -69,11 +69,21 @@ func inspectManagedWorkflow(report, c map[string]any, services []map[string]any,
 								obsolete++
 								consistent = false
 							}
-							if event == "PreToolUse" && valid[name] {
+							if !valid[name] {
+								continue
+							}
+							var expected string
+							switch event {
+							case "PreToolUse":
 								count++
-								if service["matches_opened_data_dir"] == true && g["matcher"] != probes.matcher(name) {
-									mismatchedMatchers++
-								}
+								expected = probes.matcher(name)
+							case "PostToolUse":
+								expected = probes.postMatcher(name)
+							case "PostToolUseFailure":
+								expected = probes.failureMatcher(name)
+							}
+							if expected != "" && service["matches_opened_data_dir"] == true && g["matcher"] != expected {
+								mismatchedMatchers++
 							}
 						}
 					}

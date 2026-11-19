@@ -75,4 +75,6 @@ Use `memory-mcp guide` or `memory_bootstrap` to get a minimal example from the c
 
 Check `doctor` before replaying a hook. If a probe allows the action, run `doctor --session <event-session-id>` using the same host, config, data directory, project and scope. In `recent_events`, `probe_config_invalid` records fallback to built-in probes. `custom_probe_no_clues` and `custom_probe_no_match` indicate where a configured probe stopped. An `experience_probe` with `outcome: "silent"` in its detail indicates a match with no new delivery. An empty list means there is no recorded event for that session.
 
+For conditional probes and cross-call facts, run `memory-mcp guide` and see **Conditions and previous results**. Validate the sample against the actual tool events with `doctor`. Producer selectors need a setup refresh so the client sends both the PreToolUse and PostToolUse events. Preserve case-specific cues and use `doctor --session` to see whether a branch passed, failed or has unknown context.
+
 Rollback: stop all new writers and restore the old program/configuration and the complete pre-upgrade library together. Merely pointing the old binary at a post-upgrade library is not a tested rollback.

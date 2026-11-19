@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"sort"
+	"strings"
 )
 
 func indexExperienceEntrances(ctx context.Context, tx *sql.Tx, e Entry) error {
@@ -39,9 +40,11 @@ func indexExperienceEntrances(ctx context.Context, tx *sql.Tx, e Entry) error {
 	return nil
 }
 
-func (s *Store) MatchExperiences(ctx context.Context, scope, clues string) ([]ExperienceMatch, error) {
+func (s *Store) MatchExperiences(ctx context.Context, scope string, clues ...string) ([]ExperienceMatch, error) {
 	var out []ExperienceMatch
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT a.entry_id FROM experience_entrances a JOIN entries e ON e.id=a.entry_id WHERE a.scope=? AND e.current=1 AND e.needs_review=0 AND instr(?,a.match_key)>0 ORDER BY a.entry_id LIMIT 2001`, scope, humanSignalKey(normalizedResource(clues)))
+	// Prefilter once. Only the exact check against individual fields can
+	// confirm an entrance; the combined prefilter may overselect candidates.
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT a.entry_id FROM experience_entrances a JOIN entries e ON e.id=a.entry_id WHERE a.scope=? AND e.current=1 AND e.needs_review=0 AND instr(?,a.match_key)>0 ORDER BY a.entry_id LIMIT 2001`, scope, humanSignalKey(normalizedResource(strings.Join(clues, " "))))
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +65,10 @@ func (s *Store) MatchExperiences(ctx context.Context, scope, clues string) ([]Ex
 	if len(ids) > 2000 {
 		return nil, errors.New("entrance scan limit; refusing incomplete candidate list")
 	}
-	text := newHumanSignalText(clues)
+	texts := make([]humanSignalText, len(clues))
+	for i, field := range clues {
+		texts[i] = newHumanSignalText(field)
+	}
 	for _, id := range ids {
 		r, er := s.Read(ctx, id)
 		if er != nil {
@@ -74,9 +80,16 @@ func (s *Store) MatchExperiences(ctx context.Context, scope, clues string) ([]Ex
 		}
 		for _, c := range entryCues(e) {
 			for _, a := range c.Entrances {
-				matched := literalExperienceMatch(clues, a.Value)
-				if a.Kind == "business_signal" {
-					matched = text.matches(a.Value)
+				matched := false
+				for _, text := range texts {
+					if a.Kind == "business_signal" {
+						matched = text.matches(a.Value)
+					} else {
+						matched = literalExperienceMatch(text.original, a.Value)
+					}
+					if matched {
+						break
+					}
 				}
 				if matched {
 					out = append(out, ExperienceMatch{ID: e.ID, RootID: e.RootID, CueID: c.ID, CueLabel: c.Label, CueText: c.Text, Entrance: a.Value, Trigger: a.Kind, entry: &e})

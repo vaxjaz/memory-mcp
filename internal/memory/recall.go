@@ -30,3 +30,6 @@ func identifierMatch(text, identifier string) bool {
 	}
 	return false
 }
+
+// MatchIdentifier uses the same complete token boundaries as literal cue matching.
+func MatchIdentifier(text, identifier string) bool { return identifierMatch(text, identifier) }

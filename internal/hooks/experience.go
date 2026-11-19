@@ -75,29 +75,83 @@ func experienceClues(e Event) string {
 	return result
 }
 
-func (r Runtime) configuredClues(ctx context.Context, e Event, scope string) (string, bool, error) {
+func (r Runtime) configuredClues(ctx context.Context, e Event, scope string) ([]string, bool, error) {
+	var clues []string
+	defaultClues := func() {
+		if base := experienceClues(e); base != "" {
+			clues = append(clues, base)
+		}
+	}
 	config, err := loadProbeConfig(r.Store.Dir)
 	if err != nil {
 		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_config_invalid", probeConfigName)
-		return experienceClues(e), false, nil
+		defaultClues()
+		return clues, false, nil
+	}
+	if producers := config.producers(scope, e.Tool); len(producers) > 0 {
+		if err := r.startProbeFacts(ctx, e, scope, producers); err != nil {
+			return nil, false, err
+		}
 	}
 	rule, configured := config.ruleFor(scope, e.Tool)
 	if !configured {
-		return experienceClues(e), false, nil
+		defaultClues()
+		return clues, false, nil
 	}
-	var root string
-	if rule.PathField != "" {
-		root, err = r.Store.ExperienceProjectBinding(ctx, e.CWD, scope)
+	if rule.Mode != "replace" {
+		defaultClues()
+	}
+	var active memory.ProbeContext
+	var custom []string
+	total := 0
+	seen := map[string]bool{}
+	values := probeValues{input: e.Input, fact: func(name, key string) (probeTruth, error) {
+		if active.Project == "" {
+			var err error
+			active, err = r.probeContext(ctx, e, scope)
+			if err != nil {
+				return probeUnknown, err
+			}
+		}
+		for _, definition := range config.Facts[scope] {
+			if definition.Name == name {
+				value, err := r.Store.ReadProbeFact(ctx, active, probeDefinition(definition), key)
+				return probeTruth(value), err
+			}
+		}
+		return probeUnknown, nil
+	}}
+	for _, branch := range rule.branches() {
+		truth, err := branch.When.evaluate(values)
 		if err != nil {
-			return "", true, err
+			return nil, true, err
+		}
+		if branch.When != nil || len(rule.Branches) > 0 {
+			outcome := map[probeTruth]string{probeTrue: "passed", probeFalse: "not_met", probeUnknown: "unknown"}[truth]
+			detail, _ := json.Marshal(map[string]string{"tool": e.Tool, "branch": branch.ID, "outcome": outcome})
+			_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "custom_probe_condition", string(detail))
+		}
+		if truth != probeTrue {
+			continue
+		}
+		if branch.PathField != "" && active.Project == "" {
+			active, err = r.probeContext(ctx, e, scope)
+			if err != nil {
+				return nil, true, err
+			}
+		}
+		for _, value := range branch.clues(e, active.Project) {
+			if !seen[value] {
+				seen[value] = true
+				total += len(value)
+				if total > 32768 {
+					return clues, true, nil
+				}
+				custom = append(custom, value)
+			}
 		}
 	}
-	custom := rule.clues(e, root)
-	if rule.Mode == "replace" {
-		return custom, true, nil
-	}
-	base := experienceClues(e)
-	return strings.TrimSpace(base + " " + custom), true, nil
+	return append(clues, custom...), true, nil
 }
 
 func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[string]any, error) {
@@ -157,7 +211,7 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		if err != nil {
 			return empty, err
 		}
-		if clues == "" {
+		if len(clues) == 0 {
 			if configured {
 				_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "custom_probe_no_clues", e.Tool)
 			} else if business {
@@ -168,17 +222,18 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		start := time.Now()
 		probe, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 		defer cancel()
-		matches, err := r.Store.MatchExperiences(probe, scope, clues)
+		matches, err := r.Store.MatchExperiences(probe, scope, clues...)
 		if err != nil {
 			return empty, err
 		} // Run() fails open; never records completion.
 		if business {
-			observed, lookupErr := r.Store.ObservedBusinessMatches(probe, r.host(), scope, e.Session, e.TurnID, clues)
-			err = lookupErr
-			if err != nil {
-				return empty, err
+			for _, text := range clues {
+				observed, err := r.Store.ObservedBusinessMatches(probe, r.host(), scope, e.Session, e.TurnID, text)
+				if err != nil {
+					return empty, err
+				}
+				matches = mergeExperienceMatches(matches, observed)
 			}
-			matches = mergeExperienceMatches(matches, observed)
 		}
 		if len(matches) == 0 {
 			if configured {
@@ -207,7 +262,11 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 
 	case "PostToolUseFailure":
 		if !r.isLookup(e.Tool) {
-			return empty, nil
+			enabled, err := r.Store.ExperienceTrialEnabled(ctx, scope)
+			if err != nil || !enabled {
+				return empty, err
+			}
+			return empty, r.finishProbeFacts(ctx, e, scope)
 		}
 		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "lookup_failed_native", e.Tool)
 		return empty, r.Store.FailExperienceLookup(ctx, r.host(), scope, e.Session, e.ToolUseID)
@@ -230,11 +289,11 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 			}
 			return empty, err
 		}
-		if !isBusinessTool(e.Tool) {
-			return empty, nil
-		}
 		enabled, err := r.Store.ExperienceTrialEnabled(ctx, scope)
 		if err != nil || !enabled {
+			return empty, err
+		}
+		if err = r.finishProbeFacts(ctx, e, scope); err != nil || !isBusinessTool(e.Tool) {
 			return empty, err
 		}
 		records := businessObservationRecords(e)

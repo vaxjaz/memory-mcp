@@ -44,3 +44,41 @@ Use exactly one selector per rule. tool is the exact native event name. mcp_tool
 Run doctor with the active --host, --config, --data-dir, --project and --scope before replaying a hook. Check probe_config_valid and custom_probe_rules. A selector change requires setup and a client restart; probe_matcher_mismatches checks the on-disk dispatch configuration. A valid configuration alone cannot confirm native dispatch.
 
 Use doctor --session <event-session-id> with the same options to inspect recent_events for that session. probe_config_invalid means the file was rejected and the hook fell back to built-ins. custom_probe_no_clues means the rule supplied no usable input; custom_probe_no_match means no cue matched. experience_probe with outcome silent is a matched probe with no new delivery. Look for the recorded outcome before repeating with a fresh session.
+
+### Conditions and previous results
+
+A rule accepts when plus scan fields, or branches with separate id, when and scan fields. Branches that pass contribute their own fields. Custom fields are matched separately and cue hits are deduplicated. With append, the built-in scan runs independently. Use replace to let the custom conditions control that tool's whole probe.
+
+The following example uses fixture field names. Confirm the fields of the actual PreToolUse and PostToolUse payloads before adapting it.
+
+```json
+{
+  "context_facts": {
+    "project:example/team-repo": [{
+      "name": "authenticated", "mcp_tool": "login",
+      "key": ["input.service", "input.connection_id"],
+      "when": {"field": "result.ok", "op": "eq", "value": true},
+      "ttl_seconds": 120
+    }]
+  },
+  "projects": {
+    "project:example/team-repo": [{
+      "mcp_tool": "warehouse_query", "mode": "replace",
+      "branches": [
+        {"id": "change", "text_fields": ["sql"], "when": {"all": [
+          {"fact": "authenticated", "key": ["input.service", "input.connection_id"]},
+          {"field": "input.sql", "op": "token", "value": "UPDATE"}
+        ]}},
+        {"id": "read", "text_fields": ["sql"], "when":
+          {"field": "input.sql", "op": "token", "value": "SELECT"}}
+      ]
+    }]
+  }
+}
+```
+
+Use input.<field> to read tool input and result.<field> in an observer to read the result object. The latter can be a direct object, MCP structuredContent or a single JSON-object text block. all, any and not can nest. Operators are exists, eq, prefix, suffix and token. eq compares a string, boolean or number without coercion. prefix and suffix are case-sensitive. token uses case-insensitive whole ASCII identifier matching. A comparison with a missing value or missing fact is unknown. Negating unknown keeps it unknown. Only true branches scan.
+
+An observer needs matching native call IDs and an observed input boundary. Its key is an ordered tuple of up to four scalars; large IDs belong in strings. Facts are scoped by host, project, session/agent and context generation. Default lifetime is input; session retains an observed fact across inputs up to its TTL. TTL defaults to 120 seconds and is capped at 600. A late result cannot become a new input's fact. Only a hash of the key and the predicate outcome are stored; the original result is not saved.
+
+After adding a producer or consumer tool, run setup and restart to install the native matchers. doctor shows probe_context_fact_rules and checks Pre/Post dispatch configuration. doctor --session shows custom_probe_condition with branch outcomes passed, not_met or unknown and shows whether a result could be associated with its call. A result observer affects later calls.
