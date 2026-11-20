@@ -72,9 +72,7 @@ func TestRecallPaginationSnapshotAndDuplicateQueries(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		d := in
 		d.Experience.Counterexample = fmt.Sprintf("independent synthetic mechanism %d", i)
-		if _, err := s.RecordExperience(ctx, d); err != nil {
-			t.Fatal(err)
-		}
+		seedExperience(t, s, d)
 	}
 	q := ExperienceLookup{Scope: in.Scope, Project: project, Task: "current investigation", Questions: "compare conditions", Limit: 1, Queries: []RecallQuery{{Terms: []string{"LYN", "创建准入"}}, {Terms: []string{"创建准入", "LYN"}}}}
 	seen := map[string]bool{}
@@ -106,7 +104,7 @@ func TestRecallPaginationSnapshotAndDuplicateQueries(t *testing.T) {
 	}
 	q.Queries = []RecallQuery{{Terms: []string{"LYN", "创建准入"}}, {Terms: []string{"创建准入", "LYN"}}}
 	in.Experience.Counterexample = "new independently observed fixture"
-	s.RecordExperience(ctx, in)
+	seedExperience(t, s, in)
 	if _, err := s.LookupExperience(ctx, q); err == nil {
 		t.Fatal("changed corpus accepted old cursor")
 	}
@@ -237,9 +235,7 @@ func TestChallengeCanReturnLargeRequiredCasesAcrossBoundedPages(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		d := in
 		d.Experience.Counterexample = fmt.Sprintf("隔离测试中不同的反例分支%d", i)
-		if _, err := s.RecordExperience(ctx, d); err != nil {
-			t.Fatal(err)
-		}
+		seedExperience(t, s, d)
 	}
 	matches, err := s.MatchExperiences(ctx, in.Scope, "LYN 创建准入")
 	if err != nil || len(matches) != 2 {

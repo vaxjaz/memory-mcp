@@ -1,3 +1,11 @@
+# memory-mcp 0.6.4-dev.6
+
+- Handoff batch two: W(x) write judgment. The experience write path searches same-project candidates (evidence locators, entrances, ≥3 shared body terms) read-only; a hit returns `needs_comparison` with the candidates' current facts and a comparison token, zero writes. The same draft resubmitted with `resolution.action` commits the judged relation: `reuse` (current ID), `supplement` (independent source joins the root, claim unchanged), `revise` (complete new version), `create` (new root; target never a previous_id) or `defer`. A changed candidate set invalidates the token and returns the fresh list; exact duplicates and explicit previous_id revisions bypass the comparison. Bootstrap advertises `experience_write_comparison`; the embedded guide carries the standing comparison prompt.
+
+# memory-mcp 0.6.4-dev.5
+
+- Handoff batch one (A1–A4). First lookup and reminders share one current-version fact path: cue-text related_facts leave the projection, reminders quote this version's body, and dev.3-carried superseded sentences no longer resurface while body-borne qualifiers survive; stored cue text stays readable by ID and inventoried. Committed request_id retries accept the read-only rebuilt dev.3 fingerprint. The distribution workflow verifies protocol behavior with the target tag's own scripts.
+
 # memory-mcp 0.6.4-dev.4
 
 - Third review round. Cue-text inheritance is gated to pure alias updates: a material revision of body or supporting evidence no longer carries the superseded cue text into the new version, its first lookup or the reminder — verified as the OLD→NEW3 pair against the alias pair that keeps history.

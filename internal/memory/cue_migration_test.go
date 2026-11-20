@@ -23,10 +23,7 @@ func TestExplicitCueMigrationPreservesHistoryAndRequiresReviewedCues(t *testing.
 	pendingInput := in
 	pendingInput.Title = "old record awaiting a verified cue"
 	pendingInput.Experience.Counterexample = "Isolated old cue-less case"
-	pending, err := s.RecordExperience(ctx, pendingInput)
-	if err != nil {
-		t.Fatal(err)
-	}
+	pending := seedExperience(t, s, pendingInput)
 	for _, id := range []string{active.ID, pending.ID} {
 		if _, err := s.db.Exec(
 			`UPDATE entry_profiles SET profile_json=json_set(profile_json,

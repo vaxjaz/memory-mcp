@@ -132,10 +132,7 @@ func TestDeliveryA09A17A22A43(t *testing.T) {
 	other := in
 	other.Experience.Counterexample = "合成独立机制：事务回滚后日志未回滚"
 	other.Experience.Cues = append([]ExperienceCue(nil), in.Experience.Cues[:1]...)
-	saved, err := s.RecordExperience(ctx, other)
-	if err != nil {
-		t.Fatal(err)
-	}
+	saved := seedExperience(t, s, other)
 	e2 := probeDelivery(t, s, p, "WorkOrder.remark")
 	if e2.ID == "" || len(e2.Matches) != 1 || e2.Matches[0].ID != saved.ID {
 		t.Fatal("A09", e2)
@@ -164,10 +161,7 @@ func TestDeliveryA16ActualPageOnly(t *testing.T) {
 	s, p, in := deliveryFixture(t)
 	other := in
 	other.Experience.Counterexample = "另一合成反例：独立事务失败后仍输出成功日志"
-	second, err := s.RecordExperience(ctx, other)
-	if err != nil {
-		t.Fatal(err)
-	}
+	second := seedExperience(t, s, other)
 	c := probeDelivery(t, s, p, "WorkOrder.remark")
 	if len(c.Matches) != 2 {
 		t.Fatal("missing candidates", c)
@@ -186,7 +180,7 @@ func TestDeliveryA16ActualPageOnly(t *testing.T) {
 	if remaining.ID != c.ID || remaining.Outcome != "partial_delivery" || len(remaining.Matches) != 1 || remaining.Matches[0].ID == page.Items[0].ID {
 		t.Fatal("A16 unreturned candidate lost", remaining)
 	}
-	if err = s.BeginExperienceLookup(ctx, "codex", in.Scope, "consumer", p, "page-2", "lookup", c.ID); err != nil {
+	if err := s.BeginExperienceLookup(ctx, "codex", in.Scope, "consumer", p, "page-2", "lookup", c.ID); err != nil {
 		t.Fatal(err)
 	}
 	next, err := s.LookupExperience(ctx, ExperienceLookup{Scope: in.Scope, Project: p, Task: "合成隔离任务，按当前证据比较条件", Questions: "备注与日志的历史反例是否涉及当前入口", Queries: []RecallQuery{{Terms: []string{"不匹配查询"}}}, ChallengeID: c.ID, Limit: 1, Cursor: page.NextCursor})

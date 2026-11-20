@@ -103,8 +103,18 @@ func TestReviewDirectAndObservedCueMergeOnceAndE2StillRequiresBody(t *testing.T)
 	write.Title = "Synthetic independent second experience"
 	write.Experience.Counterexample = "另一合成事务提交失败，关联状态未更新"
 	write.Experience.Cues = []memory.ExperienceCue{{ID: "cancel", Label: "取消状态", EvidenceRefs: []string{"fixture:mixed-cues"}, Matches: []memory.CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"取消"}}}}}
-	if _, err := s.RecordExperience(testCtx, write); err != nil {
+	// E2 shares the evidence locator with E1, so the write path returns the
+	// comparison; the independent transaction fact resolves to a new root.
+	pending, err := s.RecordExperience(testCtx, write)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if pending.Status == "needs_comparison" {
+		write.Resolution = &memory.WriteResolution{Action: "create", TargetID: pending.Candidates[0].ID, ComparisonToken: pending.ComparisonToken}
+		if _, err = s.RecordExperience(testCtx, write); err != nil {
+			t.Fatal(err)
+		}
+		write.Resolution = nil
 	}
 	post.Response = map[string]any{"order_no": "WXN-002", "action": "取消"}
 	handle(t, r, post)

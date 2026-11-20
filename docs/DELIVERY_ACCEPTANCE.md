@@ -186,3 +186,19 @@ dev.3 验证：全量 Go 测试、smoke、stdio 两形态校验、两个发布�
 **P2 宿主回归脚本**。`check_native_delivery.py` 与 `check_context_probes.py` 成功样本去除 cue 文案；native_delivery 的四处提醒断言改为正文派生文本（"取值入口：合成实验中业务备注已更新"）。context_probes 另有两处断言按 dev.13 起的单次请求语义更新（被 pending challenge 覆盖的命中放行，fact 门控经 doctor `outcome()==matched` 验证）。实跑：native_delivery 以真实 Windows Codex（rust exe）success 场景 `native_transport_pass=true`（block 1、正文收据 1、短提醒 1、重复命中新增 0 字节）；context_probes 本机 PASS。
 
 dev.4 验证：全量 Go 测试、smoke、stdio 两形态校验、两个发布脚本 × 三代二进制、native_delivery（真实 Codex）、context_probes、真实 ZCode 宿主试验全部通过。
+
+## 2026-11-20 审核交接包实施（0.6.4-dev.5 / dev.6）
+
+依据外部审核交接包（`target/memory-mcp-review-26ef59e`，GLM-HANDOFF.md）分两批交付，`review_replay.py --check-repairs` 四项 A1–A4 与 `verify_write_contract.py` 五用例为验收合同。
+
+**批次一（dev.5，提交 a1ff886）A1–A4**。
+- A1/A2：首次 lookup 与短提醒共用同一条当前版事实路径——投影移除 cue 文案 related_facts，提醒只引本版正文（fact 全文；反例附存量限定，缺失才拼接）；被 dev.3 修订遗留的旧文案不再回流，正文内限定（"Only in TEST"）与旧 boundary 列两种存法在两次投递中都保留限定；存量 cue 文案保持身份，按 ID 可读并由迁移盘点列出。
+- A3：已提交 request_id 分支在原始指纹不匹配时，只读重建 dev.3 的富化指纹（按请求自身 previous_id 补文案后重算）精确一致才放行原回执；改正文/换目标仍冲突，dev.2→新版、0.6.3→新版与失败未占 request_id 的既有路径回归通过。
+- A4：distribute.yml 的包验收改为 `source/scripts/`（目标标签自带）执行 smoke/trial/host_recall，版本与校验和仍由 tooling 独立检查；trial/host_recall 按标签存在性执行。
+- 证据：`review_replay.py --check-repairs --ref HEAD` 输出 PASS A1/A2/A3/A4（含 dev.1 写入→dev.3 修订→升级观察、dev.3 别名重试同回执、tag 工具链 smoke 退出码 0）。
+
+**批次二（dev.6）W(x) 业务写入判断**。`memory_experience_record` 写入路径内嵌候选检索 C(x, scope)（证据定位精确关联、代码 path+symbol、入口值、正文词项≥3 并集，稳定排序限 3 条，只读零写入），首次命中返回 `needs_comparison`（候选当前事实+命中原因+比较 token，附标准判断提示词）；同草案同 request_id 附 `resolution.action` 二段提交：reuse 返回原 ID 并登记回执、supplement 在同 root 追加独立证据（正文与原证据不动，超 3 条上限要求显式 revise）、revise 走完整新版本、create 新建 root（target_id 仅为区分标记，绝不作 previous_id）、defer 零写入。候选集变化使 token 失效并返回最新候选；显式 previous_id 修订与精确内容复用不经比较。指纹对 resolution 与 admission 排除，原始草案响应丢失重试取回已提交结果。
+- 机制验收：`verify_write_contract.py` 五用例（retry/reuse/create/supplement/defer）全 PASS——同义改写 reuse 后 1 root 1 版本、独立停用事实 create 后 2 root、独立台账补证后同 root 新版且双源俱在、defer 零写入、两阶段重放返回原结果。Go 侧另有精确复用绕行、跨 scope 隔离、token 过期返回新候选等回归（`write_comparison_test.go` 七项）。
+- 手工对照矩阵（W5/W6 后半/W8/W9）与不预填动作的 GLM 盲测、公开漏检统计为后续外部条件，本节不报告判断准确率。
+
+dev.6 验证：全量 Go 测试、smoke、stdio 两形态、host_recall/experience_trial/context_probes、verify_write_contract、真实 ZCode 宿主试验全部通过；批次一合同复验仍四绿。
