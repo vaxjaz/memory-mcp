@@ -1,3 +1,7 @@
+# memory-mcp 0.6.4-dev.8
+
+- Field feedback from a second machine. `doctor --out FILE` writes the full JSON report (indented, new file only) and prints just its path, avoiding host tool-output truncation on large reports; stdout mode is unchanged. Doctor flags `*.pre-schema8` probe leftovers beside the data directory with explicit re-registration guidance, so custom wakeup rules retired by an upgrade are visible instead of silently absent. Regressions pin that doctor output stays valid JSON with nested Chinese quotes and 60KB+ detail payloads.
+
 # memory-mcp 0.6.4-dev.7
 
 - Fifth review round on W(x). reuse/supplement/revise may only target a candidate this comparison showed, still current — a mis-sent foreign ID is rejected with zero writes. The final candidate recheck runs inside the write transaction, so concurrent paraphrases of one fact yield a single root and the loser receives a fresh comparison. Committed actions and targets are persisted per request; replays return the original outcome and re-deciding under the same ID conflicts. Resolutions require a nonblank minimal difference and an evidence reference from this submission. Candidate pages expose next_cursor/has_more over the full ranked list, and a paging-cursor bug that restarted every page at offset zero is fixed.

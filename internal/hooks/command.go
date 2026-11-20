@@ -16,6 +16,10 @@ import (
 	"github.com/vaxjaz/memory-mcp/internal/memory"
 )
 
+// legacyProbeSuffix marks a retired pre-schema8 tool-probes.json kept beside
+// the data directory during an upgrade; its rules no longer participate.
+const legacyProbeSuffix = ".pre-schema8"
+
 func Run(ctx context.Context, args []string) error {
 	cmd := args[0]
 	if cmd == "adapters" {
@@ -41,13 +45,14 @@ func Run(ctx context.Context, args []string) error {
 	dry := fs.Bool("dry-run", false, "show setup targets without writing config or opening the database")
 	checkText := fs.Bool("check-text", false, "doctor: scan stored text for invalid UTF-8/U+FFFD without changing it")
 	var session string
-	var probeFile, expectedRecord, expectedCue, challengeID string
+	var probeFile, expectedRecord, expectedCue, challengeID, doctorOut string
 	if cmd == "doctor" {
 		fs.StringVar(&session, "session", "", "limit recent hook events to this exact session ID")
 		fs.StringVar(&challengeID, "challenge", "", "read-only delivery status for a full challenge ID")
 		fs.StringVar(&probeFile, "probe", "", "read-only probe check from event JSON file, or - for stdin")
 		fs.StringVar(&expectedRecord, "expect", "", "with --probe, check whether this full record ID directly matches")
 		fs.StringVar(&expectedCue, "expect-cue", "", "with --expect, check this specific cue ID")
+		fs.StringVar(&doctorOut, "out", "", "write the full JSON report to a new file and print only its path; avoids host tool-output truncation")
 	}
 	_ = fs.String("managed-id", "", "installer ownership marker")
 	if err = fs.Parse(args[1:]); err != nil {
@@ -250,6 +255,35 @@ func Run(ctx context.Context, args []string) error {
 				return er
 			}
 			r["text_integrity"] = audit
+		}
+		// Pre-schema8 probe registrations cannot be converted mechanically;
+		// surface leftovers so the missing custom wakeup rules are visible
+		// instead of silently absent.
+		if leftovers, le := filepath.Glob(filepath.Join(store.Dir, "*"+legacyProbeSuffix)); le == nil && len(leftovers) > 0 {
+			names := make([]string, 0, len(leftovers))
+			for _, item := range leftovers {
+				names = append(names, filepath.Base(item))
+			}
+			r["legacy_probe_config_files"] = names
+			r["legacy_probe_config_next"] = "The pre-schema8 probe format is not converted automatically. Re-register this project's custom tools with the current fields format, verify with doctor --probe, then remove the leftover file."
+		}
+		if doctorOut != "" {
+			f, er := os.OpenFile(doctorOut, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+			if er != nil {
+				return er
+			}
+			encoder := json.NewEncoder(f)
+			encoder.SetIndent("", "  ")
+			if er = encoder.Encode(r); er == nil {
+				er = f.Close()
+			} else {
+				_ = f.Close()
+			}
+			if er != nil {
+				return er
+			}
+			fmt.Fprintln(os.Stdout, "Saved doctor report to", doctorOut)
+			return nil
 		}
 		return json.NewEncoder(os.Stdout).Encode(r)
 	}
