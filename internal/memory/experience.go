@@ -372,6 +372,7 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 	// comparison and retries across binary upgrades share it.
 	resolution := in.Resolution
 	admission := in.Admission
+	pageCursor := in.Cursor
 	in.Resolution = nil
 	in.Admission = nil
 	in.Cursor = ""
@@ -470,7 +471,7 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 				return result, er
 			}
 			if len(candidates) > 0 {
-				return comparisonPage(in, requestFingerprint, candidates, in.Cursor), nil
+				return comparisonPage(in, requestFingerprint, candidates, pageCursor), nil
 			}
 			// No candidate outside; re-check inside the write transaction so a
 			// concurrent writer turns this create into a comparison.
