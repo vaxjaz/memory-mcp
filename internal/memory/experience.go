@@ -87,6 +87,9 @@ type ExperienceReceipt struct {
 	Candidates      []WriteCandidate `json:"candidates,omitempty"`
 	HasMore         bool             `json:"has_more,omitempty"`
 	NextCursor      string           `json:"next_cursor,omitempty"`
+	// ResolutionTemplate is pre-filled in every needs_comparison response so
+	// completing the second phase requires no prior knowledge of the protocol.
+	ResolutionTemplate *WriteResolution `json:"resolution_template,omitempty"`
 }
 
 // TriggerPreview describes the saved revision, independently of host dispatch.
@@ -346,7 +349,9 @@ func inheritCueText(previous, submitted *Experience) map[string]bool {
 	return inherited
 }
 
-const comparisonNotice = "比较本次观察与候选旧经验。假设旧经验原句在它注明的对象、时间和环境内完全成立，本次证据还增加了哪一项可核查的事实？请引用能区分两者的旧原句和本次证据。若只是转述，复用；若多了独立来源，补证；若证据推翻旧原句，指出被推翻的部分并修订；若两条可同时成立且各自影响判断，分别保留。若区分所需事实缺失，指出缺哪一项并暂缓。只返回动作、候选 ID、最小差异和证据定位。"
+// comparisonNotice is self-contained: an agent that has never read the guide
+// must be able to complete the two-phase write from this response alone.
+const comparisonNotice = "同项目存在可比旧经验，本次调用零写入。请比较：假设旧经验原句在它注明的对象、时间和环境内完全成立，本次证据还增加了哪一项可核查的事实？若只是转述→reuse；多了独立来源→supplement；证据推翻旧原句→revise；两条可同时成立且各自影响不同判断→create；区分证据缺失→defer。判定后：用同一草案和同一 request_id 重新调用本工具，并在 resolution 字段填入 resolution_template（把 action 填为上述五者之一、target_id 换成你选中的候选当前 ID、difference 写引用了旧原句与本次证据的最小差异）；token 与 evidence_ref 已预填。模板和候选见下。"
 
 // writeComparisonAbort rolls a create back inside Put's transaction when the
 // final in-transaction candidate recheck finds a comparable record.
@@ -471,25 +476,28 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 				return result, er
 			}
 			if len(candidates) > 0 {
-				return comparisonPage(in, requestFingerprint, candidates, pageCursor), nil
+				return comparisonPage(in, requestFingerprint, candidates, pageCursor, admissionEvidenceRef(admission)), nil
 			}
 			// No candidate outside; re-check inside the write transaction so a
 			// concurrent writer turns this create into a comparison.
-			return s.commitNewRoot(ctx, in, requestFingerprint, x, "", "")
+			return s.commitNewRoot(ctx, in, requestFingerprint, x, "", "", admissionEvidenceRef(admission))
 		default:
 			return result, err
 		}
 		return s.commitExperience(ctx, in, requestFingerprint, x, "create", "", nil)
 	}
 	if resolution != nil {
-		return s.resolveWriteComparison(ctx, in, resolution, requestFingerprint, x)
+		return s.resolveWriteComparison(ctx, in, resolution, requestFingerprint, x, admissionEvidenceRef(admission))
 	}
 	return s.commitExperience(ctx, in, requestFingerprint, x, "revise", in.PreviousID, nil)
 }
 
 // comparisonPage slices the ranked candidate list for one response and keeps a
-// cursor so records beyond the first page stay reachable for this draft.
-func comparisonPage(in ExperienceWrite, fingerprint string, candidates []WriteCandidate, cursor string) ExperienceReceipt {
+// cursor so records beyond the first page stay reachable for this draft. The
+// prefilled resolution_template makes the second phase completable from this
+// response alone: token, evidence and a default target are server-known; only
+// the action and the cited difference remain for the agent's judgment.
+func comparisonPage(in ExperienceWrite, fingerprint string, candidates []WriteCandidate, cursor, draftEvidenceRef string) ExperienceReceipt {
 	token := comparisonToken(in.Scope, fingerprint, candidateIDs(candidates))
 	start := 0
 	if cursor != "" {
@@ -504,7 +512,8 @@ func comparisonPage(in ExperienceWrite, fingerprint string, candidates []WriteCa
 	if end > len(candidates) {
 		end = len(candidates)
 	}
-	receipt := ExperienceReceipt{Indexed: false, Status: "needs_comparison", ComparisonToken: token, Candidates: candidates[start:end], Notice: comparisonNotice}
+	receipt := ExperienceReceipt{Indexed: false, Status: "needs_comparison", ComparisonToken: token, Candidates: candidates[start:end], Notice: comparisonNotice,
+		ResolutionTemplate: &WriteResolution{ComparisonToken: token, EvidenceRef: draftEvidenceRef, TargetID: candidates[start].ID}}
 	if end < len(candidates) {
 		receipt.HasMore = true
 		receipt.NextCursor = encodeCursor(pageCursor{Version: 1, Filter: token, Sort: strconv.Itoa(end), ID: digestText(token)[:32]})
@@ -523,7 +532,7 @@ func candidateIDs(candidates []WriteCandidate) []string {
 // commitNewRoot commits a first-seen observation and re-checks candidates
 // inside Put's write transaction; a concurrent comparable write aborts into a
 // comparison instead of a second root.
-func (s *Store) commitNewRoot(ctx context.Context, in ExperienceWrite, requestFingerprint string, x *Experience, distinguished, expectedToken string) (ExperienceReceipt, error) {
+func (s *Store) commitNewRoot(ctx context.Context, in ExperienceWrite, requestFingerprint string, x *Experience, distinguished, expectedToken, draftEvidenceRef string) (ExperienceReceipt, error) {
 	recheck := func(ctx context.Context, tx *sql.Tx) error {
 		found, err := s.writeCandidates(ctx, tx, in.Scope, x)
 		if err != nil {
@@ -540,7 +549,7 @@ func (s *Store) commitNewRoot(ctx context.Context, in ExperienceWrite, requestFi
 	receipt, err := s.commitExperience(ctx, in, requestFingerprint, x, "create", distinguished, recheck)
 	var abort *writeComparisonAbort
 	if errors.As(err, &abort) {
-		return comparisonPage(in, requestFingerprint, abort.candidates, ""), nil
+		return comparisonPage(in, requestFingerprint, abort.candidates, "", draftEvidenceRef), nil
 	}
 	return receipt, err
 }
@@ -595,7 +604,7 @@ func (s *Store) commitExperience(ctx context.Context, in ExperienceWrite, reques
 // changed set (or draft) invalidates the token and returns the fresh
 // candidates instead of committing anything. reuse/supplement/revise may only
 // target a candidate THIS comparison actually showed, still current.
-func (s *Store) resolveWriteComparison(ctx context.Context, in ExperienceWrite, resolution *WriteResolution, requestFingerprint string, x *Experience) (ExperienceReceipt, error) {
+func (s *Store) resolveWriteComparison(ctx context.Context, in ExperienceWrite, resolution *WriteResolution, requestFingerprint string, x *Experience, draftEvidenceRef string) (ExperienceReceipt, error) {
 	var result ExperienceReceipt
 	candidates, err := s.writeCandidates(ctx, s.db, in.Scope, x)
 	if err != nil {
@@ -606,7 +615,7 @@ func (s *Store) resolveWriteComparison(ctx context.Context, in ExperienceWrite, 
 		return ExperienceReceipt{Indexed: false, Status: "deferred", Notice: "Nothing was merged or changed. Continue the current task; submit again when distinguishing evidence is available."}, nil
 	}
 	if resolution.ComparisonToken != comparisonToken(in.Scope, requestFingerprint, ids) {
-		return comparisonPage(in, requestFingerprint, candidates, ""), nil
+		return comparisonPage(in, requestFingerprint, candidates, "", draftEvidenceRef), nil
 	}
 	if resolution.Action != "create" && !containsString(ids, resolution.TargetID) {
 		return result, missingLookup("comparison_target_not_shown", "resolution.target_id", resolution.TargetID, in.Scope, "This target was not among the candidates shown for this comparison. Pick a listed candidate current ID or re-read the fresh list; nothing was written.")
@@ -631,7 +640,7 @@ func (s *Store) resolveWriteComparison(ctx context.Context, in ExperienceWrite, 
 	case "create":
 		// target_id only marks a distinguished candidate; never a previous_id.
 		// The final candidate re-check runs inside the write transaction.
-		return s.commitNewRoot(ctx, in, requestFingerprint, x, resolution.TargetID, resolution.ComparisonToken)
+		return s.commitNewRoot(ctx, in, requestFingerprint, x, resolution.TargetID, resolution.ComparisonToken, draftEvidenceRef)
 	case "revise":
 		target, e := s.Read(ctx, resolution.TargetID)
 		if e != nil || target.Entry.Scope != in.Scope || !target.Entry.Current || target.Entry.Profile == nil || target.Entry.Profile.Experience == nil {
@@ -670,6 +679,15 @@ func (s *Store) resolveWriteComparison(ctx context.Context, in ExperienceWrite, 
 		return s.commitExperience(ctx, revision, requestFingerprint, &merged, "supplement", resolution.TargetID, nil)
 	}
 	return result, errors.New("resolution.action must be reuse, supplement, revise, create or defer")
+}
+
+// admissionEvidenceRef extracts the draft's already-validated admission
+// evidence reference for template prefilling; empty when absent.
+func admissionEvidenceRef(admission *ExperienceAdmission) string {
+	if admission == nil {
+		return ""
+	}
+	return admission.EvidenceRef
 }
 
 func containsString(values []string, wanted string) bool {

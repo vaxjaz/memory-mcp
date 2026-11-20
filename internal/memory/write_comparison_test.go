@@ -521,3 +521,98 @@ func TestWriteComparisonPagingReachesHiddenCandidate(t *testing.T) {
 		t.Fatal("paging changed the library", roots, total)
 	}
 }
+
+func TestWriteComparisonTemplateCompletesNaiveAgent(t *testing.T) {
+	s, _, in := comparisonFixture(t)
+	seed, err := s.RecordExperience(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A host that has read NOTHING but this response must be able to finish.
+	incoming := in
+	incoming.RequestID = "naive"
+	incoming.Experience.Fact = "For item A on 19 November, the PROD and TEST settlement codes did not match."
+	pending, err := s.RecordExperience(ctx, incoming)
+	if err != nil || pending.Status != "needs_comparison" {
+		t.Fatal(pending, err)
+	}
+	tmpl := pending.ResolutionTemplate
+	if tmpl == nil {
+		t.Fatal("resolution_template missing from needs_comparison response")
+	}
+	if tmpl.ComparisonToken != pending.ComparisonToken || tmpl.EvidenceRef == "" || tmpl.TargetID != pending.Candidates[0].ID {
+		t.Fatal("template not prefilled with server-known values", tmpl)
+	}
+	if tmpl.Action != "" || tmpl.Difference != "" {
+		t.Fatal("judgment fields must stay empty for the agent", tmpl)
+	}
+	// Naive completion: copy the template verbatim, fill ONLY the two judgment fields.
+	resolution := *tmpl
+	resolution.Action = "reuse"
+	resolution.Difference = "同一快照同一结算项，仅换表述。"
+	done, err := s.RecordExperience(ctx, withRawResolution(incoming, &resolution))
+	if err != nil || done.Action != "reuse" || done.ID != seed.ID {
+		t.Fatal("naive completion failed", done, err)
+	}
+	if roots, total := rootCount(t, s, in.Scope); roots != 1 || total != 1 {
+		t.Fatal("naive reuse changed the library", roots, total)
+	}
+	// The create path from a bare template too.
+	other := in
+	other.RequestID = "naive-create"
+	other.Experience.Fact = "On 19 November item A was disabled in TEST."
+	pending2, err := s.RecordExperience(ctx, other)
+	if err != nil || pending2.Status != "needs_comparison" {
+		t.Fatal(pending2, err)
+	}
+	resolution2 := *pending2.ResolutionTemplate
+	resolution2.Action = "create"
+	resolution2.Difference = "停用状态独立于编码差异，二者可同时成立。"
+	done2, err := s.RecordExperience(ctx, withRawResolution(other, &resolution2))
+	if err != nil || done2.Action != "create" || done2.RootID == seed.RootID {
+		t.Fatal("naive create failed", done2, err)
+	}
+	// Stale tokens re-emit a fresh prefilled template instead of a dead end.
+	staleIncoming := in
+	staleIncoming.RequestID = "naive-stale-check"
+	staleIncoming.Admission = &ExperienceAdmission{FutureDecision: in.Admission.FutureDecision, EvidenceRef: "fixture:config-snapshot"}
+	staleIncoming.Experience.Cues = append([]ExperienceCue(nil), in.Experience.Cues...)
+	for i := range staleIncoming.Experience.Cues {
+		staleIncoming.Experience.Cues[i].EvidenceRefs = []string{"fixture:config-snapshot"}
+	}
+	staleIncoming.Experience.Fact = "For item A on 19 November, the PROD and TEST settlement codes did not match."
+	pendingStale, err := s.RecordExperience(ctx, staleIncoming)
+	if err != nil || pendingStale.Status != "needs_comparison" {
+		t.Fatal(pendingStale, err)
+	}
+	dead := *pendingStale.ResolutionTemplate
+	dead.Action = "reuse"
+	dead.Difference = "基于过期候选集的判断。"
+	// The world moves AFTER the comparison opened: a revision supersedes the
+	// shown candidate set's anchor.
+	moved := in
+	moved.RequestID = "naive-stale"
+	moved.PreviousID = seed.ID
+	moved.Experience.Fact = "On 20 November item A had equal settlement codes in TEST and PROD."
+	moved.Experience.Evidence = []ExperienceEvidence{{Kind: "business", Reference: "fixture:next-day", Observation: "Next-day snapshot."}}
+	moved.Admission = &ExperienceAdmission{FutureDecision: "按次日快照判断。", EvidenceRef: "fixture:next-day"}
+	moved.Experience.Cues = append([]ExperienceCue(nil), in.Experience.Cues...)
+	for i := range moved.Experience.Cues {
+		moved.Experience.Cues[i].EvidenceRefs = []string{"fixture:next-day"}
+	}
+	if _, err = s.RecordExperience(ctx, moved); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := s.RecordExperience(ctx, withRawResolution(staleIncoming, &dead))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fresh.Status != "needs_comparison" || fresh.ResolutionTemplate == nil || fresh.ResolutionTemplate.ComparisonToken == pendingStale.ComparisonToken {
+		t.Fatal("stale path did not re-emit a fresh prefilled template", fresh.Status)
+	}
+}
+
+func withRawResolution(in ExperienceWrite, resolution *WriteResolution) ExperienceWrite {
+	in.Resolution = resolution
+	return in
+}

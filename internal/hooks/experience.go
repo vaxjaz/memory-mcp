@@ -81,7 +81,7 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 		if err := r.Store.HookAdapterReceipt(ctx, r.host(), e.Name, scope, e.Session, e.TurnID); err != nil {
 			return empty, err
 		}
-		return contextOutput(e.Name, fmt.Sprintf("记忆经验；scope=%s；服务=%s。纠偏后先修当前工作；读错原文、漏看限定词、错解范围等本次误解跳过写入。有证据改变以后同类情形的具体判断时，用 memory_experience_record 提交反例或有来源的业务事实（两形态二选一，限定写进事实本身）并附 admission；可自主 memory_experience_lookup。当前规范先行，历史经验只提出待验证疑点。工具明确命中索引且正文未交付时主动查询；正文交付后仅新关联给短事实或反例，同关联静默。召回的历史经验到手后：联系用户原始目标与本步作用对象；它提示的区别会改变本步答案吗？会，则核对当前观察实际针对的对象、环境或版本——支持、反驳还是不足以判断；证据足够即继续，影响交付而证据不足时核查缺口或收窄断言。无原文采集、每轮提醒、异步写入或 Stop 整理。", scope, r.serverName())), nil
+		return contextOutput(e.Name, fmt.Sprintf("记忆经验；scope=%s；服务=%s。纠偏后先修当前工作；读错原文、漏看限定词、错解范围等本次误解跳过写入。有证据改变以后同类情形的具体判断时，用 memory_experience_record 提交反例或有来源的业务事实（两形态二选一，限定写进事实本身）并附 admission；若返回 needs_comparison（同项目存在可比旧经验，本次零写入），按响应内 resolution_template 填 action 与 difference，用同一草案和同一 request_id 附 resolution 复调；可自主 memory_experience_lookup。当前规范先行，历史经验只提出待验证疑点。工具明确命中索引且正文未交付时主动查询；正文交付后仅新关联给短事实或反例，同关联静默。召回的历史经验到手后：联系用户原始目标与本步作用对象；它提示的区别会改变本步答案吗？会，则核对当前观察实际针对的对象、环境或版本——支持、反驳还是不足以判断；证据足够即继续，影响交付而证据不足时核查缺口或收窄断言。无原文采集、每轮提醒、异步写入或 Stop 整理。", scope, r.serverName())), nil
 	case "UserPromptSubmit":
 		if err := r.Store.ExperienceStartTurn(ctx, r.host(), scope, e.Session, e.TurnID, e.EventID); err != nil {
 			return empty, err
