@@ -79,7 +79,6 @@ The following cue matches when Write targets a .sql file and its proposed conten
 {
   "cue_id": "settlement_code",
   "label": "Settlement field",
-  "text": "The two isolated environments returned different values for the same field.",
   "evidence_refs": ["verified-source"],
   "matches": [{
     "when": {"all": [

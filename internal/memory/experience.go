@@ -238,10 +238,12 @@ func experienceKey(x *Experience) string {
 
 // experienceWriteBoundary enforces protocol-12 write rules that stored history
 // must still satisfy on read: new experiences do not author cue text, and
-// fact-form records carry their qualifiers inside the fact sentence.
-func (validation *recordValidation) experienceWriteBoundary(x *Experience) {
+// fact-form records carry their qualifiers inside the fact sentence. Cue IDs in
+// inherited carry historical text from the previous revision, not authored
+// content.
+func (validation *recordValidation) experienceWriteBoundary(x *Experience, inherited map[string]bool) {
 	for i, c := range x.Cues {
-		if strings.TrimSpace(c.Text) != "" {
+		if strings.TrimSpace(c.Text) != "" && !inherited[c.ID] {
 			validation.add(fmt.Sprintf("experience.cues[%d].text", i), "new experience writes do not author cue text; move the fact or counterexample into the body and resubmit without cue text")
 		}
 	}
@@ -255,8 +257,49 @@ func (validation *recordValidation) experienceWriteBoundary(x *Experience) {
 	}
 }
 
+// inheritCueText restores unchanged cue text from the previous revision of the
+// same cue ID. A revision that follows the write-boundary error and omits the
+// retired field must not fork the content identity, lose stored cue facts or
+// strand previous delivery receipts on a superseded version. Authoring or
+// rewriting cue text is still rejected at the boundary.
+func inheritCueText(previous, submitted *Experience) map[string]bool {
+	if previous == nil || submitted == nil {
+		return nil
+	}
+	texts := map[string]string{}
+	for _, cue := range previous.Cues {
+		if strings.TrimSpace(cue.Text) != "" {
+			texts[cue.ID] = cue.Text
+		}
+	}
+	inherited := map[string]bool{}
+	for i := range submitted.Cues {
+		id := submitted.Cues[i].ID
+		if strings.TrimSpace(submitted.Cues[i].Text) == "" && texts[id] != "" {
+			submitted.Cues[i].Text = texts[id]
+			inherited[id] = true
+		}
+	}
+	return inherited
+}
+
 func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (ExperienceReceipt, error) {
 	var result ExperienceReceipt
+	// A replayed committed request must satisfy the binding that governs this
+	// directory right now; it predates newer validation, not the binding.
+	if in.RequestID != "" {
+		if _, err := s.experienceProject(ctx, in.Project, in.Scope); err != nil {
+			return result, err
+		}
+	}
+	// Inherit unchanged cue text before fingerprinting so retries re-derive
+	// the identical material payload.
+	var inherited map[string]bool
+	if in.PreviousID != "" {
+		if prev, e := s.Read(ctx, in.PreviousID); e == nil && prev.Entry.Scope == in.Scope && prev.Entry.Profile != nil && prev.Entry.Profile.Experience != nil {
+			inherited = inheritCueText(prev.Entry.Profile.Experience, &in.Experience)
+		}
+	}
 	// A committed request_id returns its receipt before validation: protocol
 	// upgrades may tighten checks (body budgets, form rules) that the committed
 	// payload legitimately predates. Different payload under the same ID still
@@ -285,7 +328,7 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 	var validation recordValidation
 	validation.experienceAdmission(admission, in.Experience.Evidence)
 	validation.experience(&in.Experience)
-	validation.experienceWriteBoundary(&in.Experience)
+	validation.experienceWriteBoundary(&in.Experience, inherited)
 	if err := validation.err(); err != nil {
 		return result, err
 	}

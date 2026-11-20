@@ -20,7 +20,7 @@ def check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool):
     sql = "SELECT PRIVATE_SQL_MARKER FROM information_schema.columns"
     evidence = dict(kind="runtime", reference="synthetic-sql", observation="Isolated Hook replay marker")
     entrances = ["information_schema"]
-    cue = dict(cue_id="metadata", label="Metadata", text="Fixture requires a prior metadata query",
+    cue = dict(cue_id="metadata", label="Metadata",
                evidence_refs=["synthetic-sql"], matches=[
                    dict(op="token", entrances=entrances),
                    dict(op="token", normalize="whitespace", entrances=["SHOW COLUMNS", "刷数据"]),
@@ -34,6 +34,11 @@ def check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool):
                                 boundary="Only this disposable fixture",
                                 evidence=[evidence], cues=[cue]))
     saved = host.tool("memory_experience_record", case)
+    # Retired cue text is rejected at the write boundary with a field position.
+    authored = json.loads(json.dumps(case))
+    authored["experience"]["cues"][0]["text"] = "Fixture requires a prior metadata query"
+    rejected = host.tool("memory_experience_record", authored, expect_error=True)
+    assert "experience.cues[0].text" in rejected["content"][0]["text"], rejected
 
     for label, tool, args, expected in (
             ("bash-command", "Bash", {"command": "grep information_schema fixture.sql"}, True),
@@ -202,7 +207,7 @@ def main():
                              admission=dict(future_decision="Check each entry point for the required validation.",
                                             evidence_ref="isolated fixture"),
                              request_id="experience-once",
-                             experience=dict(cues=[dict(cue_id="admission",label="入口准入",text="合成多入口实验中本地调用未覆盖另一入口的准入条件。",evidence_refs=["isolated fixture"],matches=[dict(op="token",entrances=["canDispatchLynOrder"]),dict(op="token",normalize="whitespace",entrances=["LYN 创建准入"])])],
+                             experience=dict(cues=[dict(cue_id="admission",label="入口准入",evidence_refs=["isolated fixture"],matches=[dict(op="token",entrances=["canDispatchLynOrder"]),dict(op="token",normalize="whitespace",entrances=["LYN 创建准入"])])],
                                              pitfall="A local caller is assumed to cover every entry",
                                              counterexample="An explicitly synthetic isolated counterexample, not a real business rule",
                                              impact="One entry may miss a required admission check",

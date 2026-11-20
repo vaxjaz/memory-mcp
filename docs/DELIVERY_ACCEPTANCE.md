@@ -160,3 +160,15 @@ The dev.12 Windows executable reproduced invalid next_cursor responses across sh
 **P2 预算回退入口**。短提醒超预算的回退行改为指名 `memory_read 读取 <版本ID>`（lookup 仅词项查询无法按 ID 取回）；回归断言回退行包含工具名与版本 ID，并实际按 ID 读取返回被省略的完整事实（`TestCueReminderFallsBackToMemoryReadLocator`）。
 
 全量 Go 测试、smoke（0.6.4-dev.2）、stdio 两形态校验与真实 ZCode 宿主试验（含 F 提示断言）全部通过。上述仍为传输与协议行为验证；热融合判断质量与 D/E 盲测维持未覆盖。
+
+## 2026-11-20 二轮外部审查修复（0.6.4-dev.3）
+
+**P1 发布验收脚本**。发布流程实际调用的 `check_experience_trial.py --if-supported` 与 `check_host_recall.py` 此前仍在成功样本里提交 `cue.text`，在 dev.2 写边界下退出码 1。两份脚本的成功写入已去除文案，并各保留一个负例断言旧格式被拒且字段位置正确（`experience.cues[0].text`），`assert_rejected_unchanged` 同时验证拒绝不改库。内置 guide.md 的 cue 示例同步移除 `text` 字段。两脚本在 dev.3 二进制上实跑 PASS（四适配器 10–12 ms 无命中中位；MCP 写入/修订/多查询召回/分页/漂移与 admission 覆盖不变）。
+
+**P1 存量 fact 短提醒限定**。dev.1 写入的 fact 记录可带分离 boundary（两版共用 schema 10）。`shortFact` 的 fact 分支改为与反例分支一致：追加存量 `applicability/boundary` 限定（新写入这些列为空，行为不变）；超预算仍回退 `memory_read` + 版本 ID。以 dev.1 存量形态（fact+boundary，经存储路径构造）回归：新关联提醒同时包含事实与“仅在测试环境验证”（`TestStoredFactReminderCarriesLegacyQualifiers`）。
+
+**P2 别名修订继承历史文案**。`RecordExperience` 在指纹计算前按 `previous_id + cue ID` 继承未改动的存量文案：省略 `cue.text` 的纯别名修订恢复与原版本一致的内容键，走既有 alias 去重路径（版本 ID 不变、送达收据不断裂、RelatedFacts 不丢失）；新增或改写文案仍被写边界拒绝。真实二进制定测：0.6.3 建库（带文案）→ 迁移 → dev.3 省略文案加匹配入口 → 返回同版本 reused 且 `memory_read` 确认存量文案保留（`TestAliasRevisionInheritsStoredCueText`）。
+
+**P2 重放快路径绑定检查**。`RecordExperience`/`RecordAgreement` 的已提交 request_id 快路径在返回历史收据前先执行当前项目/scope 绑定检查（目录改绑后重放返回绑定错误而非旧 scope 成功收据），正文校验仍被跳过；恢复绑定后同一重试重新成功（`TestReplayHonorsCurrentBinding`）。此前验证过的 2983 字节跨版本重试场景不受影响（绑定未变）。
+
+dev.3 验证：全量 Go 测试、smoke、stdio 两形态校验、两个发布验收脚本、真实 0.6.3 别名继承定测与真实 ZCode 宿主试验全部通过。

@@ -85,7 +85,13 @@ func validateAgreement(a *Agreement) error {
 func (s *Store) RecordAgreement(ctx context.Context, in AgreementWrite) (ExperienceReceipt, error) {
 	var zero ExperienceReceipt
 	// Committed request_id retries return their receipt before validation, as
-	// in RecordExperience; a different payload under the same ID still conflicts.
+	// in RecordExperience; a different payload under the same ID still
+	// conflicts, and a replay must satisfy the current project binding.
+	if in.RequestID != "" {
+		if _, er := s.experienceProject(ctx, in.Project, in.Scope); er != nil {
+			return zero, er
+		}
+	}
 	original, _ := json.Marshal(in)
 	fingerprint := "agreement-v1:" + digestText(string(original))
 	if in.RequestID != "" {

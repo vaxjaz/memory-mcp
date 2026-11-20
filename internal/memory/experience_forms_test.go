@@ -344,6 +344,97 @@ func TestCueReminderFallsBackToMemoryReadLocator(t *testing.T) {
 	}
 }
 
+func TestStoredFactReminderCarriesLegacyQualifiers(t *testing.T) {
+	s, project, _ := factFixture(t)
+	in := ExperienceWrite{Scope: "project:demo"}
+	// A dev.1-shaped stored record: fact body with a separate boundary column.
+	devOne := Experience{Fact: "结算编码是 X。", Boundary: "仅在测试环境验证",
+		Evidence: []ExperienceEvidence{{Kind: "business", Reference: "fixture:dev1", Observation: "dev.1 存量形态"}},
+		Cues: []ExperienceCue{
+			{ID: "settle", Label: "结算编码", EvidenceRefs: []string{"fixture:dev1"}, Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"settlementCode"}}}},
+			{ID: "envcfg", Label: "环境配置", EvidenceRefs: []string{"fixture:dev1"}, Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"offlineSettlement"}}}},
+		}}
+	d := Draft{Kind: "case", Scope: in.Scope, Title: "dev.1 存量 fact", Body: "业务事实：" + devOne.Fact, Origin: "model_inference",
+		SourceRef: "fixture:dev1", Profile: &Profile{Class: "long_term", FutureUse: devOne.Fact, CounterCheck: "stored shape", Experience: &devOne}}
+	d.experienceValidated = true
+	d.experienceKey = experienceKey(&devOne)
+	if _, err := s.Put(ctx, d, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ExperienceStartTurn(ctx, "codex", in.Scope, "consumer", "t1", "e1"); err != nil {
+		t.Fatal(err)
+	}
+	c := probeDelivery(t, s, project, "settlementCode")
+	o := nativeLookup(t, s, project, "dev1-body", c.ID, 2)
+	observeDelivery(t, s, "dev1-body", o)
+	reminder := probeDelivery(t, s, project, "offlineSettlement")
+	if reminder.Outcome != "cues" {
+		t.Fatal("stored fact record emitted no reminder", reminder)
+	}
+	if !strings.Contains(reminder.Context, "结算编码是 X") || !strings.Contains(reminder.Context, "仅在测试环境验证") {
+		t.Fatal("stored fact reminder lost its qualifier", reminder.Context)
+	}
+	finishEmission(t, s, reminder, true)
+}
+
+func TestAliasRevisionInheritsStoredCueText(t *testing.T) {
+	s, project, _ := factFixture(t)
+	legacy := legacyFiveFieldWrite(project)
+	stored := storeLegacyShapedRecord(t, s, legacy)
+	// Adding a match entrance without cue text must stay an alias update: same
+	// version, delivery receipts intact, historical cue text preserved.
+	revision := legacyFiveFieldWrite(project)
+	revision.PreviousID = stored.ID
+	revision.Experience.Cues[0].Text = ""
+	revision.Experience.Cues[0].Matches = append(revision.Experience.Cues[0].Matches, CueMatch{Rule: matching.Rule{Op: "token"}, Entrances: []string{"RemarkInput.java"}})
+	result, err := s.RecordExperience(ctx, revision)
+	if err != nil || !result.Reused || result.ID != stored.ID {
+		t.Fatal("alias revision forked the version", result, err)
+	}
+	kept, err := s.Read(ctx, stored.ID)
+	if err != nil || kept.Entry.Profile.Experience.Cues[0].Text != "隔离实验发现另一入口不经过本次检查。" {
+		t.Fatal("inherited cue text lost", kept.Entry.Profile.Experience.Cues[0].Text, err)
+	}
+	// Rewriting the historical text is still rejected at the boundary.
+	rewrite := legacyFiveFieldWrite(project)
+	rewrite.PreviousID = stored.ID
+	rewrite.Experience.Cues[0].Text = "改写后的历史文案。"
+	if _, err = s.RecordExperience(ctx, rewrite); err == nil || !strings.Contains(err.Error(), "experience.cues[0].text") {
+		t.Fatal("cue text rewrite accepted", err)
+	}
+}
+
+func TestReplayHonorsCurrentBinding(t *testing.T) {
+	s, project, in := factFixture(t)
+	in.RequestID = "bound-once"
+	committed, err := s.RecordExperience(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The directory is later rebound to another project scope; the replayed
+	// request must not return the old scope's receipt.
+	if _, err = s.db.ExecContext(ctx, "DELETE FROM hook_bindings WHERE path=?", project); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.HookBind(ctx, project, "project:other"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.RecordExperience(ctx, in); err == nil || !strings.Contains(err.Error(), "binding mismatch") {
+		t.Fatal("replay bypassed the current binding", err)
+	}
+	// Restoring the binding lets the same committed retry succeed again.
+	if _, err = s.db.ExecContext(ctx, "DELETE FROM hook_bindings WHERE path=?", project); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.HookBind(ctx, project, "project:demo"); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.RecordExperience(ctx, in)
+	if err != nil || !again.Reused || again.ID != committed.ID {
+		t.Fatal("retry no longer returns its committed receipt", again, err)
+	}
+}
+
 func TestSchema10UpgradeFromSchema9KeepsDataAndBaseline(t *testing.T) {
 	s := testStore(t)
 	project := t.TempDir()

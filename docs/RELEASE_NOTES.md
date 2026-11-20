@@ -1,3 +1,10 @@
+# memory-mcp 0.6.4-dev.3
+
+- Second external-review round. Release acceptance scripts (`check_experience_trial.py --if-supported`, `check_host_recall.py`) no longer submit cue text in their success samples and assert the retired format is rejected with a field position; the embedded guide's cue example drops `text`.
+- Reminders for fact records stored by dev.1 with separate qualifier columns append those qualifiers, matching the counterexample branch; new fact writes are unchanged.
+- A revision that omits cue text inherits the unchanged historical text from the previous revision by cue ID: alias-only revisions keep the same version, delivery receipts and stored facts. Authoring or rewriting cue text stays rejected.
+- Committed request_id replays pass the current project/scope binding before the historical receipt is returned, while still skipping tightened body validation.
+
 # memory-mcp 0.6.4-dev.2
 
 - External-review fixes over dev.1. The experience write boundary now rejects authored cue text (field-position diagnostics) and rejects fact-form bodies that still fill `impact`/`applicability`/`boundary`; stored legacy records keep reading and delivering their cue text through the compatibility path.

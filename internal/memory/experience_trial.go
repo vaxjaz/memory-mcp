@@ -130,8 +130,11 @@ func (m ExperienceMatch) shortFact() string {
 	}
 	if m.entry != nil && m.entry.Profile != nil {
 		if x := m.entry.Profile.Experience; x != nil {
+			// New fact-form writes keep qualifiers inside the sentence; records
+			// stored by dev.1 with separate columns keep their qualifiers in
+			// the reminder instead of an unconditional fact.
 			if strings.TrimSpace(x.Fact) != "" {
-				return x.Fact
+				return withStoredQualifiers(x.Fact, x.Applicability, x.Boundary)
 			}
 			return withStoredQualifiers(x.Counterexample, x.Applicability, x.Boundary)
 		}

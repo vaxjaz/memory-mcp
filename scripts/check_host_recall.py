@@ -52,7 +52,7 @@ def main():
                          admission=dict(future_decision="Verify the dependent conditions before deciding whether a state can change.",
                                         evidence_ref="fixture:runtime"), experience=dict(
                              object_id_prefixes=["OBJ"],
-                             cues=[dict(cue_id="cancellation",label="状态约束",text="合成取消实验中本地状态未覆盖关联影响限制。",evidence_refs=["fixture:runtime"],matches=[dict(op="token",normalize="whitespace",entrances=["取消 OBJ-001"])])],
+                             cues=[dict(cue_id="cancellation",label="状态约束",evidence_refs=["fixture:runtime"],matches=[dict(op="token",normalize="whitespace",entrances=["取消 OBJ-001"])])],
                              pitfall="An isolated task assumes a local status represents every condition",
                              counterexample="Synthetic observation: 取消受状态约束与关联影响限制",
                              impact="An isolated state transition may miss a required condition",
@@ -76,6 +76,9 @@ def main():
             assert_rejected_unchanged(blank, "admission.future_decision")
             wrong_ref = dict(draft, admission=dict(draft["admission"], evidence_ref="fixture:runtime "))
             assert_rejected_unchanged(wrong_ref, "admission.evidence_ref")
+            authored_text = json.loads(json.dumps(draft))
+            authored_text["experience"]["cues"][0]["text"] = "合成取消实验中本地状态未覆盖关联影响限制。"
+            assert_rejected_unchanged(authored_text, "experience.cues[0].text")
             saved = host.tool("memory_experience_record", draft)
             assert saved["indexed"]
             assert not any(draft["admission"]["future_decision"] in sql for sql in snapshot())
