@@ -131,9 +131,6 @@ func TestExperienceLegacyColumnsStillAcceptedWithoutCueText(t *testing.T) {
 	if body.Form != "counterexample" || body.Pitfall == "" || body.Counterexample == "" || body.Impact == "" || body.Applicability == "" || body.Boundary == "" {
 		t.Fatal("legacy narrative fields were dropped from the projection", body)
 	}
-	if len(body.RelatedFacts) != 0 {
-		t.Fatal("cue facts appeared without authored cue text", body)
-	}
 }
 
 func TestExperienceWriteBoundaryRejectsAuthoredCueText(t *testing.T) {
@@ -227,16 +224,31 @@ func TestLegacyStoredCueTextStillHonoredOnReadAndDelivery(t *testing.T) {
 	r2 := probeDelivery(t, s, project, "RemarkInput.java")
 	o2 := nativeLookup(t, s, project, "legacy-two-body", r2.ID, 2)
 	observeDelivery(t, s, "legacy-two-body", o2)
-	// The first cue of the two-cue stored record is now a NEW association;
-	// its stored authored text must be delivered verbatim, not a body derivation.
+	// The first cue of the two-cue stored record is now a NEW association.
+	// Its reminder shares the first-delivery path and quotes THIS version's
+	// body (counterexample with stored qualifiers), never the legacy cue text.
 	reminderTwo := probeDelivery(t, s, project, "canDispatchLynOrder")
 	if reminderTwo.Outcome != "cues" {
 		t.Fatal("stored first cue did not emit a reminder", reminderTwo)
 	}
-	if !strings.Contains(reminderTwo.Context, "隔离实验发现另一入口不经过本次检查。") {
-		t.Fatal("stored cue text not honored", reminderTwo.Context)
+	if !strings.Contains(reminderTwo.Context, "调查发现另一个入口不经过该调用处") || !strings.Contains(reminderTwo.Context, "单入口或不同业务约定不据此推断") {
+		t.Fatal("reminder does not quote the current body with qualifiers", reminderTwo.Context)
+	}
+	if strings.Contains(reminderTwo.Context, "隔离实验发现另一入口不经过本次检查。") {
+		t.Fatal("legacy cue text resurfaced as a reminder", reminderTwo.Context)
 	}
 	finishEmission(t, s, reminderTwo, true)
+	// The stored cue text keeps its identity: readable by entry ID and listed
+	// by the migration inventory pending evidence confirmation.
+	page, err := s.ReadPage(ctx, storedTwo.ID, "")
+	if err != nil || page.Entry.Profile == nil || page.Entry.Profile.Experience == nil ||
+		page.Entry.Profile.Experience.Cues[0].Text != "隔离实验发现另一入口不经过本次检查。" {
+		t.Fatal("stored cue text no longer readable by ID", err)
+	}
+	inspection, err := InspectCueMigration(ctx, s.Dir)
+	if err != nil || len(inspection.CueFactsBeyondBody) != 2 {
+		t.Fatal("cue facts beyond body not inventoried", inspection, err)
+	}
 }
 
 func TestExperienceFormMutualExclusion(t *testing.T) {
@@ -443,7 +455,10 @@ func TestMaterialRevisionStopsDeliveringSupersededText(t *testing.T) {
 		t.Fatal("revised body not delivered", o)
 	}
 	body := o.Items[0].Experience
-	if body.Fact != "Code is NEW3." || strings.Contains(strings.Join(body.RelatedFacts, "\n"), "Code is OLD.") {
+	if body.Fact != "Code is NEW3." {
+		t.Fatal("current version fact missing from the first lookup", body)
+	}
+	if encoded, _ := json.Marshal(body); strings.Contains(string(encoded), "Code is OLD.") {
 		t.Fatal("superseded text leaked into the first lookup", body)
 	}
 	observeDelivery(t, s, "new-body", o)

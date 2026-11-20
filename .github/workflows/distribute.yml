@@ -83,8 +83,14 @@ jobs:
           mkdir -p "$RUNNER_TEMP/memory-mcp-check"
           tar -xzf dist/memory-mcp-*-linux-amd64.tar.gz -C "$RUNNER_TEMP/memory-mcp-check"
           binary=$(find "$RUNNER_TEMP/memory-mcp-check" -type f -name memory-mcp -print -quit)
-          python3 tooling/scripts/smoke.py "$binary" --expected-version "$BUILD_VERSION"
-          python3 tooling/scripts/check_experience_trial.py "$binary" --if-supported
+          # Version and checksum identity stay with the release tooling; the
+          # protocol-behavior acceptance runs the scripts shipped with the
+          # target tag's own source checkout, so historical-tag packages are
+          # verified against the protocol they implement.
+          python3 source/scripts/smoke.py "$binary" --expected-version "$BUILD_VERSION"
+          if [ -f source/scripts/check_experience_trial.py ]; then
+            python3 source/scripts/check_experience_trial.py "$binary" --if-supported
+          fi
           if [ -f source/scripts/check_host_recall.py ]; then
             python3 source/scripts/check_host_recall.py "$binary"
           fi

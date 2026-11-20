@@ -257,6 +257,37 @@ func (validation *recordValidation) experienceWriteBoundary(x *Experience, inher
 	}
 }
 
+// dev3EnrichedFingerprint rebuilds, read-only, the fingerprint dev.3 computed
+// for a revision: it enriched cue text from the previous revision before
+// marshalling. A committed dev.3 receipt only matches under that computation;
+// the rebuild uses the request's own previous_id and changes nothing on disk.
+// Any other shape (or a missing history) yields a value that matches nothing.
+func (s *Store) dev3EnrichedFingerprint(ctx context.Context, in ExperienceWrite) string {
+	if in.PreviousID == "" {
+		return ""
+	}
+	prev, err := s.Read(ctx, in.PreviousID)
+	if err != nil || prev.Entry.Profile == nil || prev.Entry.Profile.Experience == nil {
+		return ""
+	}
+	legacy := in
+	legacy.Admission = nil
+	legacy.Experience.Cues = append([]ExperienceCue(nil), in.Experience.Cues...)
+	texts := map[string]string{}
+	for _, cue := range prev.Entry.Profile.Experience.Cues {
+		if strings.TrimSpace(cue.Text) != "" {
+			texts[cue.ID] = cue.Text
+		}
+	}
+	for i := range legacy.Experience.Cues {
+		if strings.TrimSpace(legacy.Experience.Cues[i].Text) == "" && texts[legacy.Experience.Cues[i].ID] != "" {
+			legacy.Experience.Cues[i].Text = texts[legacy.Experience.Cues[i].ID]
+		}
+	}
+	raw, _ := json.Marshal(legacy)
+	return "experience-v1:" + digestText(string(raw))
+}
+
 // bodyIdentityKey is the content identity with cue texts AND entrance aliases
 // removed: body, qualifiers and evidence identity only. Equal keys mean the
 // submission is a pure alias update of the previous revision.
@@ -315,7 +346,7 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 		var fp, id string
 		err := s.db.QueryRowContext(ctx, "SELECT fingerprint,entry_id FROM write_requests WHERE scope=? AND request_id=?", in.Scope, in.RequestID).Scan(&fp, &id)
 		if err == nil {
-			if fp != requestFingerprint {
+			if fp != requestFingerprint && fp != s.dev3EnrichedFingerprint(ctx, in) {
 				return result, errors.New("request_id conflict: experience payload changed")
 			}
 			old, e := s.Read(ctx, id)

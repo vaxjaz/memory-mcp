@@ -120,20 +120,16 @@ type ExperienceMatch struct {
 }
 
 // shortFact is the one-line fact or counterexample a new-association reminder
-// quotes. Every path — legacy cue text, fact form, counterexample form — keeps
-// the same assertion boundary as the first body delivery: stored qualifiers
-// missing from the quoted sentence are appended, never trimmed to fit a budget.
+// quotes. It shares the first body delivery's path: experiences quote THIS
+// version's body (fact, or counterexample with its stored qualifiers), never
+// legacy cue text — a superseded cue sentence must not resurface as a reminder
+// and body-borne qualifiers must survive. Agreements keep their confirmed cue
+// text. Qualifiers missing from the quoted sentence are appended, never
+// trimmed to fit a budget.
 func (m ExperienceMatch) shortFact() string {
 	if m.entry != nil && m.entry.Profile != nil {
 		if x := m.entry.Profile.Experience; x != nil {
-			quoted := m.CueText
-			// New fact-form writes keep qualifiers inside the sentence; records
-			// stored by dev.1 with separate columns keep their qualifiers in
-			// the reminder instead of an unconditional fact.
-			if strings.TrimSpace(quoted) == "" {
-				quoted = coreFact(x)
-			}
-			return withStoredQualifiers(quoted, x.Applicability, x.Boundary)
+			return withStoredQualifiers(coreFact(x), x.Applicability, x.Boundary)
 		}
 		if a := m.entry.Profile.Agreement; a != nil {
 			return withStoredQualifiers(m.CueText, a.Applicability, a.Boundary)

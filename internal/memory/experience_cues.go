@@ -126,9 +126,12 @@ func coreFact(x *Experience) string {
 }
 
 // ExperienceBody is deliberately separate from the persisted recognition model.
-// Facts behind every cue are present on first delivery; only the actual trigger
-// cues are consumed by the native receipt. Legacy qualifier fields are always
-// preserved so no stored record is displayed through a lossy projection.
+// Delivery quotes THIS version's body only: first lookup and reminders share
+// one path, and legacy cue text never re-enters context through the projection.
+// Cue-only material keeps its stored identity, stays readable by entry ID and
+// is listed by the migration inventory pending evidence confirmation.
+// Legacy qualifier fields are always preserved so no stored record is
+// displayed through a lossy projection.
 type ExperienceBody struct {
 	Form           string               `json:"form"`
 	Pitfall        string               `json:"pitfall,omitempty"`
@@ -137,18 +140,11 @@ type ExperienceBody struct {
 	Impact         string               `json:"impact,omitempty"`
 	Applicability  string               `json:"applicability,omitempty"`
 	Boundary       string               `json:"boundary,omitempty"`
-	RelatedFacts   []string             `json:"related_facts,omitempty"`
 	Evidence       []ExperienceEvidence `json:"evidence"`
 }
 
 func visibleExperience(x *Experience) *ExperienceBody {
 	out := &ExperienceBody{Form: experienceForm(x), Pitfall: x.Pitfall, Counterexample: x.Counterexample, Fact: x.Fact, Impact: x.Impact, Applicability: x.Applicability, Boundary: x.Boundary, Evidence: append([]ExperienceEvidence(nil), x.Evidence...)}
-	core := x.Pitfall + x.Counterexample + x.Fact + x.Impact + x.Applicability + x.Boundary
-	for _, c := range x.Cues {
-		if !strings.Contains(core, c.Text) {
-			out.RelatedFacts = append(out.RelatedFacts, c.Text)
-		}
-	}
 	for i := range out.Evidence {
 		out.Evidence[i].SHA256 = ""
 	}
