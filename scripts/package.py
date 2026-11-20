@@ -41,7 +41,7 @@ def normalize_version(value):
     return value
 
 
-def verified_source_commit(root, supplied=None):
+def verified_source_commit(root, supplied=None, allow_dirty=False):
     try:
         head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root,
                                        text=True, stderr=subprocess.DEVNULL).strip()
@@ -56,6 +56,14 @@ def verified_source_commit(root, supplied=None):
         if head != "unknown" and head != supplied:
             raise ValueError("source-commit conflicts with checkout HEAD")
         return supplied
+    if head != "unknown" and not allow_dirty:
+        # The build compiles the WORKING TREE while SOURCE_COMMIT records HEAD;
+        # an uncommitted change would ship code its own provenance cannot point
+        # to. Commit first, or explicitly accept the broken chain.
+        status = subprocess.run(["git", "status", "--porcelain"], cwd=root,
+                                capture_output=True, text=True)
+        if status.returncode == 0 and status.stdout.strip():
+            raise ValueError("working tree has uncommitted changes; commit them so SOURCE_COMMIT matches the built code (or pass --allow-dirty to accept a stale provenance stamp)")
     return head
 
 
@@ -95,13 +103,15 @@ def main():
     parser.add_argument("--output-dir", type=Path,
                         help="Output directory (default: source-dir/dist)")
     parser.add_argument("--source-commit", help="Verified archived source SHA; requires matching .source-commit")
+    parser.add_argument("--allow-dirty", action="store_true",
+                        help="build despite uncommitted changes; SOURCE_COMMIT then points at HEAD, not the built tree")
     args = parser.parse_args()
     version = args.version
     root = args.source_dir.resolve()
     if not (root / "go.mod").is_file():
         parser.error("source-dir must contain go.mod")
     try:
-        source_commit = verified_source_commit(root, args.source_commit)
+        source_commit = verified_source_commit(root, args.source_commit, args.allow_dirty)
     except ValueError as error:
         parser.error(str(error))
     dist = (args.output_dir or root / "dist").resolve()

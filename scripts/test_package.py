@@ -1,5 +1,6 @@
 import io
 from pathlib import Path
+import subprocess
 import tarfile
 import tempfile
 import unittest
@@ -9,6 +10,20 @@ from package import bundle_tar_mode, packaged_documentation, verified_source_com
 
 
 class OfflineBundleTests(unittest.TestCase):
+    def test_uncommitted_changes_reject_provenance_unless_explicitly_allowed(self):
+        head = 'c' * 40
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            dirty = subprocess.CompletedProcess(['git'], 0, ' M internal/hooks/command.go\n', '')
+            clean = subprocess.CompletedProcess(['git'], 0, '', '')
+            with patch('package.subprocess.check_output', return_value=head):
+                with patch('package.subprocess.run', return_value=dirty):
+                    with self.assertRaises(ValueError):
+                        verified_source_commit(root)
+                    self.assertEqual(verified_source_commit(root, allow_dirty=True), head)
+                with patch('package.subprocess.run', return_value=clean):
+                    self.assertEqual(verified_source_commit(root), head)
+
     def test_archived_source_requires_matching_provenance_and_rejects_conflicting_head(self):
         sha = 'a' * 40
         with tempfile.TemporaryDirectory() as temporary:
