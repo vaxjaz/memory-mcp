@@ -202,3 +202,21 @@ dev.4 验证：全量 Go 测试、smoke、stdio 两形态校验、两个发布�
 - 手工对照矩阵（W5/W6 后半/W8/W9）与不预填动作的 GLM 盲测、公开漏检统计为后续外部条件，本节不报告判断准确率。
 
 dev.6 验证：全量 Go 测试、smoke、stdio 两形态、host_recall/experience_trial/context_probes、verify_write_contract、真实 ZCode 宿主试验全部通过；批次一合同复验仍四绿。
+
+## 2026-11-20 五轮审查修复（0.6.4-dev.7）
+
+复审确认 A1–A4 关闭、W(x) 主流程通过后，对五个边缘场景收紧协议（复审脚本 `target/memory-mcp-review-862cc3b/recheck.py` 为验收合同，五场景全绿）。
+
+**P1 目标越权**。reuse/supplement/revise 的 `target_id` 必须属于本次比较实际展示的候选集（token 已绑定该集合）且仍是当前版本；误传同项目其他记录的 ID 以 `comparison_target_not_shown` 拒绝，零写入。实测：结算比较只展示结算记录时提交仓库 ID，仓库记录保持 current，库内行数不变（`TestWriteComparisonRejectsOffListTarget`）。
+
+**P1 并发重复建档**。候选复查移入 Put 写事务（Draft.preCommit 钩子，在去重/修订检查之后、落库之前执行；失败整体回滚不留半条记录）：普通 create 出现任一候选即中止为比较；已判定 create 仅在候选集与 token 一致时放行。实测双进程并发提交同义表述：一个 create、另一个 needs_comparison，库里 1 root（`TestWriteComparisonConcurrentParaphrasesSingleRoot`；recheck 并发场景同验）。
+
+**P2 回执动作重放**。每次提交把实际动作与目标持久化到 `experience_request_outcomes`；重试返回原动作，同 ID 换动作或目标报冲突；历史请求（无 outcome 行）保持原行为。实测：reuse 提交后原样重试返回 `action=reuse` 同 ID，改报 create 被拒（`TestWriteComparisonReplaysCommittedAction`）。
+
+**P2 无依据决策**。提交结果的 resolution 必须带非空最小差异（`resolution.difference`）且 `resolution.evidence_ref` 引用本草案证据；空差异与外来引用均拒绝（`TestWriteComparisonRejectsUnsubstantiatedResolutions`）。
+
+**P2 候选分页**。候选响应保留完整排序表并按 `next_cursor`/`has_more` 分页（顶层 `cursor` 字段续读，最多 3 条/页）；修复了游标在指纹计算段被清空导致每页回到第一页的缺陷。实测 4 条共享快照与 cue 的记录：第 4 条经游标可达（`TestWriteComparisonPagingReachesHiddenCandidate`；recheck hidden_candidate `true_root_reachable=true`）。token 失效统一返回新 token 的 needs_comparison 页。
+
+token 失效语义微调：不再有独立 `stale_comparison` 状态，改以新 token 返回最新候选（符合交接方案"返回新候选或明确的 stale 状态"二选一）。
+
+dev.7 验证：全量 Go 测试、recheck 五场景、verify_write_contract 五用例、smoke、stdio、host_recall/experience_trial/context_probes、review_replay A1–A4 复验、真实 ZCode 宿主——全部通过。GLM 盲测（不预填动作的区分准确率）仍为外部条件。

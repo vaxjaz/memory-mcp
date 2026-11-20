@@ -17,6 +17,8 @@ For every memory_experience_record call, put `admission` beside `experience`. Se
 
 The write path itself searches current records in this project by shared evidence locators, distinctive entrances and fact terms. You do not need to suspect a duplicate beforehand. When a candidate is worth checking, the first call writes NOTHING: it returns `status=needs_comparison`, the current facts of the candidates with their reasons (`evidence_ref`, `entrance`, `fact_terms`) and an opaque `comparison_token`. Exact structural duplicates still reuse silently, and an explicit `previous_id` revision commits directly without this step.
 
+Candidate responses show at most three records per page. When `has_more` is true, resend the SAME draft with its `cursor` set to the returned `next_cursor` to read the next page; a hidden true duplicate must stay reachable this way before you decide. A `reuse`, `supplement` or `revise` target must be one of the candidates this comparison actually showed and still current; a mis-sent foreign ID is rejected with zero writes.
+
 Judge with this standing prompt:
 
 > 比较本次观察与候选旧经验。假设旧经验原句在它注明的对象、时间和环境内完全成立，本次证据还增加了哪一项可核查的事实？请引用能区分两者的旧原句和本次证据。若只是转述，复用；若多了独立来源，补证；若证据推翻旧原句，指出被推翻的部分并修订；若两条可同时成立且各自影响判断，分别保留。若区分所需事实缺失，指出缺哪一项并暂缓。只返回动作、候选 ID、最小差异和证据定位。

@@ -1,3 +1,7 @@
+# memory-mcp 0.6.4-dev.7
+
+- Fifth review round on W(x). reuse/supplement/revise may only target a candidate this comparison showed, still current — a mis-sent foreign ID is rejected with zero writes. The final candidate recheck runs inside the write transaction, so concurrent paraphrases of one fact yield a single root and the loser receives a fresh comparison. Committed actions and targets are persisted per request; replays return the original outcome and re-deciding under the same ID conflicts. Resolutions require a nonblank minimal difference and an evidence reference from this submission. Candidate pages expose next_cursor/has_more over the full ranked list, and a paging-cursor bug that restarted every page at offset zero is fixed.
+
 # memory-mcp 0.6.4-dev.6
 
 - Handoff batch two: W(x) write judgment. The experience write path searches same-project candidates (evidence locators, entrances, ≥3 shared body terms) read-only; a hit returns `needs_comparison` with the candidates' current facts and a comparison token, zero writes. The same draft resubmitted with `resolution.action` commits the judged relation: `reuse` (current ID), `supplement` (independent source joins the root, claim unchanged), `revise` (complete new version), `create` (new root; target never a previous_id) or `defer`. A changed candidate set invalidates the token and returns the fresh list; exact duplicates and explicit previous_id revisions bypass the comparison. Bootstrap advertises `experience_write_comparison`; the embedded guide carries the standing comparison prompt.
