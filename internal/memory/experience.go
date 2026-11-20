@@ -236,28 +236,38 @@ func experienceKey(x *Experience) string {
 	return digestText(string(b))
 }
 
+// experienceWriteBoundary enforces protocol-12 write rules that stored history
+// must still satisfy on read: new experiences do not author cue text, and
+// fact-form records carry their qualifiers inside the fact sentence.
+func (validation *recordValidation) experienceWriteBoundary(x *Experience) {
+	for i, c := range x.Cues {
+		if strings.TrimSpace(c.Text) != "" {
+			validation.add(fmt.Sprintf("experience.cues[%d].text", i), "new experience writes do not author cue text; move the fact or counterexample into the body and resubmit without cue text")
+		}
+	}
+	if strings.TrimSpace(x.Fact) == "" {
+		return
+	}
+	for _, column := range []struct{ field, value string }{{"impact", x.Impact}, {"applicability", x.Applicability}, {"boundary", x.Boundary}} {
+		if strings.TrimSpace(column.value) != "" {
+			validation.add("experience."+column.field, "fact-form records keep object/environment/time qualifiers inside the fact sentence; merge this qualifier into experience.fact and resubmit")
+		}
+	}
+}
+
 func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (ExperienceReceipt, error) {
 	var result ExperienceReceipt
-	var validation recordValidation
-	validation.experienceAdmission(in.Admission, in.Experience.Evidence)
-	validation.experience(&in.Experience)
-	if err := validation.err(); err != nil {
-		return result, err
-	}
-	// Keep retries over the material payload stable across protocol upgrades.
+	// A committed request_id returns its receipt before validation: protocol
+	// upgrades may tighten checks (body budgets, form rules) that the committed
+	// payload legitimately predates. Different payload under the same ID still
+	// conflicts. Keep retries over the material payload stable across upgrades.
+	admission := in.Admission
 	in.Admission = nil
 	raw, _ := json.Marshal(in)
-	project, err := s.experienceProject(ctx, in.Project, in.Scope)
-	if err != nil {
-		return result, err
-	}
 	requestFingerprint := "experience-v1:" + digestText(string(raw))
-	// Hash enrichment must not mutate the caller's slice or change a retry's
-	// original payload (in-process hosts/tests may reuse that exact object).
-	in.Experience.Evidence = append([]ExperienceEvidence(nil), in.Experience.Evidence...)
 	if in.RequestID != "" {
 		var fp, id string
-		err = s.db.QueryRowContext(ctx, "SELECT fingerprint,entry_id FROM write_requests WHERE scope=? AND request_id=?", in.Scope, in.RequestID).Scan(&fp, &id)
+		err := s.db.QueryRowContext(ctx, "SELECT fingerprint,entry_id FROM write_requests WHERE scope=? AND request_id=?", in.Scope, in.RequestID).Scan(&fp, &id)
 		if err == nil {
 			if fp != requestFingerprint {
 				return result, errors.New("request_id conflict: experience payload changed")
@@ -272,6 +282,20 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 			return result, err
 		}
 	}
+	var validation recordValidation
+	validation.experienceAdmission(admission, in.Experience.Evidence)
+	validation.experience(&in.Experience)
+	validation.experienceWriteBoundary(&in.Experience)
+	if err := validation.err(); err != nil {
+		return result, err
+	}
+	project, err := s.experienceProject(ctx, in.Project, in.Scope)
+	if err != nil {
+		return result, err
+	}
+	// Hash enrichment must not mutate the caller's slice or change a retry's
+	// original payload (in-process hosts/tests may reuse that exact object).
+	in.Experience.Evidence = append([]ExperienceEvidence(nil), in.Experience.Evidence...)
 	for i := range in.Experience.Evidence {
 		e := &in.Experience.Evidence[i]
 		if e.Kind != "code" && e.Path == "" {

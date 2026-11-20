@@ -121,21 +121,34 @@ type ExperienceMatch struct {
 
 // shortFact is the one-line fact or counterexample a new-association reminder
 // quotes. Legacy cue text stays honored; new records derive it from this
-// version's body, and its qualifiers travel inside the text itself, never
-// trimmed to fit a budget.
+// version's body. A reminder must keep the same assertion boundary as the
+// first body delivery: qualifiers stored beside the core fact are appended,
+// never trimmed to fit a budget.
 func (m ExperienceMatch) shortFact() string {
 	if strings.TrimSpace(m.CueText) != "" {
 		return m.CueText
 	}
 	if m.entry != nil && m.entry.Profile != nil {
 		if x := m.entry.Profile.Experience; x != nil {
-			return coreFact(x)
+			if strings.TrimSpace(x.Fact) != "" {
+				return x.Fact
+			}
+			return withStoredQualifiers(x.Counterexample, x.Applicability, x.Boundary)
 		}
 		if a := m.entry.Profile.Agreement; a != nil {
-			return a.Requirement
+			return withStoredQualifiers(a.Requirement, a.Applicability, a.Boundary)
 		}
 	}
 	return ""
+}
+
+func withStoredQualifiers(fact, applicability, boundary string) string {
+	for _, qualifier := range []struct{ label, value string }{{"适用", applicability}, {"边界", boundary}} {
+		if strings.TrimSpace(qualifier.value) != "" {
+			fact += "（" + qualifier.label + "：" + qualifier.value + "）"
+		}
+	}
+	return fact
 }
 
 type ExperienceChallenge struct {

@@ -23,8 +23,8 @@ func TestReviewObservedBusinessNewCueRetainsMaterial(t *testing.T) {
 		t.Fatalf("expected observed B: %#v, %v", matches, err)
 	}
 	result, err := s.ChallengeExperience(ctx, "codex", in.Scope, "consumer", "t1", p, matches)
-	if err != nil || result.ID != "" || !strings.Contains(result.Context, in.Experience.Cues[1].Text) {
-		t.Fatalf("new observed B must deliver its material after A: %#v, %v", result, err)
+	if err != nil || result.ID != "" || !strings.Contains(result.Context, "另一取值入口读取独立参数") || !strings.Contains(result.Context, "单入口或不同业务约定不据此推断") {
+		t.Fatalf("new observed B must deliver its body fact with qualifiers after A: %#v, %v", result, err)
 	}
 }
 

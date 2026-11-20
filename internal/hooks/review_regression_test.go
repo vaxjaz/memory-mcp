@@ -28,7 +28,7 @@ func TestReviewDirectDeliveredMatchCannotHideObservedUndeliveredExperience(t *te
 		ObjectIDPrefixes: []string{"WXN"},
 		Pitfall:          "合成取消动作误以为无需处理关联记录", Counterexample: "合成测试中取消后关联记录仍保留旧状态", Impact: "合成关联状态不一致", Applicability: "合成取消动作", Boundary: "仅隔离审查测试",
 		Evidence: []memory.ExperienceEvidence{{Kind: "business", Reference: "fixture:review-observed", Observation: "隔离测试，不是真实事故"}},
-		Cues:     []memory.ExperienceCue{{ID: "cancel", Label: "取消动作", Text: "合成测试中取消后关联记录仍保留旧状态。", EvidenceRefs: []string{"fixture:review-observed"}, Matches: []memory.CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"取消"}}}}},
+		Cues:     []memory.ExperienceCue{{ID: "cancel", Label: "取消动作", EvidenceRefs: []string{"fixture:review-observed"}, Matches: []memory.CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"取消"}}}}},
 	}})
 	if err != nil {
 		t.Fatal(err)

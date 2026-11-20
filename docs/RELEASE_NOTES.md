@@ -1,3 +1,10 @@
+# memory-mcp 0.6.4-dev.2
+
+- External-review fixes over dev.1. The experience write boundary now rejects authored cue text (field-position diagnostics) and rejects fact-form bodies that still fill `impact`/`applicability`/`boundary`; stored legacy records keep reading and delivering their cue text through the compatibility path.
+- New-association reminders append the stored qualifiers beside the counterexample, keeping the same assertion boundary as the first body delivery. The budget fallback names `memory_read` with the exact version ID, which the tests actually read back.
+- Committed `request_id` retries return their receipt before validation runs (same payload) or conflict (different payload), so payloads committed by older binaries keep retrying cleanly across the schema upgrade.
+- SessionStart carries a short hot-fusion prompt, so hosts that never call `memory_bootstrap` still receive it; verified on a real ZCode session.
+
 # memory-mcp 0.6.4-dev.1
 
 - Experience bodies take one of two mutually exclusive forms: a sourced business `fact` with its object/environment/time qualifiers, or `pitfall` + `counterexample`. The legacy `impact`/`applicability`/`boundary` columns become optional and are preserved verbatim on old-client submissions; nothing is dropped and reported as success.

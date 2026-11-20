@@ -286,9 +286,9 @@ SELECT c.id FROM experience_challenges c WHERE c.consumer=? AND NOT EXISTS (
 			extra++
 		}
 		if size+extra+len(cueRemainder) > CueOutputBudget {
-			// Never trim qualifiers to fit. Keep the locator as the entry to
-			// fetch the complete fact instead of a truncated strong assertion.
-			line = fmt.Sprintf("%s@%s · %s：完整限定超出短提醒预算，经 lookup 获取", m.RootID, m.ID, m.CueLabel)
+			// Never trim qualifiers to fit. Point at memory_read with the exact
+			// version ID; lookup takes term queries and cannot fetch by ID.
+			line = fmt.Sprintf("%s@%s · %s：完整限定超出短提醒预算，用 memory_read 读取 %s", m.RootID, m.ID, m.CueLabel, m.ID)
 			extra = len(line)
 			if len(lines) > 0 {
 				extra++

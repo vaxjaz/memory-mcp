@@ -22,7 +22,7 @@ func experienceFixture(t *testing.T) (*Store, string, ExperienceWrite) {
 		t.Fatal(err)
 	}
 	in := ExperienceWrite{Scope: "project:demo", Project: project, Title: "多入口准入覆盖风险", Admission: &ExperienceAdmission{FutureDecision: "跨入口改动时逐个核对调用路径是否覆盖。", EvidenceRef: "isolated fixture; not production"}, Experience: Experience{
-		Cues:           []ExperienceCue{{ID: "admission", Label: "核验多个入口", Text: "隔离实验发现另一入口不经过本次检查。", EvidenceRefs: []string{"isolated fixture; not production"}, Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"canDispatchLynOrder"}}, {Rule: matching.Rule{Op: "token", Normalize: "whitespace"}, Entrances: []string{"LYN 创建准入"}}}}},
+		Cues:           []ExperienceCue{{ID: "admission", Label: "核验多个入口", EvidenceRefs: []string{"isolated fixture; not production"}, Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"canDispatchLynOrder"}}, {Rule: matching.Rule{Op: "token", Normalize: "whitespace"}, Entrances: []string{"LYN 创建准入"}}}}},
 		Pitfall:        "在眼前调用处添加校验就能覆盖所有入口",
 		Counterexample: "调查发现另一个入口不经过该调用处；本测试仅验证机制，不宣称模型推理正确",
 		Impact:         "要求全入口一致的规则可能只在部分入口生效",

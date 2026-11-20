@@ -20,8 +20,8 @@ func deliveryFixture(t *testing.T) (*Store, string, ExperienceWrite) {
 	in.Admission = &ExperienceAdmission{FutureDecision: "修改备注时单独核对日志的数据来源。", EvidenceRef: "fixture:counterexample"}
 	in.Experience.Evidence = []ExperienceEvidence{{Kind: "business", Reference: "fixture:counterexample", Observation: "合成实验只验证投递协议，不是真实业务事故"}}
 	in.Experience.Cues = []ExperienceCue{
-		{ID: "remark", Label: "备注变化", Text: "隔离实验中备注更新后日志仍取旧文本。", EvidenceRefs: []string{"fixture:counterexample"}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"WorkOrder.remark"}}, {Rule:matching.Rule{Op:"token"},Entrances:[]string{"RemarkInput.java"}}, {Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"调整回馈备注"}}}},
-		{ID: "log_input", Label: "取值入口", Text: "隔离实验中日志取值入口读取独立参数，未接入更新后的备注。", EvidenceRefs: []string{"fixture:counterexample"}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"FeedbackLogBuilder.build"}}, {Rule:matching.Rule{Op:"token"},Entrances:[]string{"FeedbackLogBuilder.java"}}, {Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"生成回馈日志"}}}},
+		{ID: "remark", Label: "备注变化", EvidenceRefs: []string{"fixture:counterexample"}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"WorkOrder.remark"}}, {Rule:matching.Rule{Op:"token"},Entrances:[]string{"RemarkInput.java"}}, {Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"调整回馈备注"}}}},
+		{ID: "log_input", Label: "取值入口", EvidenceRefs: []string{"fixture:counterexample"}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"FeedbackLogBuilder.build"}}, {Rule:matching.Rule{Op:"token"},Entrances:[]string{"FeedbackLogBuilder.java"}}, {Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{"生成回馈日志"}}}},
 	}
 	if _, err := s.RecordExperience(ctx, in); err != nil {
 		t.Fatal(err)
@@ -97,8 +97,12 @@ func TestDeliveryA01ToA10A18A23A26A34A37A38A41A42(t *testing.T) {
 		t.Fatal("A18", c)
 	}
 	b := probeDelivery(t, s, p, "FeedbackLogBuilder.build FeedbackLogBuilder.java 生成回馈日志")
-	if b.ID != "" || !strings.Contains(b.Context, in.Experience.Cues[1].Text) || strings.Count(b.Context, "取值入口：") != 1 {
+	if b.ID != "" || !strings.Contains(b.Context, "另一取值入口读取独立参数") || strings.Count(b.Context, "取值入口：") != 1 {
 		t.Fatal("A06/A08/A10", b)
+	}
+	// The reminder keeps the stored qualifiers instead of an unconditional fact.
+	if !strings.Contains(b.Context, "单入口或不同业务约定不据此推断") || !strings.Contains(b.Context, "适用：调整多入口创建准入时核对覆盖范围") {
+		t.Fatal("A06 reminder dropped stored qualifiers", b.Context)
 	}
 	finishEmission(t, s, b, true)
 	for i := 0; i < 100; i++ {
@@ -250,10 +254,15 @@ func TestDeliveryA11A27A29(t *testing.T) {
 	}
 	finishEmission(t, s, recovered, true)
 	// Budget over multiple distinct associations, all already present in body.
+	// Reminder lines are body-derived: one long counterexample makes the first
+	// line fit, later full lines overflow into memory_read locators, and the
+	// tail is deferred with the remainder marker.
 	in.PreviousID = o.Items[0].ID
 	in.Experience.Cues = nil
+	in.Experience.Impact, in.Experience.Applicability, in.Experience.Boundary = "", "", ""
+	in.Experience.Counterexample = strings.Repeat("合成反例逐字核对", 30)
 	for i := 0; i < 4; i++ {
-		in.Experience.Cues = append(in.Experience.Cues, ExperienceCue{ID: fmt.Sprintf("fact_%d", i), Label: "隔离关联", Text: fmt.Sprintf("合成条件%d：%s。", i, strings.Repeat("反例", 45)), EvidenceRefs: []string{"fixture:counterexample"}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{fmt.Sprintf("业务关联%d", i)}}}})
+		in.Experience.Cues = append(in.Experience.Cues, ExperienceCue{ID: fmt.Sprintf("fact_%d", i), Label: "隔离关联", EvidenceRefs: []string{"fixture:counterexample"}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token", Normalize:"whitespace"},Entrances:[]string{fmt.Sprintf("业务关联%d", i)}}}})
 	}
 	if _, e := s.RecordExperience(ctx, in); e != nil {
 		t.Fatal(e)
@@ -276,6 +285,9 @@ func TestDeliveryA11A27A29(t *testing.T) {
 	batch := probeDelivery(t, s, p, all)
 	if batch.ID != "" || len(batch.Context) > CueOutputBudget || !strings.Contains(batch.Context, "未展示") {
 		t.Fatal("A27", len(batch.Context), batch)
+	}
+	if strings.Count(batch.Context, "memory_read 读取") == 0 {
+		t.Fatal("A27 overflow fallback missing memory_read locator", batch.Context)
 	}
 	finishEmission(t, s, batch, true)
 	rest := probeDelivery(t, s, p, all)
@@ -439,10 +451,10 @@ func TestDeliveryA21A24A28A39Atomic(t *testing.T) {
 	if c := probeDelivery(t, s, p, "remark.sync.enabled"); c.ID != "" || c.Context != "" {
 		t.Fatal("alias reset cue", c)
 	}
-	// cue changes are material even when a caller forgets to edit the primary
-	// counterexample: first delivery includes the changed related fact as body.
+	// A body change is material: the new fact enters the revised version and
+	// its first delivery, never a cue-side short quote.
 	alias.PreviousID = saved.ID
-	alias.Experience.Cues[1].Text = "合成新边界：另一事务失败时独立参数也未提交。"
+	alias.Experience.Boundary = "合成新边界：另一事务失败时独立参数也未提交。"
 	revision, err := s.RecordExperience(ctx, alias)
 	if err != nil || revision.ID == saved.ID {
 		t.Fatal("A39", revision, err)
@@ -453,7 +465,7 @@ func TestDeliveryA21A24A28A39Atomic(t *testing.T) {
 	}
 	response := nativeLookup(t, s, p, "revised", c.ID, 0)
 	encoded, _ := json.Marshal(response)
-	if !strings.Contains(string(encoded), alias.Experience.Cues[1].Text) {
+	if !strings.Contains(string(encoded), alias.Experience.Boundary) {
 		t.Fatal("A39 risk missing from first body")
 	}
 	bad := alias
@@ -486,7 +498,7 @@ func TestDeliveryA21A24A28A39Atomic(t *testing.T) {
 
 func TestDeliveryA21CodeReferenceRelocation(t *testing.T) {
 	s, p, in := experienceFixture(t)
-	in.Experience.Cues = []ExperienceCue{{ID: "admission", Label: "准入入口", Text: "合成反例中，本地入口未覆盖另一调用方。", EvidenceRefs: []string{in.Experience.Evidence[0].Reference}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"canDispatchLynOrder"}}}}}
+	in.Experience.Cues = []ExperienceCue{{ID: "admission", Label: "准入入口", EvidenceRefs: []string{in.Experience.Evidence[0].Reference}, Matches: []CueMatch{{Rule:matching.Rule{Op:"token"},Entrances:[]string{"canDispatchLynOrder"}}}}}
 	saved, err := s.RecordExperience(ctx, in)
 	if err != nil {
 		t.Fatal(err)

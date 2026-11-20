@@ -84,14 +84,9 @@ func validateAgreement(a *Agreement) error {
 
 func (s *Store) RecordAgreement(ctx context.Context, in AgreementWrite) (ExperienceReceipt, error) {
 	var zero ExperienceReceipt
+	// Committed request_id retries return their receipt before validation, as
+	// in RecordExperience; a different payload under the same ID still conflicts.
 	original, _ := json.Marshal(in)
-	if err := validateAgreement(&in.Agreement); err != nil {
-		return zero, err
-	}
-	project, err := s.experienceProject(ctx, in.Project, in.Scope)
-	if err != nil {
-		return zero, err
-	}
 	fingerprint := "agreement-v1:" + digestText(string(original))
 	if in.RequestID != "" {
 		var fp, id string
@@ -109,6 +104,13 @@ func (s *Store) RecordAgreement(ctx context.Context, in AgreementWrite) (Experie
 		if er != nil && !errors.Is(er, sql.ErrNoRows) {
 			return zero, er
 		}
+	}
+	if err := validateAgreement(&in.Agreement); err != nil {
+		return zero, err
+	}
+	project, err := s.experienceProject(ctx, in.Project, in.Scope)
+	if err != nil {
+		return zero, err
 	}
 	in.Agreement.Evidence = append([]ExperienceEvidence(nil), in.Agreement.Evidence...)
 	for i := range in.Agreement.Evidence {

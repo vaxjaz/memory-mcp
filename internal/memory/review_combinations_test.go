@@ -109,7 +109,7 @@ func TestReviewInputReplayPreservesCurrentObservationAndDelivery(t *testing.T) {
 			if err := s.db.QueryRow("SELECT matches_json FROM business_observations").Scan(&stored); err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(stored, "WXN-002") || strings.Contains(stored, in.Experience.Cues[1].Text) {
+			if strings.Contains(stored, "WXN-002") || strings.Contains(stored, "备注更新后日志仍取旧文本") {
 				t.Fatal("observation persisted raw object or cue body", stored)
 			}
 		})

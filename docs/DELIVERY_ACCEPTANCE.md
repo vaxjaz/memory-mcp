@@ -144,3 +144,19 @@ The dev.12 Windows executable reproduced invalid next_cursor responses across sh
 **真实 ZCode 原生宿主实测**。Windows 原生 ZCode 3.16.3（`D:\ZCode-Memory-Trial-3.16.3`）+ 本地确定性 mock 模型（无第二个真实模型），隔离配置与临时库，`build/check-zcode-native-forms.py` 交叉编译二进制一次会话内验证完整链路：含 `settlementCode` 的首次 Write 被挑战暂停（文件未落盘，challenge_id 进入模型请求）→ 宿主实际调用 `mcp__decision-memory__memory_experience_lookup` → PostToolUse 原生收据 `lookup_result_observed` 记账 → 重试 Write 放行写入 → 同记录第二 cue（`offlineSettlement`）的新关联未再次拦截，以 output 短提醒把 **fact 全文（含“各环境”“隔离夹具”限定）**送入第 5 次真实模型请求。落库证据：`experience_body_deliveries=1`（正文仅一次）、`cue_deliveries=[(settle, body_receipt), (envcfg, output)]`。这是传输与投递机制的真宿主验收；模型对该事实的判断质量（D/E 组能力增益）仍属盲测范围。
 
 **未覆盖路径（如实标注）**。方案 §5 交接前挑战未启用，且已对本机宿主完成启用条件核对：ZCode 3.16.3 的 zcode.cjs（15.2 MB）事件面仅 `SessionStart/UserPromptSubmit/PreToolUse/PostToolUse/Stop`，`ops_asset_gate` 与任何 asset_gate 变体 0 次出现——该版本不存在"草稿已成型、可修改、未交接"事件，PostToolUse 只能事后回放；此路径记作未覆盖，不做投机接线。§6 D/E 组盲测与错误交付率对照需要预标注评分样本与真实 GLM 宿主（mock 模型只验证传输），为外部条件，本节不报告任何百分比。guide.md 已嵌入 §4 前置热融合常驻提示，其降低误用的效果未经能力盲测。Codex/Qoder 未做本次原生回归。
+
+## 2026-11-20 外部审查修复（0.6.4-dev.2）
+
+外部审查在隔离库复现了三个既有测试未覆盖的问题并指出两处宿主使用问题；五项均已修复并回归。
+
+**P1 写边界（cue 文案与分离限定）**。`RecordExperience` 新增写边界校验（与读取/扫描校验分离，存量记录仍按宽容路径进入召回扫描）：经验侧提交 `cue.text` 被拒并给出字段位置（`experience.cues[i].text`），首次 lookup 不再把独立文案带进 related_facts，新关联短提醒不再优先投递指令式文案；fact 形态附带 `impact/applicability/boundary` 任一列被拒（`experience.*` 指示并入事实原句）。存量带文案记录经存储路径（Put）构造的回归验证：仍在召回扫描、正常匹配、正文投递后新关联按原文案投递（`TestLegacyStoredCueTextStillHonoredOnReadAndDelivery`、`TestExperienceWriteBoundaryRejectsAuthoredCueText`、`TestFactFormRejectsSeparateQualifierColumns`）。
+
+**P1 短提醒断言边界**。新关联短提醒对 counterexample 形态追加存量限定（`（适用：…）（边界：…）`），不再把"仅测试环境观测"的事实发成无条件断言（`TestDeliveryA01…` 的 A06 断言与 `TestReviewObservedBusinessNewCueRetainsMaterial` 均验证限定随行）。
+
+**P2 幂等重试先于校验**。`RecordExperience`/`RecordAgreement` 把已提交 request_id 的指纹比对移到一切校验之前：同 ID 同载荷直接返回原收据，同 ID 异载荷仍拒绝。真实跨版本复现（reviewer 场景）：真 0.6.3 二进制提交 2988 字节旧投影（带 request_id 与 cue 文案），迁移 schema 10 后新二进制原样重试返回原收据（新投影 3012 字节、带文案，重跑校验必拒）；同 ID 异载荷拒绝；无 request_id 原样新写入被拒并指向 `experience.cues[0].text`；存量记录读取无损（`TestCommittedRequestRetrySkipsTightenedValidation`）。
+
+**P2 常驻 F 提示**。SessionStart 注入加入简短热融合提示（对照原始目标与作用对象、区别是否改变本步答案、当前证据支持/反驳/不足、证据不足且影响交付时核查或收窄）。真实 ZCode 会话（mock 模型全程未调 `memory_bootstrap`）验证提示经 SessionStart 进入第一次模型请求——直接按挑战调用 lookup 的宿主不再依赖 bootstrap 才能收到 F 提示。
+
+**P2 预算回退入口**。短提醒超预算的回退行改为指名 `memory_read 读取 <版本ID>`（lookup 仅词项查询无法按 ID 取回）；回归断言回退行包含工具名与版本 ID，并实际按 ID 读取返回被省略的完整事实（`TestCueReminderFallsBackToMemoryReadLocator`）。
+
+全量 Go 测试、smoke（0.6.4-dev.2）、stdio 两形态校验与真实 ZCode 宿主试验（含 F 提示断言）全部通过。上述仍为传输与协议行为验证；热融合判断质量与 D/E 盲测维持未覆盖。
