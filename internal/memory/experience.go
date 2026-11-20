@@ -68,7 +68,7 @@ type ExperienceWrite struct {
 type WriteResolution struct {
 	Action          string `json:"action" jsonschema:"reuse | supplement | revise | create | defer. reuse: same claim, same scope, evidence already covered. supplement: same claim plus a genuinely independent new source. revise: new evidence overturns the old record. create: an independently standing fact, even when sharing a cue or snapshot. defer: distinguishing evidence is missing."`
 	TargetID        string `json:"target_id,omitempty" jsonschema:"Current version ID of the compared candidate. Required for reuse/supplement/revise; for create it only marks the candidate distinguished, never a previous_id."`
-	Difference      string `json:"difference,omitempty" jsonschema:"The minimal cited difference between this observation and the candidate."`
+	Difference      string `json:"difference" jsonschema:"The minimal cited difference between this observation and the candidate; required for committing actions."`
 	EvidenceRef     string `json:"evidence_ref,omitempty" jsonschema:"Evidence reference from this submission supporting the claimed relationship."`
 	ComparisonToken string `json:"comparison_token,omitempty" jsonschema:"Opaque token returned by this draft's needs_comparison response."`
 }
