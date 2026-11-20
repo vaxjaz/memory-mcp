@@ -122,6 +122,9 @@ type DeliveryFact struct {
 	Match ExperienceMatch
 	Body  bool
 	Cue   bool
+	// Fact reports whether a quotable body fact exists for this match: legacy
+	// cue text, or the fact/counterexample derived from this version's body.
+	Fact bool
 }
 type DeliveryDecision struct {
 	Kind    string
@@ -140,7 +143,7 @@ func DecideExperienceDelivery(facts []DeliveryFact) DeliveryDecision {
 		seen[key] = true
 		if !f.Body {
 			unseen = append(unseen, f.Match)
-		} else if !f.Cue && f.Match.CueText != "" {
+		} else if !f.Cue && f.Fact {
 			cues = append(cues, f.Match)
 		}
 	}
@@ -210,7 +213,7 @@ func (s *Store) ChallengeExperience(ctx context.Context, host, scope, session, n
 				}
 			}
 		}
-		facts = append(facts, DeliveryFact{m, body > 0, cue > 0})
+		facts = append(facts, DeliveryFact{Match: m, Body: body > 0, Cue: cue > 0, Fact: m.shortFact() != ""})
 	}
 	decision := DecideExperienceDelivery(facts)
 	out.Outcome = decision.Kind
@@ -277,14 +280,23 @@ SELECT c.id FROM experience_challenges c WHERE c.consumer=? AND NOT EXISTS (
 	size := 0
 	remaining := false
 	for _, m := range decision.Matches {
-		line := fmt.Sprintf("%s@%s · %s：%s", m.RootID, m.ID, m.CueLabel, m.CueText)
+		line := fmt.Sprintf("%s@%s · %s：%s", m.RootID, m.ID, m.CueLabel, m.shortFact())
 		extra := len(line)
 		if len(lines) > 0 {
 			extra++
 		}
 		if size+extra+len(cueRemainder) > CueOutputBudget {
-			remaining = true
-			continue
+			// Never trim qualifiers to fit. Keep the locator as the entry to
+			// fetch the complete fact instead of a truncated strong assertion.
+			line = fmt.Sprintf("%s@%s · %s：完整限定超出短提醒预算，经 lookup 获取", m.RootID, m.ID, m.CueLabel)
+			extra = len(line)
+			if len(lines) > 0 {
+				extra++
+			}
+			if size+extra+len(cueRemainder) > CueOutputBudget {
+				remaining = true
+				continue
+			}
 		}
 		result, er := tx.ExecContext(ctx, "INSERT OR IGNORE INTO experience_cue_deliveries VALUES(?,?,?,?,?,?,?)", consumer, m.RootID, m.ID, m.CueID, "reserved", emission, owner)
 		if er != nil {

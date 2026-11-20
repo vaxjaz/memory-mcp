@@ -17,16 +17,20 @@ import (
 	"github.com/vaxjaz/memory-mcp/internal/matching"
 )
 
-// Experience is an observed failure pattern, never a prescribed implementation.
+// Experience is an observed failure pattern or a sourced business fact, never
+// a prescribed implementation. The body has two mutually exclusive forms:
+// counterexample (pitfall+counterexample) or fact. Legacy submissions that also
+// fill impact/applicability/boundary stay valid; nothing is dropped.
 // Evidence stores locators and concise observations, not chat transcripts/code.
 type Experience struct {
 	Cues             []ExperienceCue      `json:"cues" jsonschema:"Evidenced stable associations; provide with the synchronous write. New facts require a revision. Entrances are aliases, not separate risks."`
 	ObjectIDPrefixes []string             `json:"object_id_prefixes,omitempty" jsonschema:"Prefixes of object identifiers for same-input business result association only; no effect on direct matching or search."`
-	Pitfall          string               `json:"pitfall" jsonschema:"1-240 Unicode characters. The fallible inference that this incident challenged."`
-	Counterexample   string               `json:"counterexample" jsonschema:"1-240 Unicode characters. Summarize the observation that challenges the inference and separate it from the explanation."`
-	Impact           string               `json:"impact" jsonschema:"1-240 Unicode characters. Concrete possible bug, affected behavior or wrong decision if this condition is missed."`
-	Applicability    string               `json:"applicability" jsonschema:"1-240 Unicode characters. Conditions in which this failure pattern is worth investigating."`
-	Boundary         string               `json:"boundary" jsonschema:"1-240 Unicode characters. Exceptions, different environments and unknowns."`
+	Pitfall          string               `json:"pitfall,omitempty" jsonschema:"Counterexample form (mutually exclusive with fact). 1-240 Unicode characters. The fallible inference that this incident challenged."`
+	Counterexample   string               `json:"counterexample,omitempty" jsonschema:"Counterexample form (mutually exclusive with fact). 1-240 Unicode characters. The observation that overturned that inference, with the object/environment qualifiers it actually observed."`
+	Fact             string               `json:"fact,omitempty" jsonschema:"Fact form (mutually exclusive with pitfall/counterexample). 1-240 Unicode characters. One sourced business fact that changes a specific judgment, keeping the object, environment or time qualifiers it was actually observed under."`
+	Impact           string               `json:"impact,omitempty" jsonschema:"Optional legacy qualifier. Prefer writing the qualifiers into the fact or counterexample itself."`
+	Applicability    string               `json:"applicability,omitempty" jsonschema:"Optional legacy qualifier. Prefer writing the conditions into the fact or counterexample itself."`
+	Boundary         string               `json:"boundary,omitempty" jsonschema:"Optional legacy qualifier. Prefer writing exceptions and unknowns into the fact or counterexample itself."`
 	Evidence         []ExperienceEvidence `json:"evidence" jsonschema:"1-3 actual evidence locators; no entire conversations or source files"`
 }
 
@@ -127,13 +131,27 @@ func (validation *recordValidation) experience(x *Experience) {
 	if err := validatePrefixes(x.ObjectIDPrefixes); err != nil {
 		validation.add("experience.object_id_prefixes", err.Error())
 	}
-	validation.shortText("experience.pitfall", x.Pitfall, 240)
-	validation.shortText("experience.counterexample", x.Counterexample, 240)
-	validation.shortText("experience.impact", x.Impact, 240)
-	validation.shortText("experience.applicability", x.Applicability, 240)
-	validation.shortText("experience.boundary", x.Boundary, 240)
+	// Two mutually exclusive body forms. Legacy submissions keep all five
+	// narrative fields; qualifiers useful to the counterexample are written
+	// into the fact or counterexample text itself.
+	hasFact := strings.TrimSpace(x.Fact) != ""
+	hasCounterexample := strings.TrimSpace(x.Pitfall) != "" || strings.TrimSpace(x.Counterexample) != ""
+	switch {
+	case hasFact && hasCounterexample:
+		validation.add("experience", "fact and pitfall/counterexample are mutually exclusive body forms; submit one per record")
+	case hasFact:
+		validation.shortText("experience.fact", x.Fact, 240)
+	case hasCounterexample:
+		validation.shortText("experience.pitfall", x.Pitfall, 240)
+		validation.shortText("experience.counterexample", x.Counterexample, 240)
+	default:
+		validation.add("experience", "requires one body form: fact, or pitfall with counterexample")
+	}
+	validation.optionalText("experience.impact", x.Impact, 240)
+	validation.optionalText("experience.applicability", x.Applicability, 240)
+	validation.optionalText("experience.boundary", x.Boundary, 240)
 	validation.evidence("experience", x.Evidence)
-	validation.cues("experience", x.Cues, x.Evidence)
+	validation.cues("experience", x.Cues, x.Evidence, false)
 	body, _ := json.Marshal(visibleExperience(x))
 	if len(body) > 3000 {
 		validation.add("experience", fmt.Sprintf("body budget is 3000 UTF-8 bytes, got %d; condense prose and preserve conditions", len(body)))
@@ -278,10 +296,23 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 		e.SHA256 = actual
 	}
 	x := &in.Experience
-	body := fmt.Sprintf("易错推断：%s\n关键反例：%s\nBug影响：%s\n适用条件：%s\n边界与未知：%s",
-		x.Pitfall, x.Counterexample, x.Impact, x.Applicability, x.Boundary)
+	var body string
+	if experienceForm(x) == "fact" {
+		body = "业务事实：" + x.Fact
+	} else {
+		body = fmt.Sprintf("易错推断：%s\n关键反例：%s", x.Pitfall, x.Counterexample)
+		for _, line := range []struct{ label, value string }{{"Bug影响", x.Impact}, {"适用条件", x.Applicability}, {"边界与未知", x.Boundary}} {
+			if strings.TrimSpace(line.value) != "" {
+				body += "\n" + line.label + "：" + line.value
+			}
+		}
+	}
+	futureUse := x.Applicability
+	if strings.TrimSpace(futureUse) == "" {
+		futureUse = coreFact(x)
+	}
 	d := Draft{Kind: "case", Scope: in.Scope, Title: in.Title, Body: body, Origin: "model_inference", RequestID: in.RequestID,
-		SourceRef: x.Evidence[0].Reference, Profile: &Profile{Class: "long_term", FutureUse: x.Applicability, CounterCheck: "Recorded counterexample and concrete impact; ordinary recoverable facts are not admitted.", Applicability: x.Applicability, Boundary: x.Boundary, Experience: x}}
+		SourceRef: x.Evidence[0].Reference, Profile: &Profile{Class: "long_term", FutureUse: futureUse, CounterCheck: "Recorded counterexample or sourced business fact; ordinary recoverable facts are not admitted.", Applicability: x.Applicability, Boundary: x.Boundary, Experience: x}}
 	d.experienceValidated = true
 	d.experienceKey = experienceKey(x)
 	d.requestFingerprint = requestFingerprint

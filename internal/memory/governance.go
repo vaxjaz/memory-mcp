@@ -48,12 +48,16 @@ func validateProfile(p *Profile) error {
 	if p.Class != "long_term" && p.Class != "temporary" {
 		return errors.New("profile.class must be long_term or temporary")
 	}
-	for name, v := range map[string]string{"future_use": p.FutureUse, "counter_check": p.CounterCheck, "applicability": p.Applicability, "boundary": p.Boundary} {
-		if strings.TrimSpace(v) == "" || len(v) > 4096 {
-			return fmt.Errorf("profile.%s must be nonblank and at most 4096 bytes", name)
-		}
-		if err := textguard.Check("profile."+name, v, false); err != nil {
-			return err
+	// Compact experience/agreement bodies carry their own qualifiers; the
+	// narrative profile fields remain mandatory only for plain case profiles.
+	if p.Experience == nil && p.Agreement == nil {
+		for name, v := range map[string]string{"future_use": p.FutureUse, "counter_check": p.CounterCheck, "applicability": p.Applicability, "boundary": p.Boundary} {
+			if strings.TrimSpace(v) == "" || len(v) > 4096 {
+				return fmt.Errorf("profile.%s must be nonblank and at most 4096 bytes", name)
+			}
+			if err := textguard.Check("profile."+name, v, false); err != nil {
+				return err
+			}
 		}
 	}
 	if len(p.SearchHints) > 12 {

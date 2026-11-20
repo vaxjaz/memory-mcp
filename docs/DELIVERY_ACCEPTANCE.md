@@ -128,3 +128,17 @@ The actual dev.11 executable created a disposable schema 9 library and a request
 Two simultaneous Windows hook processes issuing matching test/dev tool calls now receive one forced lookup and share one challenge. Distinct candidate sets are still eligible for their own lookup. A challenge stays pending if the server generates a result without an observed Post receipt. Covered retries proceed across process restart and session resume, and the eventual receipt credits only the actual returned records. A partial result continues with the original challenge and cursor. Doctor reads one challenge by ID and exposes the current stage without changing SQLite.
 
 The dev.12 Windows executable reproduced invalid next_cursor responses across short legacy IDs, old timestamp formatting and an empty timestamp. Dev.13 uses the original stored sort key for pagination. The executable reaches the last page for both empty and fixed-keyword queries, and the 33-record cleanup inventory returns all 33 distinct IDs. Ranked lookup paging and changed-filter rejection remain covered separately.
+
+## 2026-11-20 两形态正文与前置热融合（0.6.4-dev.1）
+
+依据 [EXPERIENCE_MODEL_GLM_HANDOFF.md](EXPERIENCE_MODEL_GLM_HANDOFF.md) §3/§4 实施，integration protocol 12、schema 10。基线为 v0.6.3（3394137）全量测试通过的 B 组行为快照。
+
+**写入契约**。`memory_experience_record` 正文两形态互斥：`fact` 为一条有来源、带对象/环境/时间限定的业务事实；`counterexample` 为 pitfall+counterexample。`impact/applicability/boundary` 转为可选 legacy 限定字段，旧客户端五栏提交继续接受且逐字段保留，无任何字段被丢弃后返回成功。经验侧不再撰写 `cue.text`；约定工具（`memory_reference_record`）在 wire schema 与校验两层仍必填。互斥与缺形态错误带字段位置（`experience.fact` 等）。request_id 幂等与同内容去重对 legacy payload 保持字节级键兼容（`TestExperienceLegacyFiveFieldSubmissionStaysValid`、`TestExperienceFactFormWriteAndRecall`、`TestExperienceFormMutualExclusion`、`TestAgreementStillRequiresCueText`）。
+
+**读取投影与短提醒**。lookup 投影新增 `form`，legacy 五栏与 cue.text 派生事实全量保留，不发布截短强断言。正文送达后新关联的一次短提醒从本版本正文派生（fact 全文或反例），限定完整；预算不足时退化为定位入口行而非截断（`TestCueReminderQuotesBodyFactWithQualifiers`、`TestCueReminderFallsBackToLocatorWhenBudgetExhausted`）。首个 lookup、投递去重、上下文重置等既有 A01–A43 行为随全量回归保持。
+
+**旧库升级与回退**。schema 9 库被新二进制拒绝直接打开并提示 migrate；`migrate` 盘点报告新增 `current_entries_with_legacy_narrative_qualifiers`、`current_entries_with_cue_facts_beyond_body`、`structured_entries_missing_evidence`，`migrate --apply --backup` 备份后升级到 schema 10。真实二进制 CLI 演练：拒绝→盘点（legacy 条目正确列出）→备份升级→回退基线文件存在→升级后 status 正常（`TestSchema10UpgradeFromSchema9KeepsDataAndBaseline`）。旧 0.6.3 二进制对 schema 10 库按版本门拒绝，不会静默丢 `fact` 字段。
+
+**stdio 实测**。`build/check-experience-forms-stdio.py` 以真实二进制在隔离库完成 initialize、七工具清单、bootstrap（protocol 12/schema 10/新特性位）、fact 写入、互斥诊断、legacy 五栏写入、去重与两形态召回；`scripts/smoke.py` 同步断言 protocol 12。
+
+**未覆盖路径（如实标注）**。方案 §5 交接前挑战未启用：现有宿主适配器（ZCode/Codex/Qoder 等）未验证存在"草稿已成型、可修改、未交接"事件，`ops_asset_gate` 待真实宿主核对；按方案先记未覆盖，不做投机接线。§6 D/E 组盲测、真实宿主能力增益与错误交付率对照需要实际宿主会话与预标注评分样本，为外部条件，本节不报告任何百分比。guide.md 已嵌入 §4 前置热融合常驻提示与 §5 禁止项边界，其降低误用的效果未经宿主测量。

@@ -53,6 +53,14 @@ func (v *recordValidation) shortText(field, value string, max int) {
 	v.checkText(field, value)
 }
 
+// optionalText validates a legacy qualifier only when submitted; blank is valid.
+func (v *recordValidation) optionalText(field, value string, max int) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	v.shortText(field, value, max)
+}
+
 func (v *recordValidation) evidence(root string, evidence []ExperienceEvidence) {
 	field := root + ".evidence"
 	v.count(field, len(evidence), 1, 3, "actual evidence locators")

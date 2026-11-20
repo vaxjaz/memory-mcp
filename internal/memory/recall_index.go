@@ -76,6 +76,7 @@ func indexRecallEntry(ctx context.Context, tx *sql.Tx, e Entry) error {
 	}
 	if e.Profile != nil {
 		if x := e.Profile.Experience; x != nil {
+			add(x.Fact, 3)
 			add(x.Applicability, 3)
 			add(x.Pitfall, 2)
 			add(x.Counterexample, 2)

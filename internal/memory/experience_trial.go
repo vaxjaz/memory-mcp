@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"time"
 )
 
@@ -116,6 +117,25 @@ type ExperienceMatch struct {
 	Entrance string   `json:"entrance"`
 	Objects  []string `json:"objects,omitempty"`
 	entry    *Entry
+}
+
+// shortFact is the one-line fact or counterexample a new-association reminder
+// quotes. Legacy cue text stays honored; new records derive it from this
+// version's body, and its qualifiers travel inside the text itself, never
+// trimmed to fit a budget.
+func (m ExperienceMatch) shortFact() string {
+	if strings.TrimSpace(m.CueText) != "" {
+		return m.CueText
+	}
+	if m.entry != nil && m.entry.Profile != nil {
+		if x := m.entry.Profile.Experience; x != nil {
+			return coreFact(x)
+		}
+		if a := m.entry.Profile.Agreement; a != nil {
+			return a.Requirement
+		}
+	}
+	return ""
 }
 
 type ExperienceChallenge struct {

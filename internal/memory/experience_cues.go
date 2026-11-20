@@ -10,12 +10,14 @@ import (
 	"github.com/vaxjaz/memory-mcp/internal/matching"
 )
 
-// Cues are evidenced associations with the SAME historical counterexample.
+// Cues are evidenced associations with the SAME historical body.
 // Entrances are aliases, not independent risks or model-authored read receipts.
+// Experience-side cue text is no longer authored; delivered facts come from
+// the body. Legacy records keep their stored text and it keeps being honored.
 type ExperienceCue struct {
 	ID           string     `json:"cue_id" jsonschema:"Stable within the record. Start with a lowercase ASCII letter; use up to 48 lowercase letters, digits or underscores in total."`
 	Label        string     `json:"label" jsonschema:"Compact association label, at most 24 Unicode characters."`
-	Text         string     `json:"text" jsonschema:"A complete evidence-backed reminder stating the applicable fact, at most 160 Unicode characters. Only facts already in this version's body; new risks require a material revision or new experience."`
+	Text         string     `json:"text,omitempty" jsonschema:"Optional legacy field for agreements and old experience records. New experience writes leave it empty; delivered facts come from the body. If present: a complete evidence-backed fact, at most 160 Unicode characters, only facts already in this version's body."`
 	EvidenceRefs []string   `json:"evidence_refs" jsonschema:"1-3 exact evidence[].reference values from this submitted body. When removing evidence, update all cues that cite it."`
 	Matches      []CueMatch `json:"matches" jsonschema:"Matching groups with a total of 1-12 directly evidenced entrance strings."`
 }
@@ -34,7 +36,7 @@ func entranceComparison(rule matching.Rule) EntranceComparison {
 
 var cueIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,47}$`)
 
-func (v *recordValidation) cues(root string, cues []ExperienceCue, evidence []ExperienceEvidence) {
+func (v *recordValidation) cues(root string, cues []ExperienceCue, evidence []ExperienceEvidence, requireText bool) {
 	field := root + ".cues"
 	v.count(field, len(cues), 1, 12, "evidenced cues")
 	refs := map[string]bool{}
@@ -49,7 +51,9 @@ func (v *recordValidation) cues(root string, cues []ExperienceCue, evidence []Ex
 		}
 		ids[c.ID] = true
 		v.shortText(row+".label", c.Label, 24)
-		v.shortText(row+".text", c.Text, 160)
+		if requireText || strings.TrimSpace(c.Text) != "" {
+			v.shortText(row+".text", c.Text, 160)
+		}
 		v.count(row+".evidence_refs", len(c.EvidenceRefs), 1, 3, "existing evidence references")
 		for j, ref := range c.EvidenceRefs {
 			if !refs[ref] {
@@ -102,22 +106,44 @@ func cueContent(cues []ExperienceCue) []ExperienceCue {
 	return out
 }
 
+// experienceForm reports the stored body form. Legacy five-field records are
+// counterexample form; fact is the new sourced-business-fact form.
+func experienceForm(x *Experience) string {
+	if strings.TrimSpace(x.Fact) != "" {
+		return "fact"
+	}
+	return "counterexample"
+}
+
+// coreFact is the short fact or counterexample of this version's body. Cue
+// reminders quote it instead of an experience-side cue text; qualifiers that
+// matter to it are written inside the text itself.
+func coreFact(x *Experience) string {
+	if strings.TrimSpace(x.Fact) != "" {
+		return x.Fact
+	}
+	return x.Counterexample
+}
+
 // ExperienceBody is deliberately separate from the persisted recognition model.
 // Facts behind every cue are present on first delivery; only the actual trigger
-// cues are consumed by the native receipt.
+// cues are consumed by the native receipt. Legacy qualifier fields are always
+// preserved so no stored record is displayed through a lossy projection.
 type ExperienceBody struct {
-	Pitfall        string               `json:"pitfall"`
-	Counterexample string               `json:"counterexample"`
-	Impact         string               `json:"impact"`
-	Applicability  string               `json:"applicability"`
-	Boundary       string               `json:"boundary"`
+	Form           string               `json:"form"`
+	Pitfall        string               `json:"pitfall,omitempty"`
+	Counterexample string               `json:"counterexample,omitempty"`
+	Fact           string               `json:"fact,omitempty"`
+	Impact         string               `json:"impact,omitempty"`
+	Applicability  string               `json:"applicability,omitempty"`
+	Boundary       string               `json:"boundary,omitempty"`
 	RelatedFacts   []string             `json:"related_facts,omitempty"`
 	Evidence       []ExperienceEvidence `json:"evidence"`
 }
 
 func visibleExperience(x *Experience) *ExperienceBody {
-	out := &ExperienceBody{Pitfall: x.Pitfall, Counterexample: x.Counterexample, Impact: x.Impact, Applicability: x.Applicability, Boundary: x.Boundary, Evidence: append([]ExperienceEvidence(nil), x.Evidence...)}
-	core := x.Pitfall + x.Counterexample + x.Impact + x.Applicability + x.Boundary
+	out := &ExperienceBody{Form: experienceForm(x), Pitfall: x.Pitfall, Counterexample: x.Counterexample, Fact: x.Fact, Impact: x.Impact, Applicability: x.Applicability, Boundary: x.Boundary, Evidence: append([]ExperienceEvidence(nil), x.Evidence...)}
+	core := x.Pitfall + x.Counterexample + x.Fact + x.Impact + x.Applicability + x.Boundary
 	for _, c := range x.Cues {
 		if !strings.Contains(core, c.Text) {
 			out.RelatedFacts = append(out.RelatedFacts, c.Text)

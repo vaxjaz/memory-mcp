@@ -72,7 +72,9 @@ func validateAgreement(a *Agreement) error {
 	validation.shortText("agreement.authority", a.Authority, 240)
 	validation.shortText("agreement.confirmation_reference", a.ConfirmationReference, 240)
 	validation.evidence("agreement", a.Evidence)
-	validation.cues("agreement", a.Cues, a.Evidence)
+	// Agreements keep requiring cue text; only the experience side derives
+	// delivered facts from the body.
+	validation.cues("agreement", a.Cues, a.Evidence, true)
 	b, _ := json.Marshal(visibleAgreement(a))
 	if len(b) > 3000 {
 		validation.add("agreement", fmt.Sprintf("body budget is 3000 UTF-8 bytes, got %d; condense prose and preserve conditions", len(b)))

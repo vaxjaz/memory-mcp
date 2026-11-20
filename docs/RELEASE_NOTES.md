@@ -1,3 +1,12 @@
+# memory-mcp 0.6.4-dev.1
+
+- Experience bodies take one of two mutually exclusive forms: a sourced business `fact` with its object/environment/time qualifiers, or `pitfall` + `counterexample`. The legacy `impact`/`applicability`/`boundary` columns become optional and are preserved verbatim on old-client submissions; nothing is dropped and reported as success.
+- Experience cues no longer carry authored text. Post-body new-association reminders quote the fact or counterexample from this version's body with its full qualifiers; when the reminder budget cannot hold them, a locator entry keeps access to the complete fact instead of a trimmed assertion. Agreement cues keep requiring their confirmed text.
+- Lookups project a `form` field and keep every legacy qualifier and cue-text fact losslessly. The embedded guide adds the standing recall/hot-fusion prompt for hosts.
+- Schema 10: older binaries refuse to open the new library instead of silently dropping the fact form. `migrate` inventories legacy narrative qualifiers, cue facts beyond the body, and records missing evidence; `migrate --apply --backup FILE` upgrades with a rollback baseline.
+
+This dev release uses integration protocol 12 and schema 10. Schema 9 libraries require the packaged migration with a fresh backup before opening.
+
 # memory-mcp 0.6.3
 
 - Configure built-in and project tools through one registration path. Bind keyword matching, optional `when` prerequisites and verified earlier tool results to the cue.

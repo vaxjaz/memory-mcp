@@ -20,7 +20,10 @@ import (
 	"github.com/vaxjaz/memory-mcp/internal/textguard"
 )
 
-const SchemaVersion = 9
+// Schema 10 stores two experience body forms (counterexample/fact) in
+// profile_json. Older binaries cannot project the fact form and are refused
+// instead of silently dropping it; upgrade runs the existing backup flow.
+const SchemaVersion = 10
 
 // Entry bodies are free text. These fields track provenance, not semantic truth.
 type Entry struct {
@@ -285,7 +288,7 @@ PRAGMA user_version=2;`)
 	if err = migrateRecall(tx); err != nil {
 		return err
 	}
-	if _, err = tx.Exec("PRAGMA user_version=9"); err != nil {
+	if _, err = tx.Exec(fmt.Sprintf("PRAGMA user_version=%d", SchemaVersion)); err != nil {
 		return err
 	}
 	return tx.Commit()

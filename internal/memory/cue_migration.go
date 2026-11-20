@@ -21,16 +21,27 @@ type MigrationEntry struct {
 }
 
 type MigrationReport struct {
-	FromSchema   int              `json:"from_schema"`
-	TargetSchema int              `json:"target_schema"`
-	Applied      bool             `json:"applied"`
-	Backup       string           `json:"backup,omitempty"`
-	Convertible  int              `json:"structured_entries_with_cues"`
-	NeedsCues    []MigrationEntry `json:"current_entries_needing_cues"`
+	FromSchema int `json:"from_schema"`
+	// LegacyQualifierEntries are current records whose necessary qualifiers may
+	// live only in the legacy narrative fields. They stay readable with their
+	// full stored shape; slim them only after verifying the original evidence.
+	LegacyQualifierEntries []MigrationEntry `json:"current_entries_with_legacy_narrative_qualifiers"`
+	// CueFactsBeyondBody are current records whose cue text carries facts not
+	// contained in the body core; a new-form revision must not drop them.
+	CueFactsBeyondBody []MigrationEntry `json:"current_entries_with_cue_facts_beyond_body"`
+	// MissingEvidence lists structured records without locators; verify these
+	// manually before relying on them.
+	MissingEvidence   []MigrationEntry `json:"structured_entries_missing_evidence"`
+	TargetSchema      int              `json:"target_schema"`
+	Applied           bool             `json:"applied"`
+	Backup            string           `json:"backup,omitempty"`
+	Convertible       int              `json:"structured_entries_with_cues"`
+	NeedsCues         []MigrationEntry `json:"current_entries_needing_cues"`
 }
 
 func InspectCueMigration(ctx context.Context, dir string) (MigrationReport, error) {
-	report := MigrationReport{TargetSchema: SchemaVersion, NeedsCues: []MigrationEntry{}}
+	report := MigrationReport{TargetSchema: SchemaVersion, NeedsCues: []MigrationEntry{},
+		LegacyQualifierEntries: []MigrationEntry{}, CueFactsBeyondBody: []MigrationEntry{}, MissingEvidence: []MigrationEntry{}}
 	store, err := OpenReadOnly(dir)
 	if err != nil {
 		return report, err
@@ -48,7 +59,8 @@ func InspectCueMigration(ctx context.Context, dir string) (MigrationReport, erro
 	}
 	rows, err := store.db.QueryContext(ctx, `
 SELECT e.id,e.scope,e.title,CASE WHEN json_type(p.profile_json,'$.experience')='object' THEN 'experience' ELSE 'agreement' END,
-       e.current,coalesce(json_array_length(p.profile_json,'$.experience.cues'),json_array_length(p.profile_json,'$.agreement.cues'),0)
+       e.current,coalesce(json_array_length(p.profile_json,'$.experience.cues'),json_array_length(p.profile_json,'$.agreement.cues'),0),
+       coalesce(p.profile_json,'')
 FROM entry_profiles p JOIN entries e ON e.id=p.entry_id
 WHERE json_type(p.profile_json,'$.experience')='object' OR json_type(p.profile_json,'$.agreement')='object'
 ORDER BY e.scope,e.id`)
@@ -59,14 +71,47 @@ ORDER BY e.scope,e.id`)
 	for rows.Next() {
 		var entry MigrationEntry
 		var current bool
-		var cues int
-		if err := rows.Scan(&entry.ID, &entry.Scope, &entry.Title, &entry.Kind, &current, &cues); err != nil {
+		var cueCount int
+		var profileJSON string
+		if err := rows.Scan(&entry.ID, &entry.Scope, &entry.Title, &entry.Kind, &current, &cueCount, &profileJSON); err != nil {
 			return report, err
 		}
-		if cues > 0 {
+		if cueCount > 0 {
 			report.Convertible++
 		} else if current {
 			report.NeedsCues = append(report.NeedsCues, entry)
+		}
+		if !current {
+			continue
+		}
+		var profile Profile
+		if err := json.Unmarshal([]byte(profileJSON), &profile); err != nil {
+			continue
+		}
+		if profile.Experience == nil && profile.Agreement == nil {
+			continue
+		}
+		var evidence []ExperienceEvidence
+		var cues []ExperienceCue
+		core := ""
+		if x := profile.Experience; x != nil {
+			evidence, cues = x.Evidence, x.Cues
+			core = x.Pitfall + x.Counterexample + x.Fact + x.Impact + x.Applicability + x.Boundary
+			if strings.TrimSpace(x.Impact) != "" || strings.TrimSpace(x.Applicability) != "" || strings.TrimSpace(x.Boundary) != "" {
+				report.LegacyQualifierEntries = append(report.LegacyQualifierEntries, entry)
+			}
+		} else if a := profile.Agreement; a != nil {
+			evidence, cues = a.Evidence, a.Cues
+			core = a.Requirement + a.Applicability + a.Boundary
+		}
+		if len(evidence) == 0 {
+			report.MissingEvidence = append(report.MissingEvidence, entry)
+		}
+		for _, cue := range cues {
+			if strings.TrimSpace(cue.Text) != "" && !strings.Contains(core, cue.Text) {
+				report.CueFactsBeyondBody = append(report.CueFactsBeyondBody, entry)
+				break
+			}
 		}
 	}
 	return report, rows.Err()
