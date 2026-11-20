@@ -82,9 +82,9 @@ def main():
                                       impact="An unrelated query can trigger a reminder", applicability="Fixture only",
                                       boundary="No database was queried",
                                       evidence=[dict(kind="runtime", reference="context-fixture", observation=body)],
-                                      cues=[dict(cue_id="change", label="Context", text=body, evidence_refs=["context-fixture"],
+                                      cues=[dict(cue_id="change", label="Context", evidence_refs=["context-fixture"],
                                                  matches=[change]),
-                                            dict(cue_id="read", label="Read", text="Isolated metadata fixture.",
+                                            dict(cue_id="read", label="Read",
                                                  evidence_refs=["context-fixture"], matches=[read])])))
             assert "tool_result_facts" in host.tool("memory_bootstrap", {})["features"]
             identity = {"service": "fixture", "connection_id": "one"}
@@ -126,7 +126,10 @@ def main():
             assert challenge(run("SELECT information_schema"))
             start("login-1")
             complete("login-1", True)
-            assert challenge(run())
+            # Single request per challenge: the pending SELECT challenge already
+            # covers this entry's body, so the covered hit proceeds; doctor
+            # confirms the fact-gated cue itself matches with the login fact.
+            assert run() == {} and outcome() == "matched"
             assert run(connection="two") == {} and outcome(connection="two") == "unknown"
             assert run(service="other") == {} and outcome(service="other") == "unknown"
             assert run(session="other") == {}
@@ -159,7 +162,9 @@ def main():
             assert run(turn="turn-2") == {} and outcome(turn="turn-2") == "unknown"
             start("login-2", turn="turn-2")
             complete("login-2", True, turn="turn-2")
-            assert challenge(run(turn="turn-2"))
+            # Same session: the pending challenge still covers this entry's
+            # body, so the hit proceeds while the fact gate stays verifiable.
+            assert run(turn="turn-2") == {} and outcome(turn="turn-2") == "matched"
             with closing(sqlite3.connect(data / "memory.db")) as db:
                 rows = db.execute("SELECT * FROM probe_context_facts").fetchall()
                 assert rows and "DO_NOT_STORE_RESPONSE" not in str(rows) and "fixture" not in str(rows), rows

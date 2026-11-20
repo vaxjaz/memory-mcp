@@ -257,13 +257,25 @@ func (validation *recordValidation) experienceWriteBoundary(x *Experience, inher
 	}
 }
 
+// bodyIdentityKey is the content identity with cue texts AND entrance aliases
+// removed: body, qualifiers and evidence identity only. Equal keys mean the
+// submission is a pure alias update of the previous revision.
+func bodyIdentityKey(x *Experience) string {
+	copyX := *x
+	copyX.Cues = append([]ExperienceCue(nil), x.Cues...)
+	for i := range copyX.Cues {
+		copyX.Cues[i].Text = ""
+	}
+	return experienceKey(&copyX)
+}
+
 // inheritCueText restores unchanged cue text from the previous revision of the
-// same cue ID. A revision that follows the write-boundary error and omits the
-// retired field must not fork the content identity, lose stored cue facts or
-// strand previous delivery receipts on a superseded version. Authoring or
+// same cue ID, but ONLY for a pure alias update: when body, qualifiers or
+// supporting evidence materially changed, the superseded text is not carried
+// into the new version and reminders must come from the new body. Authoring or
 // rewriting cue text is still rejected at the boundary.
 func inheritCueText(previous, submitted *Experience) map[string]bool {
-	if previous == nil || submitted == nil {
+	if previous == nil || submitted == nil || bodyIdentityKey(previous) != bodyIdentityKey(submitted) {
 		return nil
 	}
 	texts := map[string]string{}
@@ -292,18 +304,9 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 			return result, err
 		}
 	}
-	// Inherit unchanged cue text before fingerprinting so retries re-derive
-	// the identical material payload.
-	var inherited map[string]bool
-	if in.PreviousID != "" {
-		if prev, e := s.Read(ctx, in.PreviousID); e == nil && prev.Entry.Scope == in.Scope && prev.Entry.Profile != nil && prev.Entry.Profile.Experience != nil {
-			inherited = inheritCueText(prev.Entry.Profile.Experience, &in.Experience)
-		}
-	}
-	// A committed request_id returns its receipt before validation: protocol
-	// upgrades may tighten checks (body budgets, form rules) that the committed
-	// payload legitimately predates. Different payload under the same ID still
-	// conflicts. Keep retries over the material payload stable across upgrades.
+	// The request fingerprint stays over the payload exactly as submitted, so
+	// a revision committed by an older binary retries cleanly; inheritance
+	// below only feeds the stored content identity.
 	admission := in.Admission
 	in.Admission = nil
 	raw, _ := json.Marshal(in)
@@ -323,6 +326,14 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return result, err
+		}
+	}
+	// A pure alias update inherits the unchanged historical cue text so it
+	// keeps the same version, delivery receipts and stored facts.
+	var inherited map[string]bool
+	if in.PreviousID != "" {
+		if prev, e := s.Read(ctx, in.PreviousID); e == nil && prev.Entry.Scope == in.Scope && prev.Entry.Profile != nil && prev.Entry.Profile.Experience != nil {
+			inherited = inheritCueText(prev.Entry.Profile.Experience, &in.Experience)
 		}
 	}
 	var validation recordValidation

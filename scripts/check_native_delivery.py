@@ -31,8 +31,8 @@ def rpc_write_fixture(binary, data, project, business=False):
     call({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-11-25','capabilities':{},'clientInfo':{'name':'isolated-delivery-fixture','version':'1'}}})
     call({'jsonrpc':'2.0','method':'notifications/initialized'})
     experience = {'pitfall':'合成实验误以为备注变化自动影响日志', 'counterexample':'合成实验中业务备注已更新，日志仍读取独立旧参数。', 'impact':'合成日志可能保留旧文本', 'applicability':'同一合成回馈业务', 'boundary':'条件不同或已修复时可以直接继续，无需修改或登记拒绝', 'evidence':[{'kind':'business','reference':'fixture:local-only','observation':'合成反例，不是真实事故'}], 'cues':[
-        {'cue_id':'remark','label':'备注变化','text':'合成实验中备注更新后日志仍保留旧文本。','evidence_refs':['fixture:local-only'],'matches':[{'op':'token','entrances':['RemarkInput.java','WorkOrder.remark']}]},
-        {'cue_id':'log_input','label':'取值入口','text':'合成实验中日志生成读取独立旧参数，备注更新未传入。','evidence_refs':['fixture:local-only'],'matches':[{'op':'token','entrances':['FeedbackLogBuilder.java','FeedbackLogBuilder.build']}]}]}
+        {'cue_id':'remark','label':'备注变化','evidence_refs':['fixture:local-only'],'matches':[{'op':'token','entrances':['RemarkInput.java','WorkOrder.remark']}]},
+        {'cue_id':'log_input','label':'取值入口','evidence_refs':['fixture:local-only'],'matches':[{'op':'token','entrances':['FeedbackLogBuilder.java','FeedbackLogBuilder.build']}]}]}
     if business:
         experience['object_id_prefixes']=['WXN']
         experience['cues'][1]['matches'].append({'op':'token','normalize':'whitespace','entrances':['生成回馈日志']})
@@ -104,19 +104,19 @@ def main():
                 state['block_count']=sum('blocked by PreToolUse hook' in json.dumps(i,ensure_ascii=False) for i in outputs)
                 state['body_result_count']=sum('"receipt_id"' in json.dumps(i,ensure_ascii=False).replace('\\"','"') for i in outputs)
                 state['file_results']=sum('isolated fixture' in json.dumps(i,ensure_ascii=False) for i in outputs)
-                state['cue_context_count']=sum('取值入口：合成实验中日志生成' in json.dumps(i,ensure_ascii=False) for i in body.get('input',[]) if i.get('role')=='developer')
+                state['cue_context_count']=sum('取值入口：合成实验中业务备注已更新' in json.dumps(i,ensure_ascii=False) for i in body.get('input',[]) if i.get('role')=='developer')
                 # Only aggregate fixture visibility flags and sizes are persisted.
                 state['body_seen'] |= '合成实验中业务备注已更新' in serialized
-                state['cue_seen'] |= '取值入口：合成实验中日志生成' in serialized
+                state['cue_seen'] |= '取值入口：合成实验中业务备注已更新' in serialized
                 matches=re.findall(r'challenge_id=\\?"([a-f0-9]{32})',serialized)
                 if matches:state['challenge']=matches[-1]
                 material=[]
                 for item in body.get('input',[]):
                     encoded=json.dumps(item,ensure_ascii=False)
-                    if (item.get('role')=='developer' and '取值入口：合成实验中日志生成' in encoded) or (item.get('type')=='function_call_output' and ('receipt_id' in encoded or 'blocked by PreToolUse hook' in encoded)):
+                    if (item.get('role')=='developer' and '取值入口：合成实验中业务备注已更新' in encoded) or (item.get('type')=='function_call_output' and ('receipt_id' in encoded or 'blocked by PreToolUse hook' in encoded)):
                         material.append(encoded)
                 state['material_bytes_by_stage'].append(sum(len(x.encode()) for x in material))
-                state['cue_context_bytes']=sum(len(json.dumps(i,ensure_ascii=False).encode()) for i in body.get('input',[]) if i.get('role')=='developer' and '取值入口：合成实验中日志生成' in json.dumps(i,ensure_ascii=False))
+                state['cue_context_bytes']=sum(len(json.dumps(i,ensure_ascii=False).encode()) for i in body.get('input',[]) if i.get('role')=='developer' and '取值入口：合成实验中业务备注已更新' in json.dumps(i,ensure_ascii=False))
                 state['lookup_result_bytes']=sum(len(json.dumps(i,ensure_ascii=False).encode()) for i in outputs if 'receipt_id' in json.dumps(i,ensure_ascii=False))
                 stage=state['stage'];state['stage']+=1
                 lookup=next((n for n in names if n.endswith('memory_experience_lookup')),None)

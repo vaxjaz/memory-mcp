@@ -2,6 +2,23 @@
 """Exercise the current packaged MCP executable in an isolated library."""
 import argparse,json,queue,subprocess,tempfile,threading
 from pathlib import Path
+
+def rejects_cue_text(binary):
+ """True when this binary's experience write boundary rejects authored cue
+ text. Historical-tag binaries legitimately accept it (pre 0.6.4-dev.2);
+ release acceptance scripts pick their assertions accordingly."""
+ try: version=subprocess.check_output([str(binary),"version"],text=True,encoding="utf-8").strip()
+ except Exception: return True
+ parts=version.split("-")
+ try: base=[int(x) for x in parts[0].split(".")]
+ except ValueError: return True
+ if base>[0,6,4]: return True
+ if base<[0,6,4]: return False
+ if len(parts)>=2 and parts[1].startswith("dev."):
+  try: return int(parts[1].split(".")[1])>=2
+  except (ValueError,IndexError): return True
+ return True
+
 class Host:
  def __init__(self,binary,data_dir):
   self.p=subprocess.Popen([binary,"serve","--data-dir",data_dir],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,encoding="utf-8")

@@ -404,6 +404,95 @@ func TestAliasRevisionInheritsStoredCueText(t *testing.T) {
 	}
 }
 
+func TestMaterialRevisionStopsDeliveringSupersededText(t *testing.T) {
+	s, project, in := factFixture(t)
+	// Stored legacy shape: OLD fact in the body, OLD conclusion in cue text.
+	old := Experience{Fact: "Code is OLD.", Boundary: "仅历史版本",
+		Evidence: []ExperienceEvidence{{Kind: "business", Reference: "fixture:rev", Observation: "旧版本"}},
+		Cues: []ExperienceCue{
+			{ID: "settle", Label: "结算编码", Text: "Code is OLD.", EvidenceRefs: []string{"fixture:rev"}, Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"settlementCode"}}}},
+			{ID: "envcfg", Label: "环境配置", Text: "Code is OLD.", EvidenceRefs: []string{"fixture:rev"}, Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"offlineSettlement"}}}},
+		}}
+	d := Draft{Kind: "case", Scope: in.Scope, Title: "旧事实", Body: "业务事实：Code is OLD.", Origin: "model_inference",
+		SourceRef: "fixture:rev", Profile: &Profile{Class: "long_term", FutureUse: "Code is OLD.", CounterCheck: "stored shape", Boundary: "仅历史版本", Experience: &old}}
+	d.experienceValidated = true
+	d.experienceKey = experienceKey(&old)
+	stored, err := s.Put(ctx, d, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A MATERIAL correction to NEW3: the superseded cue text must not be
+	// inherited into the new version through any path.
+	revision := ExperienceWrite{Scope: in.Scope, Project: project, Title: "新事实", PreviousID: stored.ID,
+		Admission: &ExperienceAdmission{FutureDecision: "按新事实核对。", EvidenceRef: "fixture:rev2"},
+		Experience: Experience{Fact: "Code is NEW3.", Evidence: []ExperienceEvidence{{Kind: "business", Reference: "fixture:rev2", Observation: "修正后事实"}},
+			Cues: []ExperienceCue{
+				{ID: "settle", Label: "结算编码", EvidenceRefs: []string{"fixture:rev2"}, Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"settlementCode"}}}},
+				{ID: "envcfg", Label: "环境配置", EvidenceRefs: []string{"fixture:rev2"}, Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"offlineSettlement"}}}},
+			}}}
+	result, err := s.RecordExperience(ctx, revision)
+	if err != nil || result.Reused || result.ID == stored.ID {
+		t.Fatal("material revision did not create a new version", result, err)
+	}
+	if err := s.ExperienceStartTurn(ctx, "codex", in.Scope, "consumer", "t1", "e1"); err != nil {
+		t.Fatal(err)
+	}
+	c := probeDelivery(t, s, project, "settlementCode")
+	o := nativeLookup(t, s, project, "new-body", c.ID, 2)
+	if len(o.Items) != 1 || o.Items[0].Experience == nil {
+		t.Fatal("revised body not delivered", o)
+	}
+	body := o.Items[0].Experience
+	if body.Fact != "Code is NEW3." || strings.Contains(strings.Join(body.RelatedFacts, "\n"), "Code is OLD.") {
+		t.Fatal("superseded text leaked into the first lookup", body)
+	}
+	observeDelivery(t, s, "new-body", o)
+	reminder := probeDelivery(t, s, project, "offlineSettlement")
+	if reminder.Outcome != "cues" {
+		t.Fatal("new association emitted no reminder", reminder)
+	}
+	if !strings.Contains(reminder.Context, "Code is NEW3.") || strings.Contains(reminder.Context, "Code is OLD.") {
+		t.Fatal("reminder quotes the superseded conclusion", reminder.Context)
+	}
+	finishEmission(t, s, reminder, true)
+}
+
+func TestStoredCueTextReminderCarriesMissingQualifiers(t *testing.T) {
+	s, project, in := factFixture(t)
+	// dev.1 shape: fact + separate boundary + authored cue text WITHOUT the
+	// qualifier. The reminder must regain the boundary on every path.
+	devOne := Experience{Fact: "Code is STAGING.", Boundary: "Only verified in TEST.",
+		Evidence: []ExperienceEvidence{{Kind: "business", Reference: "fixture:dev1b", Observation: "dev.1 存量形态"}},
+		Cues: []ExperienceCue{
+			{ID: "settle", Label: "Settlement", Text: "Code is STAGING.", EvidenceRefs: []string{"fixture:dev1b"}, Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"settlementCode"}}}},
+			{ID: "envcfg", Label: "Env", Text: "Code is STAGING.", EvidenceRefs: []string{"fixture:dev1b"}, Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"offlineSettlement"}}}},
+		}}
+	d := Draft{Kind: "case", Scope: in.Scope, Title: "dev.1 存量", Body: "业务事实：Code is STAGING.", Origin: "model_inference",
+		SourceRef: "fixture:dev1b", Profile: &Profile{Class: "long_term", FutureUse: "Code is STAGING.", CounterCheck: "stored shape", Boundary: "Only verified in TEST.", Experience: &devOne}}
+	d.experienceValidated = true
+	d.experienceKey = experienceKey(&devOne)
+	if _, err := s.Put(ctx, d, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ExperienceStartTurn(ctx, "codex", in.Scope, "consumer", "t1", "e1"); err != nil {
+		t.Fatal(err)
+	}
+	c := probeDelivery(t, s, project, "settlementCode")
+	o := nativeLookup(t, s, project, "dev1b-body", c.ID, 2)
+	observeDelivery(t, s, "dev1b-body", o)
+	reminder := probeDelivery(t, s, project, "offlineSettlement")
+	if reminder.Outcome != "cues" {
+		t.Fatal("stored record emitted no reminder", reminder)
+	}
+	if !strings.Contains(reminder.Context, "Code is STAGING.") || !strings.Contains(reminder.Context, "Only verified in TEST.") {
+		t.Fatal("stored cue-text reminder lost the qualifier", reminder.Context)
+	}
+	if strings.Count(reminder.Context, "Only verified in TEST.") != 1 {
+		t.Fatal("qualifier duplicated in the reminder", reminder.Context)
+	}
+	finishEmission(t, s, reminder, true)
+}
+
 func TestReplayHonorsCurrentBinding(t *testing.T) {
 	s, project, in := factFixture(t)
 	in.RequestID = "bound-once"

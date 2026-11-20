@@ -12,11 +12,11 @@ import subprocess
 import tempfile
 import time
 
-from smoke import Host
+from smoke import Host, rejects_cue_text
 
 
 
-def check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool):
+def check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool, cue_text_rejected):
     sql = "SELECT PRIVATE_SQL_MARKER FROM information_schema.columns"
     evidence = dict(kind="runtime", reference="synthetic-sql", observation="Isolated Hook replay marker")
     entrances = ["information_schema"]
@@ -25,6 +25,11 @@ def check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool):
                    dict(op="token", entrances=entrances),
                    dict(op="token", normalize="whitespace", entrances=["SHOW COLUMNS", "刷数据"]),
                ])
+    # Historical-tag binaries predate the write boundary: they require cue
+    # text and legitimately accept it. Newer targets omit it and must reject
+    # an authored copy.
+    if not cue_text_rejected:
+        cue["text"] = "Fixture requires a prior metadata query"
     case = dict(scope=scope, project=str(project), title="Synthetic SQL metadata rule",
                 admission=dict(future_decision="Verify columns before proposing a query.", evidence_ref="synthetic-sql"),
                 experience=dict(pitfall="A lookup uses an unverified column name",
@@ -34,11 +39,11 @@ def check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool):
                                 boundary="Only this disposable fixture",
                                 evidence=[evidence], cues=[cue]))
     saved = host.tool("memory_experience_record", case)
-    # Retired cue text is rejected at the write boundary with a field position.
-    authored = json.loads(json.dumps(case))
-    authored["experience"]["cues"][0]["text"] = "Fixture requires a prior metadata query"
-    rejected = host.tool("memory_experience_record", authored, expect_error=True)
-    assert "experience.cues[0].text" in rejected["content"][0]["text"], rejected
+    if cue_text_rejected:
+        authored = json.loads(json.dumps(case))
+        authored["experience"]["cues"][0]["text"] = "Fixture requires a prior metadata query"
+        rejected = host.tool("memory_experience_record", authored, expect_error=True)
+        assert "experience.cues[0].text" in rejected["content"][0]["text"], rejected
 
     for label, tool, args, expected in (
             ("bash-command", "Bash", {"command": "grep information_schema fixture.sql"}, True),
@@ -200,7 +205,7 @@ def main():
                     failure = current_events["PostToolUseFailure"][0]["matcher"]
                     assert re.search(failure, "mcp__decision-memory__memory_experience_lookup")
                     assert not re.search(failure, sql_tool)
-                    check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool)
+                    check_zcode_probe_matrix(host, hook, scope, project, data, sql_tool, rejects_cue_text(binary))
                 else:
                     assert "PostToolUseFailure" not in current_events, current_events
                 draft = dict(scope=scope, project=str(project), title="Synthetic multi-entry risk",
@@ -216,6 +221,8 @@ def main():
                                              evidence=[dict(kind="code", reference="isolated fixture",
                                                             observation="Literal candidate method only",
                                                             path="Policy.java", symbol="canDispatchLynOrder")]))
+                if not rejects_cue_text(binary):
+                    draft["experience"]["cues"][0]["text"] = "合成多入口实验中本地调用未覆盖另一入口的准入条件。"
                 saved = host.tool("memory_experience_record", draft)
                 # Exercise the actual managed matcher and runtime using the same
                 # bootstrap example across all adapters, with the actual scope.

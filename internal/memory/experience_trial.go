@@ -120,34 +120,34 @@ type ExperienceMatch struct {
 }
 
 // shortFact is the one-line fact or counterexample a new-association reminder
-// quotes. Legacy cue text stays honored; new records derive it from this
-// version's body. A reminder must keep the same assertion boundary as the
-// first body delivery: qualifiers stored beside the core fact are appended,
-// never trimmed to fit a budget.
+// quotes. Every path — legacy cue text, fact form, counterexample form — keeps
+// the same assertion boundary as the first body delivery: stored qualifiers
+// missing from the quoted sentence are appended, never trimmed to fit a budget.
 func (m ExperienceMatch) shortFact() string {
-	if strings.TrimSpace(m.CueText) != "" {
-		return m.CueText
-	}
 	if m.entry != nil && m.entry.Profile != nil {
 		if x := m.entry.Profile.Experience; x != nil {
+			quoted := m.CueText
 			// New fact-form writes keep qualifiers inside the sentence; records
 			// stored by dev.1 with separate columns keep their qualifiers in
 			// the reminder instead of an unconditional fact.
-			if strings.TrimSpace(x.Fact) != "" {
-				return withStoredQualifiers(x.Fact, x.Applicability, x.Boundary)
+			if strings.TrimSpace(quoted) == "" {
+				quoted = coreFact(x)
 			}
-			return withStoredQualifiers(x.Counterexample, x.Applicability, x.Boundary)
+			return withStoredQualifiers(quoted, x.Applicability, x.Boundary)
 		}
 		if a := m.entry.Profile.Agreement; a != nil {
-			return withStoredQualifiers(a.Requirement, a.Applicability, a.Boundary)
+			return withStoredQualifiers(m.CueText, a.Applicability, a.Boundary)
 		}
 	}
-	return ""
+	return m.CueText
 }
 
+// withStoredQualifiers appends each stored qualifier that the quoted sentence
+// does not already contain, so complete authored reminders are not duplicated
+// while partial ones regain their limits.
 func withStoredQualifiers(fact, applicability, boundary string) string {
 	for _, qualifier := range []struct{ label, value string }{{"适用", applicability}, {"边界", boundary}} {
-		if strings.TrimSpace(qualifier.value) != "" {
+		if strings.TrimSpace(qualifier.value) != "" && !strings.Contains(fact, qualifier.value) {
 			fact += "（" + qualifier.label + "：" + qualifier.value + "）"
 		}
 	}

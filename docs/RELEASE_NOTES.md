@@ -1,3 +1,10 @@
+# memory-mcp 0.6.4-dev.4
+
+- Third review round. Cue-text inheritance is gated to pure alias updates: a material revision of body or supporting evidence no longer carries the superseded cue text into the new version, its first lookup or the reminder — verified as the OLD→NEW3 pair against the alias pair that keeps history.
+- Reminders append stored qualifiers on every path, including legacy cue text, and only qualifiers the quoted sentence does not already contain.
+- The request_id fingerprint is computed over the payload exactly as submitted; a revision committed by dev.2 retries cleanly on dev.4.
+- Release and host regression scripts pick cue-text assertions by target binary version (0.6.3, dev.1 and dev.4 all pass), drop cue text from success samples, and follow the single-request-per-challenge semantics.
+
 # memory-mcp 0.6.4-dev.3
 
 - Second external-review round. Release acceptance scripts (`check_experience_trial.py --if-supported`, `check_host_recall.py`) no longer submit cue text in their success samples and assert the retired format is rejected with a field position; the embedded guide's cue example drops `text`.

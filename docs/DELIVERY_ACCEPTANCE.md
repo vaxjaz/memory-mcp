@@ -172,3 +172,17 @@ The dev.12 Windows executable reproduced invalid next_cursor responses across sh
 **P2 重放快路径绑定检查**。`RecordExperience`/`RecordAgreement` 的已提交 request_id 快路径在返回历史收据前先执行当前项目/scope 绑定检查（目录改绑后重放返回绑定错误而非旧 scope 成功收据），正文校验仍被跳过；恢复绑定后同一重试重新成功（`TestReplayHonorsCurrentBinding`）。此前验证过的 2983 字节跨版本重试场景不受影响（绑定未变）。
 
 dev.3 验证：全量 Go 测试、smoke、stdio 两形态校验、两个发布验收脚本、真实 0.6.3 别名继承定测与真实 ZCode 宿主试验全部通过。
+
+## 2026-11-20 三轮外部审查修复（0.6.4-dev.4）
+
+**P1 实质修订不再继承被推翻的文案**。自动继承限定为纯别名更新：`bodyIdentityKey`（去除 cue 文案与入口别名后的正文/限定/证据身份）与上一版一致才继承；正文或支持证据实质改变时不继承，新版本 related_facts 不再出现旧结论，短提醒取自新正文。定测（`TestMaterialRevisionStopsDeliveringSupersededText`）：OLD→NEW3 修正后首次 lookup 只含 NEW3，另一 cue 的新关联提醒引用 NEW3 且不含 OLD；纯别名修订保持上轮行为（同版本 reused、存量文案保留）。这正是"只改入口时保住历史事实；纠正事实时停止投递旧结论"的成对验收。
+
+**P1 存量 cue.text 路径保限定**。`shortFact` 重构：存量文案、fact、反例三条路径统一经 `withStoredQualifiers`，且只拼接引句中缺失的限定（已含限定的完整文案不重复）。定测（`TestStoredCueTextReminderCarriersMissingQualifiers`）：dev.1 形态 fact+boundary+文案（"Code is STAGING." / "Only verified in TEST."）的提醒同时含事实与限定且限定只出现一次。
+
+**P2 指纹回到原始载荷**。request_id 指纹改按客户端提交的原始载荷计算（继承只喂存储内容键），修复 dev.2 已提交修订在 dev.3 被误报 conflict。真实链路定测：真 0.6.3 写入基线（带文案）→ 迁移 → 真 dev.2 提交修订（previous_id+request_id、按边界提示省略文案）→ dev.4 原样重试**返回原收据**。
+
+**P2 历史标签验收按目标版本选择断言**。cue 文案的负例断言以目标二进制版本判定（`smoke.rejects_cue_text`，≥0.6.4-dev.2 才断言拒绝），成功样本在旧边界目标上补回必填文案。两个发布脚本对真 0.6.3、真 dev.1、dev.4 三代二进制实跑全部 PASS。
+
+**P2 宿主回归脚本**。`check_native_delivery.py` 与 `check_context_probes.py` 成功样本去除 cue 文案；native_delivery 的四处提醒断言改为正文派生文本（"取值入口：合成实验中业务备注已更新"）。context_probes 另有两处断言按 dev.13 起的单次请求语义更新（被 pending challenge 覆盖的命中放行，fact 门控经 doctor `outcome()==matched` 验证）。实跑：native_delivery 以真实 Windows Codex（rust exe）success 场景 `native_transport_pass=true`（block 1、正文收据 1、短提醒 1、重复命中新增 0 字节）；context_probes 本机 PASS。
+
+dev.4 验证：全量 Go 测试、smoke、stdio 两形态校验、两个发布脚本 × 三代二进制、native_delivery（真实 Codex）、context_probes、真实 ZCode 宿主试验全部通过。

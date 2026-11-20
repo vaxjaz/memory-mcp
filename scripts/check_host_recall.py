@@ -8,7 +8,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
-from smoke import Host
+from smoke import Host, rejects_cue_text
 
 
 def main():
@@ -60,6 +60,8 @@ def main():
                              boundary="Approval withdrawal and inspection alone are different tasks",
                              evidence=[dict(kind="runtime", reference="fixture:runtime",
                                             observation="Only a protocol fixture; not a real incident")]))
+            if not rejects_cue_text(binary):
+                draft["experience"]["cues"][0]["text"] = "合成取消实验中本地状态未覆盖关联影响限制。"
             obsolete = json.loads(json.dumps(draft))
             obsolete["experience"]["anchors"] = ["ObjectType"]
             host.tool("memory_experience_record", obsolete, expect_error=True)
@@ -76,9 +78,12 @@ def main():
             assert_rejected_unchanged(blank, "admission.future_decision")
             wrong_ref = dict(draft, admission=dict(draft["admission"], evidence_ref="fixture:runtime "))
             assert_rejected_unchanged(wrong_ref, "admission.evidence_ref")
-            authored_text = json.loads(json.dumps(draft))
-            authored_text["experience"]["cues"][0]["text"] = "合成取消实验中本地状态未覆盖关联影响限制。"
-            assert_rejected_unchanged(authored_text, "experience.cues[0].text")
+            # Cue-text rejection depends on the target's write boundary; a
+            # historical-tag binary legitimately accepts the retired field.
+            if rejects_cue_text(binary):
+                authored_text = json.loads(json.dumps(draft))
+                authored_text["experience"]["cues"][0]["text"] = "合成取消实验中本地状态未覆盖关联影响限制。"
+                assert_rejected_unchanged(authored_text, "experience.cues[0].text")
             saved = host.tool("memory_experience_record", draft)
             assert saved["indexed"]
             assert not any(draft["admission"]["future_decision"] in sql for sql in snapshot())
