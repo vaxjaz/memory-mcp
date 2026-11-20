@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -253,7 +254,9 @@ func TestWriteComparisonStaleTokenReturnsFreshCandidates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stale.Status != "stale_comparison" || stale.Indexed || stale.ComparisonToken == pending.ComparisonToken {
+	// The expired token returns the fresh candidate list under a new token
+	// instead of committing the stale judgment.
+	if stale.Status != "needs_comparison" || stale.Indexed || stale.ComparisonToken == pending.ComparisonToken {
 		t.Fatal("stale token committed or echoed", stale)
 	}
 	found := false
@@ -280,7 +283,7 @@ func withResolution(in ExperienceWrite, action, target, token string) Experience
 // way: their subject is not the write judgment, which has dedicated tests.
 func seedExperience(t *testing.T, s *Store, in ExperienceWrite) Entry {
 	t.Helper()
-	receipt, err := s.commitExperience(ctx, in, "", &in.Experience, "create")
+	receipt, err := s.commitExperience(ctx, in, "", &in.Experience, "create", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,5 +319,205 @@ func TestWriteComparisonCrossScopeIsolation(t *testing.T) {
 	var rootsOther int
 	if err = s.db.QueryRowContext(ctx, "SELECT count(DISTINCT root_id) FROM entries WHERE scope='project:other'").Scan(&rootsOther); err != nil || rootsOther != 1 {
 		t.Fatal("foreign write did not land in its scope", rootsOther, err)
+	}
+}
+
+func TestWriteComparisonRejectsOffListTarget(t *testing.T) {
+	s, _, in := comparisonFixture(t)
+	if _, err := s.RecordExperience(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	// An unrelated warehouse record in the same scope.
+	warehouse := in
+	warehouse.RequestID = "warehouse"
+	warehouse.Title = "Warehouse hours"
+	warehouse.Admission = &ExperienceAdmission{FutureDecision: "Check closing hours.", EvidenceRef: "fixture:warehouse"}
+	warehouse.Experience.Fact = "Warehouse shutters close nightly."
+	warehouse.Experience.Evidence = []ExperienceEvidence{{Kind: "business", Reference: "fixture:warehouse", Observation: "Synthetic."}}
+	warehouse.Experience.Cues = append([]ExperienceCue(nil), in.Experience.Cues...)
+	for i := range warehouse.Experience.Cues {
+		warehouse.Experience.Cues[i].EvidenceRefs = []string{"fixture:warehouse"}
+		warehouse.Experience.Cues[i].Matches = []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{fmt.Sprintf("otherLookup%d", i)}}}
+	}
+	warehouse.Admission.EvidenceRef = "fixture:warehouse"
+	other, err := s.RecordExperience(ctx, warehouse)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The settlement comparison shows only the settlement record; a revision
+	// naming the warehouse ID must be rejected with zero writes.
+	incoming := in
+	incoming.RequestID = "misdirected"
+	incoming.Experience.Fact = "Different codes were observed for settlement in the two environments."
+	pending, err := s.RecordExperience(ctx, incoming)
+	if err != nil || pending.Status != "needs_comparison" {
+		t.Fatal(pending, err)
+	}
+	resolution := withResolution(incoming, "revise", other.ID, pending.ComparisonToken)
+	rejected, err := s.RecordExperience(ctx, resolution)
+	if err == nil || rejected.Indexed {
+		t.Fatal("off-list revision committed", rejected, err)
+	}
+	kept, err := s.Read(ctx, other.ID)
+	if err != nil || !kept.Entry.Current {
+		t.Fatal("warehouse record was superseded by an off-list revision", err)
+	}
+	if roots, total := rootCount(t, s, in.Scope); roots != 2 || total != 2 {
+		t.Fatal("off-list attempt changed the library", roots, total)
+	}
+}
+
+func TestWriteComparisonConcurrentParaphrasesSingleRoot(t *testing.T) {
+	s, _, in := comparisonFixture(t)
+	left := in
+	left.RequestID = "left"
+	left.Experience.Fact = "In TEST and PROD the settlement codes differ."
+	right := in
+	right.RequestID = "right"
+	right.Experience.Fact = "The PROD and TEST settlement codes do not match."
+	barrier := make(chan struct{})
+	done := make(chan struct{})
+	results := make([]ExperienceReceipt, 2)
+	errs := make([]error, 2)
+	for i, draft := range []ExperienceWrite{left, right} {
+		go func(i int, draft ExperienceWrite) {
+			defer func() { done <- struct{}{} }()
+			<-barrier
+			results[i], errs[i] = s.RecordExperience(ctx, draft)
+		}(i, draft)
+	}
+	close(barrier)
+	<-done
+	<-done
+	for i := range errs {
+		if errs[i] != nil {
+			t.Fatal(i, errs[i])
+		}
+	}
+	roots, total := rootCount(t, s, in.Scope)
+	if roots != 1 || total != 1 {
+		for i, r := range results {
+			t.Logf("result[%d]: status=%q action=%q indexed=%v err=%v", i, r.Status, r.Action, r.Indexed, errs[i])
+		}
+		t.Fatal("concurrent paraphrases created multiple roots", roots, total, results[0].Action, results[1].Action)
+	}
+	if results[0].Status != "needs_comparison" && results[1].Status != "needs_comparison" {
+		t.Fatal("loser of the race did not receive a comparison", results[0], results[1])
+	}
+}
+
+func TestWriteComparisonReplaysCommittedAction(t *testing.T) {
+	s, _, in := comparisonFixture(t)
+	seed, err := s.RecordExperience(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	incoming := in
+	incoming.RequestID = "replay-action"
+	incoming.Experience.Fact = "TEST uses a different settlement code than PROD."
+	pending, err := s.RecordExperience(ctx, incoming)
+	if err != nil || pending.Status != "needs_comparison" {
+		t.Fatal(pending, err)
+	}
+	first, err := s.RecordExperience(ctx, withResolution(incoming, "reuse", seed.ID, pending.ComparisonToken))
+	if err != nil || first.Action != "reuse" {
+		t.Fatal(first, err)
+	}
+	// A plain replay of the ORIGINAL draft returns the committed action.
+	replay, err := s.RecordExperience(ctx, incoming)
+	if err != nil || replay.Action != "reuse" || replay.ID != seed.ID {
+		t.Fatal("replay lost the committed action", replay, err)
+	}
+	// The same request_id cannot re-decide to create.
+	changed, err := s.RecordExperience(ctx, withResolution(incoming, "create", seed.ID, pending.ComparisonToken))
+	if err == nil || changed.Indexed {
+		t.Fatal("committed action was re-decided", changed, err)
+	}
+}
+
+func TestWriteComparisonRejectsUnsubstantiatedResolutions(t *testing.T) {
+	s, _, in := comparisonFixture(t)
+	seed, err := s.RecordExperience(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, override := range map[string]func(*WriteResolution){
+		"missing difference": func(r *WriteResolution) { r.Difference = "  " },
+		"foreign evidence":   func(r *WriteResolution) { r.EvidenceRef = "absent:unprovided" },
+		"missing evidence":   func(r *WriteResolution) { r.EvidenceRef = "" },
+	} {
+		incoming := in
+		incoming.RequestID = "unsubstantiated-" + name
+		incoming.Experience.Fact = "TEST uses a different settlement code than PROD."
+		pending, err := s.RecordExperience(ctx, incoming)
+		if err != nil || pending.Status != "needs_comparison" {
+			t.Fatal(pending, err)
+		}
+		resolution := withResolution(incoming, "reuse", seed.ID, pending.ComparisonToken)
+		override(resolution.Resolution)
+		rejected, err := s.RecordExperience(ctx, resolution)
+		if err == nil || rejected.Indexed {
+			t.Fatal(name, "accepted an unsubstantiated decision", rejected, err)
+		}
+	}
+}
+
+func TestWriteComparisonPagingReachesHiddenCandidate(t *testing.T) {
+	s, _, in := comparisonFixture(t)
+	facts := []string{
+		"Collection closes at noon.",
+		"Only cash is accepted.",
+		"Managers sign twice.",
+		"Cancellations require approval.",
+	}
+	ids := make([]string, 0, len(facts))
+	for i, fact := range facts {
+		draft := in
+		draft.RequestID = fmt.Sprintf("seed-%d", i)
+		draft.Experience.Fact = fact
+		out, err := s.RecordExperience(ctx, draft)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Status == "needs_comparison" {
+			out, err = s.RecordExperience(ctx, withResolution(draft, "create", out.Candidates[0].ID, out.ComparisonToken))
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		ids = append(ids, out.ID)
+	}
+	hidden := ids[len(ids)-1]
+	// A paraphrase of the hidden record shares evidence and entrances; the
+	// first page shows at most three candidates, the cursor must reach it.
+	incoming := in
+	incoming.RequestID = "page-me"
+	incoming.Experience.Fact = "Withdrawal needs consent."
+	first, err := s.RecordExperience(ctx, incoming)
+	if err != nil || first.Status != "needs_comparison" {
+		t.Fatal(first, err)
+	}
+	seen := map[string]bool{}
+	for _, c := range first.Candidates {
+		seen[c.ID] = true
+	}
+	cursor := first.NextCursor
+	for !seen[hidden] && cursor != "" {
+		paged := incoming
+		paged.Cursor = cursor
+		page, err := s.RecordExperience(ctx, paged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range page.Candidates {
+			seen[c.ID] = true
+		}
+		cursor = page.NextCursor
+	}
+	if !seen[hidden] {
+		t.Fatal("hidden true duplicate unreachable through candidate pages", seen)
+	}
+	if roots, total := rootCount(t, s, in.Scope); roots != len(facts) || total != len(facts) {
+		t.Fatal("paging changed the library", roots, total)
 	}
 }

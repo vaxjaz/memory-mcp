@@ -65,6 +65,12 @@ type Draft struct {
 	experienceValidated        bool
 	experienceKey              string
 	requestFingerprint         string
+	// preCommit runs inside Put's write transaction, after dedup and revision
+	// checks and immediately before the entry insert. The W(x) write judgment
+	// re-checks comparison candidates here so a concurrent writer between the
+	// outer search and the commit turns this write into a comparison instead
+	// of a duplicate root.
+	preCommit                   func(context.Context, *sql.Tx) error
 	ResponseMode               string   `json:"response_mode,omitempty" jsonschema:"compact: short IDs/state/integrity receipt; full: full response. Assist defaults to compact, strict to legacy full. Not part of write identity."`
 	ContextSourceID            string   `json:"context_source_id,omitempty" jsonschema:"Optional actual CURRENT user source for turn association, separate from evidence links. Assist validates source identity without requiring prepare/complete. Strict requires its checkpoint complete. Never fabricate source IDs."`
 	Profile                    *Profile `json:"profile,omitempty" jsonschema:"For cases and hypotheses: concrete future use, counter-check against saving, applicability and boundaries. No fabricated counterexamples."`
@@ -553,6 +559,13 @@ func (s *Store) Put(ctx context.Context, d Draft, previousID string) (Entry, err
 	}
 	if (d.Kind == "hypothesis" || d.Kind == "case" && d.Profile != nil) && !grounded && !d.experienceValidated {
 		return Entry{}, errors.New("case/hypothesis needs at least one current active reviewed record or case as support or provenance; stale/context-only invalid material and contradiction targets cannot ground a new conclusion; preserve a factual correction as a record or add fresh evidence")
+	}
+	// Last read gate inside the write transaction; an error rolls everything
+	// back with no partial rows, request receipt or index updates.
+	if d.preCommit != nil {
+		if err = d.preCommit(ctx, tx); err != nil {
+			return Entry{}, err
+		}
 	}
 	_, err = tx.ExecContext(ctx, `INSERT INTO entries (`+columns+`) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, e.ID, e.RootID, e.PreviousID, e.Kind, e.Scope, e.Title, e.Body, e.Origin, e.SourceRef, e.Host, e.Model, e.Session, e.CreatedAt, e.Current, e.NeedsReview)
 	if err != nil {

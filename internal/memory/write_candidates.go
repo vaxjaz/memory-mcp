@@ -64,12 +64,15 @@ func entranceValues(x *Experience) map[string]bool {
 // writeCandidates searches current active records in this scope for entries
 // worth checking against a new observation: shared evidence locators, shared
 // distinctive entrances, or body-term overlap. Evidence and object double hits
-// rank first; ordering is stable by entry ID.
-func (s *Store) writeCandidates(ctx context.Context, scope string, draft *Experience) ([]WriteCandidate, error) {
+// rank first; ordering is stable by entry ID. The FULL ranked list is
+// returned; callers page it with writeCandidateLimit per response and keep a
+// cursor so a hidden true duplicate stays reachable. The query runs read-only
+// against either the pool or an open write transaction.
+func (s *Store) writeCandidates(ctx context.Context, q dbQuerier, scope string, draft *Experience) ([]WriteCandidate, error) {
 	if draft == nil {
 		return nil, nil
 	}
-	entries, err := s.Experiences(ctx, scope)
+	entries, err := scanExperiences(ctx, q, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -141,8 +144,5 @@ func (s *Store) writeCandidates(ctx context.Context, scope string, draft *Experi
 		}
 		return out[i].ID < out[j].ID
 	})
-	if len(out) > writeCandidateLimit {
-		out = out[:writeCandidateLimit]
-	}
 	return out, nil
 }

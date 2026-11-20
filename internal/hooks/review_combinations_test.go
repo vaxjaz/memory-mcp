@@ -110,7 +110,7 @@ func TestReviewDirectAndObservedCueMergeOnceAndE2StillRequiresBody(t *testing.T)
 		t.Fatal(err)
 	}
 	if pending.Status == "needs_comparison" {
-		write.Resolution = &memory.WriteResolution{Action: "create", TargetID: pending.Candidates[0].ID, ComparisonToken: pending.ComparisonToken}
+		write.Resolution = &memory.WriteResolution{Action: "create", TargetID: pending.Candidates[0].ID, ComparisonToken: pending.ComparisonToken, Difference: "独立事务事实与既有备注/日志经验同时成立。", EvidenceRef: write.Admission.EvidenceRef}
 		if _, err = s.RecordExperience(testCtx, write); err != nil {
 			t.Fatal(err)
 		}
