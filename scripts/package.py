@@ -133,10 +133,12 @@ def main():
                 destination = bundle / relative
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(file, destination)
-            (bundle / "SOURCE_COMMIT").write_text(source_commit + "\n")
-            (bundle / "THIRD_PARTY_NOTICES.txt").write_text(licenses)
+            # LF endings keep checksums and provenance verifiable on every OS;
+            # a Windows text-mode CRLF breaks `sha256sum -c` and strict compares.
+            (bundle / "SOURCE_COMMIT").write_text(source_commit + "\n", newline="\n")
+            (bundle / "THIRD_PARTY_NOTICES.txt").write_text(licenses, newline="\n")
             (bundle / "mcp.example.json").write_text(json.dumps({"mcpServers": {"decision-memory": {
-                "command": "REPLACE_WITH_ABSOLUTE_PATH_TO_" + exe, "args": ["serve"]}}}, indent=2) + "\n")
+                "command": "REPLACE_WITH_ABSOLUTE_PATH_TO_" + exe, "args": ["serve"]}}}, indent=2) + "\n", newline="\n")
             if target_os == "windows":
                 archive = dist / (name + ".zip")
                 with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as z:
@@ -172,7 +174,7 @@ def main():
                 z.write(artifact, "packages/" + artifact.name)
         checksums += f"{hashlib.sha256(upgrade.read_bytes()).hexdigest()}  {upgrade.name}\n"
         print(f"Built {upgrade.name}", flush=True)
-    (dist / "SHA256SUMS").write_text(checksums)
+    (dist / "SHA256SUMS").write_text(checksums, newline="\n")
 
 
 if __name__ == "__main__":
