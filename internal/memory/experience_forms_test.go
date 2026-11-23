@@ -515,9 +515,15 @@ func TestReplayHonorsCurrentBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// HookBind stores the canonical path (lowercased on Windows); raw tempdir
+	// casing with uppercase test names would miss the row and fail the rebind.
+	bound, err := canonicalPath(project)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// The directory is later rebound to another project scope; the replayed
 	// request must not return the old scope's receipt.
-	if _, err = s.db.ExecContext(ctx, "DELETE FROM hook_bindings WHERE path=?", project); err != nil {
+	if _, err = s.db.ExecContext(ctx, "DELETE FROM hook_bindings WHERE path=?", bound); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.HookBind(ctx, project, "project:other"); err != nil {
@@ -527,7 +533,7 @@ func TestReplayHonorsCurrentBinding(t *testing.T) {
 		t.Fatal("replay bypassed the current binding", err)
 	}
 	// Restoring the binding lets the same committed retry succeed again.
-	if _, err = s.db.ExecContext(ctx, "DELETE FROM hook_bindings WHERE path=?", project); err != nil {
+	if _, err = s.db.ExecContext(ctx, "DELETE FROM hook_bindings WHERE path=?", bound); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.HookBind(ctx, project, "project:demo"); err != nil {
