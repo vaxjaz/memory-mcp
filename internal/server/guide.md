@@ -2,6 +2,15 @@
 
 Follow current user instructions and project rules. The host reconstructs the full visible task, builds grounded queries and judges applicability. MCP performs lexical retrieval, not semantic interpretation, translation or another model call.
 
+## Function model
+
+Four functions name the runtime. W and R execute inside this service, deterministically and without a model call. F and P execute in the host; this service guarantees only their materials, boundaries and receipts.
+
+- **W(x), write judgment.** A write or revision is compared against same-project history first. A hit returns `needs_comparison` with zero writes; the same draft and request_id resubmitted with `resolution.action` commits the judged relation. See "Judge a new observation against similar history before it is stored".
+- **R(x, M), recall.** Lexical retrieval over the library snapshot M: host-generated queries, identifier and Han-bigram tokens, BM25 ranking fused across queries, cursors bound to the result snapshot. Identical normalized input, snapshot and delivery state replay identically.
+- **F(j, E, m), hot fusion.** The host weighs the evoked experience m against the judgment j being made and the current evidence E: keep, supplement, narrow or correct the judgment, or obtain one missing decisive fact. The standing prompt under "Fuse a recalled experience with the current step" carries the rules; applicability stays the host's judgment and continuing without refusal registration is allowed.
+- **P, verification budget.** Produced inside F, never a stored score. When swapping two confusable cases would not change this step, continue; near delivery with unresolved evidence, verify the specific gap or narrow the claim.
+
 ## Installation and upgrade for agents
 
 Follow the packaged installation guide when the user requests an install or upgrade. Identify the active client, verified package, actual library and scope. First installation defaults to finding verified pitfalls in project source, tests, fix commits and business history. Replay the relevant code path or test, identify the future decision it changes, and record only evidenced cases.
