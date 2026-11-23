@@ -94,7 +94,7 @@ Run setup and restart the client after changing tool selectors. `doctor` reports
 
 ## Define when a cue matches
 
-The following cue matches when Write targets a .sql file and its proposed content has both the UPDATE token and a column containing fix_third. The same column in a SELECT, a .txt file, or the filename alone does not trigger this cue. Replace the evidence reference with an exact reference in your submission.
+A worked manual with hard limits, complete examples and a silent-miss checklist ships as `docs/CUE_MATCHING_GUIDE.md` in the release bundle; read it before authoring cues. The following cue matches when Write targets a .sql file and its proposed content has both the UPDATE token and a column containing fix_third. The same column in a SELECT, a .txt file, or the filename alone does not trigger this cue. Replace the evidence reference with an exact reference in your submission.
 
 ```json
 {

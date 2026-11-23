@@ -56,7 +56,7 @@ Keep the user report short. Give the installed version, the count of initialized
 
 ## Register a custom tool
 
-Use `memory-mcp guide` or `memory_bootstrap` for current examples. Put `tool-probes.json` under the active library and use the verified project scope.
+Use `memory-mcp guide` or `memory_bootstrap` for current examples. Put `tool-probes.json` under the active library and use the verified project scope. A full worked manual — cue anatomy, field sources, operator reference, complete examples and a silent-miss checklist — is in [CUE_MATCHING_GUIDE.md](CUE_MATCHING_GUIDE.md).
 
 1. Inspect a sample with `doctor --probe EVENT.json`. If no sample is available, register the tool selector alone, rerun setup, restart, use the tool once, and read `tool_field_shape` in `doctor --session SESSION_ID`.
 2. Map the observed native paths. For example, `{"tool":"Write","fields":{"text":"content","path":"file_path"}}`. Use `mcp_tool` for a bare MCP tool name across servers.
