@@ -261,3 +261,20 @@ func TestChallengeCanReturnLargeRequiredCasesAcrossBoundedPages(t *testing.T) {
 		t.Fatal(second, err)
 	}
 }
+
+func TestLookupDropsUnsearchableTermsAndFailsOnlyWhenNothingRemains(t *testing.T) {
+	s, project, in := experienceFixture(t)
+	in.Experience.Counterexample = "取消工单还受关联影响和状态约束限制；仅为隔离检索测试材料"
+	in.Experience.Applicability = "取消工单时核对状态约束与关联影响"
+	saved, err := s.RecordExperience(ctx, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.LookupExperience(ctx, ExperienceLookup{Scope: in.Scope, Project: project, Task: "调查当前取消要求", Questions: "核对条件与关联影响", Queries: []RecallQuery{{Terms: []string{"LYN", "表", "状态约束"}}}})
+	if err != nil || len(out.Items) != 1 || out.Items[0].ID != saved.ID || out.QueryCount != 1 || len(out.DroppedTerms) != 1 || out.DroppedTerms[0] != "表" {
+		t.Fatal(out, err)
+	}
+	if _, err = s.LookupExperience(ctx, ExperienceLookup{Scope: in.Scope, Project: project, Task: "当前调查", Questions: "查看状态约束", Queries: []RecallQuery{{Terms: []string{"表"}}}}); err == nil || !strings.Contains(err.Error(), "dropped") {
+		t.Fatal("expected a named error for a query whose every term was dropped")
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/vaxjaz/memory-mcp/internal/matching"
 	"math"
 	"sort"
@@ -188,49 +189,65 @@ func qualifiedEntryColumns(alias string) string {
 	return alias + "." + strings.ReplaceAll(columns, ",", ","+alias+".")
 }
 
-func normalizeRecallQueries(in ExperienceLookup) ([]RecallQuery, error) {
+// Unsearchable terms (single Han characters, terms that split into single
+// characters, oversized fragments) are dropped from the query and reported
+// back to the host instead of failing the whole lookup; a match=all query
+// without them is correspondingly broader, so the drop must stay visible.
+func normalizeRecallQueries(in ExperienceLookup) ([]RecallQuery, []string, error) {
 	queries := in.Queries
 	if len(queries) == 0 {
 		_, terms, err := normalizeSearchQuery(strings.Join(in.Keywords, " "))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if len(terms) == 0 {
-			return nil, errors.New("supply host-generated queries, or compatibility keywords")
+			return nil, nil, errors.New("supply host-generated queries, or compatibility keywords")
 		}
 		queries = []RecallQuery{{Terms: terms, Match: "any"}}
 	}
 	if len(queries) > 4 {
-		return nil, errors.New("at most four independent search perspectives")
+		return nil, nil, errors.New("at most four independent search perspectives")
 	}
 	var out []RecallQuery
 	seen := map[string]bool{}
+	dropped := []string{}
+	droppedSeen := map[string]bool{}
+	drop := func(term string) {
+		if !droppedSeen[term] {
+			droppedSeen[term] = true
+			dropped = append(dropped, term)
+		}
+	}
 	total := 0
 	for _, q := range queries {
 		if q.Match == "" {
 			q.Match = "all"
 		}
 		if q.Match != "all" && q.Match != "any" {
-			return nil, errors.New("query.match must be all or any")
+			return nil, nil, errors.New("query.match must be all or any")
 		}
 		if len(q.Terms) == 0 || (len(in.Queries) > 0 && len(q.Terms) > 16) {
-			return nil, errors.New("each query needs 1-16 informative terms")
+			return nil, nil, errors.New("each query needs 1-16 informative terms")
 		}
 		terms := []string{}
 		local := map[string]bool{}
 		for _, term := range q.Terms {
 			term = strings.ToLower(strings.TrimSpace(term))
-			total += len(term)
 			if term == "" || len(term) > 256 || len(recallTermOptions(term)) == 0 {
-				return nil, errors.New("query term is empty, oversized or has no indexable identifier/Chinese pair")
+				drop(term)
+				continue
 			}
 			if err := textguard.Check("query.term", term, false); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
+			total += len(term)
 			if !local[term] {
 				terms = append(terms, term)
 				local[term] = true
 			}
+		}
+		if len(terms) == 0 {
+			return nil, nil, fmt.Errorf("query has no searchable terms (dropped %v); use at least two consecutive identifier characters or two Han characters - Chinese is indexed as adjacent pairs, so a single character is not searchable", q.Terms)
 		}
 		sort.Strings(terms)
 		q.Terms = terms
@@ -241,9 +258,9 @@ func normalizeRecallQueries(in ExperienceLookup) ([]RecallQuery, error) {
 		}
 	}
 	if total > 4096 {
-		return nil, errors.New("combined query terms exceed 4096 bytes")
+		return nil, nil, errors.New("combined query terms exceed 4096 bytes")
 	}
-	return out, nil
+	return out, dropped, nil
 }
 
 type recallRank struct {

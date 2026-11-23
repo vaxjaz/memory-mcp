@@ -174,6 +174,7 @@ type ExperienceLookupResult struct {
 	CandidateStates  []CandidateState `json:"candidate_states,omitempty"`
 	NextCursor       string           `json:"next_cursor,omitempty"`
 	QueryCount       int              `json:"query_count"`
+	DroppedTerms     []string         `json:"dropped_terms,omitempty"`
 	ContentRole      string           `json:"content_role"`
 	Items            []ExperienceItem `json:"items"`
 	HasMore          bool             `json:"has_more"`

@@ -20,9 +20,13 @@ func (s *Store) LookupExperience(ctx context.Context, in ExperienceLookup) (Expe
 			return out, err
 		}
 	}
-	queries, err := normalizeRecallQueries(in)
+	queries, dropped, err := normalizeRecallQueries(in)
 	if err != nil {
 		return out, err
+	}
+	if len(dropped) > 0 {
+		out.DroppedTerms = dropped
+		out.Notice += " Terms without a searchable lexical form (" + strings.Join(dropped, ", ") + ") were dropped; a match=all query without them is correspondingly broader."
 	}
 	out.QueryCount = len(queries)
 	if in.Limit < 0 || in.Limit > 3 {
