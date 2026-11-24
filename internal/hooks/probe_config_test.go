@@ -24,6 +24,7 @@ func saveProbeFixture(t *testing.T, dir string, config probeConfig) {
 
 func TestToolRegistrationDiagnostics(t *testing.T) {
 	rule := toolTemplates["Write"]
+	root := t.TempDir()
 	const private = "private fixture text"
 	for _, tc := range []struct {
 		name    string
@@ -33,14 +34,15 @@ func TestToolRegistrationDiagnostics(t *testing.T) {
 		{"string", private, "present"},
 		{"empty", "", "empty"},
 		{"missing", nil, "missing"},
-		{"array", []any{private}, "unsupported_type"},
+		// An array of strings is mapped element by element.
+		{"array", []any{private}, "present"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			event := Event{Tool: "Write", Input: map[string]any{"file_path": "private.sql"}}
+			event := Event{Tool: "Write", CWD: root, Input: map[string]any{"file_path": "private.sql"}}
 			if tc.content != nil {
 				event.Input["content"] = tc.content
 			}
-			input, report := rule.extract(event)
+			input, report := rule.extract(event, root)
 			fields := report.Fields
 			if len(fields) != 2 || fields[1].Field != "text" || fields[1].InputPath != "content" || fields[1].Status != tc.status ||
 				input.Fields["path"] != "private.sql" {
@@ -52,8 +54,9 @@ func TestToolRegistrationDiagnostics(t *testing.T) {
 			}
 		})
 	}
-	input, report := rule.extract(Event{Tool: "Write", Input: map[string]any{"content": strings.Repeat("x", customProbeTextLimit+1)}})
-	if len(input.Texts) != 0 || report.Outcome != "text_budget_exceeded" {
+	_, report := rule.extract(Event{Tool: "Write", Input: map[string]any{"content": strings.Repeat("x", customProbeTextLimit+1)}}, root)
+	// An oversized value is left out whole and named; it is never trimmed.
+	if len(report.Fields) != 2 || report.Fields[1].Status != "field_too_large" || report.Outcome != "no_eligible_text" {
 		t.Fatal(report)
 	}
 }
@@ -66,9 +69,9 @@ func TestRegisteredFieldsHaveOneEffectiveSource(t *testing.T) {
 	rules := []probeRule{
 		toolTemplates["Write"],
 		toolTemplates["Edit"],
-		{MCPTool: "company_select", Fields: map[string]string{"text": "arguments.sql"}},
-		{Tool: "Grep", Fields: map[string]string{"text": "regex2"}},
-		{Tool: "mcp__special__company_select", Fields: map[string]string{"text": "statement"}},
+		{MCPTool: "company_select", Fields: mapped("text", "arguments.sql")},
+		{Tool: "Grep", Fields: mapped("text", "regex2")},
+		{Tool: "mcp__special__company_select", Fields: mapped("text", "statement")},
 		{Tool: "Read", Enabled: &disabled},
 	}
 	saveProbeFixture(t, store.Dir, probeConfig{Projects: map[string][]probeRule{scope: rules}})
@@ -109,11 +112,12 @@ func TestRegisteredFieldsHaveOneEffectiveSource(t *testing.T) {
 			}
 		})
 	}
-	if grep, ok := policy.ruleFor("project:other", "Grep"); !ok || grep.preset != "search" {
+	if grep, ok := policy.ruleFor("project:other", "Grep"); !ok || grep.Fields["text"].Paths[0] != "pattern" {
 		t.Fatal(grep)
 	}
-	if _, ok := policy.ruleFor("project:other", "Write"); ok {
-		t.Fatal("project registration escaped scope")
+	// Another project sees the listed-but-disabled Write rule, never this project's registration.
+	if write, ok := policy.ruleFor("project:other", "Write"); !ok || write.active() || write.Fields["text"].Paths[0] != "content" {
+		t.Fatal(write)
 	}
 }
 
@@ -166,6 +170,11 @@ func TestCustomProbeConfigValidationAndPath(t *testing.T) {
 		`{"projects":{"project:demo":[{"tool":"Write","path_feld":"file_path"}]}}`,
 		`{"projects":{"project:demo":[{"tool":"Write","when":{"field":"tool","op":"eq","value":"Write"}}]}}`,
 		`{"projects":{}} {}`,
+		`{"tools":[{"tool":"ask","observe":[{"name":"ok","key":["input.connection_id"],"fields":{"ok":"ok"}}]}],"projects":{}}`,
+		`{"tools":[{"tool":"Bash","scan":["grep"],"fields":{"path":"file_path"}}],"projects":{}}`,
+		`{"tools":[{"tool":"ask","fields":{"text":"questions.0.question"},"discover":"query"}}],"projects":{}}`,
+		`{"tools":[{"tool":"ask","fields":{"text":"questions..question"}}],"projects":{}}`,
+		`{"tools":[{"tool":"ask","fields":{"text":"questions[].question"}}],"projects":{}}`,
 	} {
 		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 			t.Fatal(err)
@@ -178,8 +187,9 @@ func TestCustomProbeConfigValidationAndPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, reason := probePath(canonical, root, filepath.Join("new dir", "report.sql")); got != "new dir/report.sql" || reason != "" {
-		t.Fatal(got)
+	// A target that does not exist yet is judged by its nearest existing parent.
+	if reason := pathVerdict(canonical, root, filepath.Join("new dir", "report.sql")); reason != "" {
+		t.Fatal(reason)
 	}
 	t.Run("external redirect", func(t *testing.T) {
 		outside := t.TempDir()
@@ -199,8 +209,8 @@ func TestCustomProbeConfigValidationAndPath(t *testing.T) {
 				t.Error(err)
 			}
 		})
-		if got, reason := probePath(canonical, root, filepath.Join("external", "missing.sql")); got != "" || reason == "" {
-			t.Fatal("redirect outside project contributed clues", got)
+		if reason := pathVerdict(canonical, root, filepath.Join("external", "missing.sql")); reason != "path_outside_project" {
+			t.Fatal("redirect outside project contributed clues", reason)
 		}
 	})
 }

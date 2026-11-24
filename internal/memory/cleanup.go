@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,11 +16,11 @@ import (
 
 type CleanupOperation struct {
 	AffectedForReview []string `json:"affected_for_review,omitempty" jsonschema:"Computed by the program for supersession; dependent interpretations to recheck, never silently confirmed by undo"`
-	EntryID           string   `json:"entry_id"`
+	EntryID           string   `json:"entry_id" jsonschema:"Full ID of the record this operation changes, as returned by memory_search or memory_read."`
 	Action            string   `json:"action" jsonschema:"archive, supersede, distill or recheck; never permanently deletes evidence"`
 	ReplacementID     string   `json:"replacement_id,omitempty" jsonschema:"Current retained entry for supersede; full replacement only, not partial corrections"`
 	Summary           string   `json:"summary,omitempty" jsonschema:"distill only: concise current conclusion WITH applicability, reasons, exceptions and unknowns"`
-	Reason            string   `json:"reason"`
+	Reason            string   `json:"reason" jsonschema:"Why this record is archived, replaced, distilled or rechecked; shown to the user in the preview and kept with the plan."`
 	EvidenceIDs       []string `json:"evidence_ids" jsonschema:"Actually read evidence supporting this exact operation; references are preserved"`
 }
 type CleanupPreview struct {
@@ -233,8 +234,14 @@ func (s *Store) PreviewCleanup(ctx context.Context, in CleanupPreview) (CleanupP
 }
 func loadPlan(ctx context.Context, q queryer, id string) (CleanupPlan, error) {
 	p := CleanupPlan{ID: id}
+	if strings.TrimSpace(id) == "" {
+		return p, errors.New("a plan ID is required: preview returns plan.id, and confirm, apply, undo and read_plan take it")
+	}
 	var ops, snaps, before string
 	err := q.QueryRowContext(ctx, "SELECT scope,operations_json,snapshots_json,before_json,status,created_at,approval_source_id,approval_quote,backup_path,decided_at FROM cleanup_plans WHERE id=?", id).Scan(&p.Scope, &ops, &snaps, &before, &p.Status, &p.CreatedAt, &p.ApprovalSourceID, &p.ApprovalQuote, &p.BackupPath, &p.DecidedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return p, fmt.Errorf("no cleanup plan has the ID %q in this library: run preview first and use the plan.id it returns", id)
+	}
 	if err != nil {
 		return p, err
 	}
@@ -307,7 +314,11 @@ func (s *Store) DecideCleanup(ctx context.Context, in CleanupDecision, undo bool
 		return p, nil
 	}
 	if p.Status != expected {
-		return p, errors.New("plan is not in the required state")
+		action := "apply"
+		if undo {
+			action = "undo"
+		}
+		return p, fmt.Errorf("%s needs a plan in state %q; this plan is in state %q", action, expected, p.Status)
 	}
 	if strings.TrimSpace(in.ApprovalQuote) == "" || len(in.ApprovalQuote) > 8192 {
 		return p, errors.New("exact user approval excerpt required")

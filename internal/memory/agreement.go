@@ -27,12 +27,12 @@ type Agreement struct {
 }
 
 type AgreementWrite struct {
-	Scope      string    `json:"scope"`
-	Project    string    `json:"project"`
-	Title      string    `json:"title"`
-	Agreement  Agreement `json:"agreement"`
+	Scope      string    `json:"scope" jsonschema:"project:<identifier> this agreement applies to."`
+	Project    string    `json:"project" jsonschema:"Actual bound project directory; not inferred from a model name or another machine"`
+	Title      string    `json:"title" jsonschema:"Short name of the agreement, shown in search results."`
+	Agreement  Agreement `json:"agreement" jsonschema:"The confirmed requirement, its authority, scope, exceptions, evidence and cues."`
 	PreviousID string    `json:"previous_id,omitempty" jsonschema:"Full current agreement revision ID. Send the complete revised agreement, including evidence and cue references."`
-	RequestID  string    `json:"request_id,omitempty"`
+	RequestID  string    `json:"request_id,omitempty" jsonschema:"Reuse only when retrying the same agreement payload"`
 }
 
 func validatePrefixes(prefixes []string) error {
@@ -112,6 +112,12 @@ func (s *Store) RecordAgreement(ctx context.Context, in AgreementWrite) (Experie
 		}
 	}
 	if err := validateAgreement(&in.Agreement); err != nil {
+		return zero, err
+	}
+	// The title is checked with the same wording as an experience's.
+	var title recordValidation
+	title.shortText("title", in.Title, 200)
+	if err := title.err(); err != nil {
 		return zero, err
 	}
 	project, err := s.experienceProject(ctx, in.Project, in.Scope)

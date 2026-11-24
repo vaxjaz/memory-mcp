@@ -162,7 +162,7 @@ type ExperienceLookup struct {
 	Queries     []RecallQuery `json:"queries,omitempty" jsonschema:"1-4 host-generated search perspectives; server does lexical retrieval only."`
 	Cursor      string        `json:"cursor,omitempty" jsonschema:"next_cursor for unchanged query/results; otherwise restart."`
 	Limit       int           `json:"limit,omitempty" jsonschema:"1-3 complete items, default 2, within 8 KiB."`
-	Scope       string        `json:"scope"`
+	Scope       string        `json:"scope" jsonschema:"project:<identifier> to search; a challenge can only be answered in its own scope."`
 	Project     string        `json:"project,omitempty" jsonschema:"Bound current project; a current challenge can supply this exact directory"`
 	Task        string        `json:"task" jsonschema:"Current task reconstructed from visible conversation and project; not just the latest sentence"`
 	Questions   string        `json:"questions" jsonschema:"The current inference or uncertainty you intend to cross-check; no private chain of thought"`

@@ -25,36 +25,20 @@ func Run(ctx context.Context, args []string) error {
 	if cmd == "adapters" {
 		return json.NewEncoder(os.Stdout).Encode(Adapters())
 	}
-	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-	host := fs.String("host", "", "explicit protocol adapter; run adapters for supported hosts")
-	dir := fs.String("data-dir", "", "memory directory")
+	// An explicit help request shows the reference of this command on stdout.
+	for _, a := range args[1:] {
+		if a == "--help" || a == "-h" {
+			writeUsage(os.Stdout, cmd)
+			return nil
+		}
+	}
+	fs, o := newFlags(cmd)
+	host, dir, config, project, scope, serverName := o.host, o.dir, o.config, o.project, o.scope, o.serverName
+	enableWakeup, disableWakeup, reviews, dry, checkText := o.enableWakeup, o.disableWakeup, o.reviews, o.dry, o.checkText
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
-	config := fs.String("config", "", "actual user-level host configuration; defaults by adapter")
-	project := fs.String("project", "", "project directory to bind without modifying it")
-	scope := fs.String("scope", "", "project:<stable identifier>")
-	serverName := fs.String("server-name", "", "explicit MCP server name (use a distinct name and data directory for isolated acceptance)")
-	enableWakeup := fs.Bool("enable-wakeup", false, "enable selective experience wakeup for this project")
-	disableWakeup := fs.Bool("disable-wakeup", false, "disable selective wakeup without activating an alternative workflow")
-	if cmd == "hook" {
-		_ = fs.Bool(legacyExperienceHooksFlag, false, "accepted for older installed launchers")
-	}
-	reviews := fs.Bool("reviews", false, "doctor: include paginated current needs_review entries for --scope")
-	dry := fs.Bool("dry-run", false, "show setup targets without writing config or opening the database")
-	checkText := fs.Bool("check-text", false, "doctor: scan stored text for invalid UTF-8/U+FFFD without changing it")
-	var session string
-	var probeFile, expectedRecord, expectedCue, challengeID, doctorOut string
-	if cmd == "doctor" {
-		fs.StringVar(&session, "session", "", "limit recent hook events to this exact session ID")
-		fs.StringVar(&challengeID, "challenge", "", "read-only delivery status for a full challenge ID")
-		fs.StringVar(&probeFile, "probe", "", "read-only probe check from event JSON file, or - for stdin")
-		fs.StringVar(&expectedRecord, "expect", "", "with --probe, check whether this full record ID directly matches")
-		fs.StringVar(&expectedCue, "expect-cue", "", "with --expect, check this specific cue ID")
-		fs.StringVar(&doctorOut, "out", "", "write the full JSON report to a new file and print only its path; avoids host tool-output truncation")
-	}
-	_ = fs.String("managed-id", "", "installer ownership marker")
 	if err = fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -64,6 +48,8 @@ func Run(ctx context.Context, args []string) error {
 	if fs.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
 	}
+	// Read after the parse: these are the options only doctor binds.
+	session, probeFile, expectedRecord, expectedCue, challengeID, doctorOut := *o.session, *o.probeFile, *o.expectedRecord, *o.expectedCue, *o.challengeID, *o.doctorOut
 	if challengeID != "" && probeFile != "" {
 		return errors.New("--challenge and --probe are separate read-only checks")
 	}
@@ -186,9 +172,21 @@ func Run(ctx context.Context, args []string) error {
 		r["probe_config_valid"] = probeErr == nil
 		if probeErr != nil {
 			r["probe_config_error"] = probeErr.Error()
-		} else if *scope != "" {
-			r["custom_probe_rules"] = len(probes.Projects[*scope])
-			r["probe_context_fact_rules"] = probes.observationCount(*scope)
+		} else {
+			// Until setup writes the default tools into the file they are in
+			// effect but not listed there.
+			if _, statErr := os.Stat(r["probe_config_path"].(string)); statErr != nil {
+				r["probe_config_missing"] = true
+			}
+			if probes.toolsImplicit {
+				r["probe_tools_implicit"] = true
+				r["probe_tools_next"] = "Run setup to write the default tool rules into tool-probes.json, where they can be edited."
+			}
+			if *scope != "" {
+				r["custom_probe_rules"] = len(probes.Projects[*scope])
+				r["probe_context_fact_rules"] = probes.observationCount(*scope)
+				r["probe_surface"] = probes.surface(*scope)
+			}
 		}
 		inspectManagedWorkflow(r, c, services, *host, *config, *serverName, probes, "")
 		if probeErr != nil {
@@ -243,6 +241,11 @@ func Run(ctx context.Context, args []string) error {
 				index["error"] = indexErr.Error()
 			}
 			r["experience_index"] = index
+			if unreachable, er := UnreachableCues(ctx, store, *scope); er == nil {
+				r["unreachable_cues"] = unreachable
+			} else {
+				return er
+			}
 			m, er := store.Maintenance(ctx, *scope)
 			if er != nil {
 				return er

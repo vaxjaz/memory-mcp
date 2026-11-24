@@ -36,7 +36,7 @@ def main():
                 pitfall=title, counterexample="Synthetic cue verification fixture", impact="Could miss the intended cue",
                 applicability="Isolated CLI test", boundary="No business tool executed",
                 evidence=[dict(kind="runtime", reference="fixture", observation="Verified in the fixture")],
-                cues=[dict(cue_id="write", label="Fixture", text="The synthetic operation has an observable entrance.",
+                cues=[dict(cue_id="write", label="Fixture",
                            evidence_refs=["fixture"], matches=[dict(op="token", entrances=[entrance])])]))
         def snapshot():
             with closing(sqlite3.connect((data / "memory.db").as_uri() + "?mode=ro", uri=True)) as db:
@@ -49,9 +49,16 @@ def main():
             assert sample_marker not in response.stdout, response.stdout
             return json.loads(response.stdout)
         try:
-            general = host.tool("memory_experience_record", record("Generic fixture gate", gate))
+            def submit(fixture):
+                # Both fixtures cite one evidence reference, so the write path asks for a judgment first.
+                out = host.tool("memory_experience_record", fixture)
+                if isinstance(out, dict) and out.get("status") == "needs_comparison":
+                    out = host.tool("memory_experience_record", dict(fixture, resolution=dict(
+                        out["resolution_template"], action="create", difference="two independent cue fixtures")))
+                return out
+            general = submit(record("Generic fixture gate", gate))
             draft = record("Specific full identifier fixture", short)
-            specific = host.tool("memory_experience_record", draft)
+            specific = submit(draft)
             before = snapshot()
             miss = check(specific["id"])
             assert miss["outcome"] == "cue_missed" and "full identifier" in miss["next"], miss
@@ -100,9 +107,17 @@ def main():
             combined = host.tool("memory_experience_record", draft)
             assert combined["id"] == sensitive["id"] and combined["trigger_preview"]["entrances"][0]["conditional"], combined
             before = snapshot()
-            positive = check(combined["id"], path=root / "EXAMPLE.SQL",
+            positive = check(combined["id"], path="EXAMPLE.SQL",
                              content="UPDATE demo SET work_order_feedback_FIX_THIRD=1")
             assert positive["outcome"] == "direct_match" and len(positive["cue_checks"][0]["checks"]) == 3, positive
+            # A path outside the project is left out and reported as such, so a
+            # condition on that path cannot be decided and the cue does not match.
+            external = check(combined["id"], path=root / "EXAMPLE.SQL",
+                             content="UPDATE demo SET work_order_feedback_FIX_THIRD=1")
+            assert external["outcome"] == "cue_missed", external
+            assert external["tool_input"]["fields"][0]["status"] == "path_outside_project", external
+            assert external["cue_checks"][0]["checks"][0]["outcome"] == "unknown", external
+            assert external["cue_checks"][0]["checks"][1]["outcome"] == "matched", external
             select = check(combined["id"], content="SELECT work_order_feedback_FIX_THIRD FROM demo")
             assert select["outcome"] == "cue_missed" and select["cue_checks"][0]["checks"][-1]["value"] == "update", select
             renamed = check(combined["id"], path="example.txt")

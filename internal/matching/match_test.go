@@ -1,6 +1,10 @@
 package matching
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestSharedComparison(t *testing.T) {
 	sensitive := true
@@ -29,5 +33,43 @@ func TestSharedComparison(t *testing.T) {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// A field name may stand for several values, such as the elements of an
+// array. A comparison that names the field is satisfied when any value under
+// that name satisfies it; a name that carries one value behaves as before.
+func TestNamedFieldComparesEveryValue(t *testing.T) {
+	load := func(text string) *Expression {
+		var expression Expression
+		if err := json.Unmarshal([]byte(text), &expression); err != nil {
+			t.Fatal(err)
+		}
+		return &expression
+	}
+	many := &Input{Fields: map[string]any{"text": "first", "tool": "ask"}, Texts: []NamedText{
+		{Field: "text", Value: "first"}, {Field: "text", Value: "Is entAsk right?"}, {Field: "path", Value: "notes/entAsk.md"},
+	}}
+	one := &Input{Fields: map[string]any{"text": "first"}, Texts: []NamedText{{Field: "text", Value: "first"}}}
+	for _, tc := range []struct {
+		name   string
+		text   string
+		input  *Input
+		want   Truth
+		onPath bool
+	}{
+		{"an entrance in the second element", `{"field":"text","op":"contains","entrances":["entAsk"]}`, many, True, false},
+		{"an entrance under another name is not looked at", `{"field":"text","op":"contains","entrances":["entAsk"]}`, one, False, false},
+		{"without a name every value is searched", `{"op":"contains","entrances":["entAsk"]}`, many, True, false},
+		{"a value guard met by the second element", `{"field":"text","op":"token","value":"entask"}`, many, True, false},
+		{"a value guard met by no element", `{"field":"text","op":"token","value":"missing"}`, many, False, false},
+		{"a name that carries nothing", `{"field":"absent","op":"contains","entrances":["entAsk"]}`, many, Unknown, false},
+	} {
+		truth, hit := load(tc.text).compare(tc.input)
+		// Only a comparison with entrances reports which value matched.
+		wantHit := tc.want == True && strings.Contains(tc.text, "entrances")
+		if truth != tc.want || (hit != nil) != wantHit || hit != nil && (hit.Field == "path") != tc.onPath {
+			t.Fatalf("%s: got %v %v, want %v (hit on path: %v)", tc.name, truth, hit, tc.want, tc.onPath)
+		}
 	}
 }

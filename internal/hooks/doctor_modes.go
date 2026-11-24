@@ -2,6 +2,7 @@ package hooks
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -68,6 +69,7 @@ func inspectManagedWorkflow(report, c map[string]any, services []map[string]any,
 	obsolete := 0
 	mismatchedMatchers := 0
 	routed := false
+	var splitExecutables []map[string]any
 	if h, ok := c["hooks"].(map[string]any); ok {
 		if events, ok := h["events"].(map[string]any); ok {
 			for event, v := range events {
@@ -85,6 +87,14 @@ func inspectManagedWorkflow(report, c map[string]any, services []map[string]any,
 							own := host == "zcode" && managed(handler, name) || host != "zcode" && handler["command"] == nativeCommand(SetupOptions{Host: host, Config: config}, name)
 							if !own {
 								continue
+							}
+							// On ZCode the hooks name the program directly. A service moved
+							// to a new executable while its hooks still launch the old one
+							// is a silent split: two programs read one library.
+							if hookBinary, serviceBinary := handler["command"], service["command"]; host == "zcode" && hookBinary != nil && !sameExecutable(fmt.Sprint(hookBinary), fmt.Sprint(serviceBinary)) {
+								splitExecutables = append(splitExecutables, map[string]any{"server": name, "event": event,
+									"hook_command": hookBinary, "service_command": serviceBinary,
+									"next": "The hooks and the service run different programs. Run setup with the current executable, then fully restart the client."})
 							}
 							if event == "Stop" || host == "zcode" && configuredWorkflow(stringArgs(handler["args"])) != "verified_experience" {
 								obsolete++
@@ -125,10 +135,23 @@ func inspectManagedWorkflow(report, c map[string]any, services []map[string]any,
 	report["obsolete_handlers"] = obsolete
 	report["experience_hooks_installed"] = count > 0
 	report["probe_matcher_mismatches"] = mismatchedMatchers
-	report["configuration_consistent"] = consistent && mismatchedMatchers == 0
+	if len(splitExecutables) > 0 {
+		report["split_executables"] = splitExecutables
+	}
+	report["configuration_consistent"] = consistent && mismatchedMatchers == 0 && len(splitExecutables) == 0
 	if tool != "" {
 		report["tool_routed"] = routed
 	}
+}
+
+// sameExecutable reports whether two configured commands name the same file.
+func sameExecutable(a, b string) bool {
+	x, err := canonicalForDoctor(a)
+	if err != nil {
+		return false
+	}
+	y, err := canonicalForDoctor(b)
+	return err == nil && x != "" && x == y
 }
 
 func matcherAccepts(pattern, tool string) bool {

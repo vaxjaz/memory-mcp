@@ -75,13 +75,12 @@ func readProbeEvent(o probeCheckOptions) (Event, error) {
 		return e, errors.New("probe needs tool_name and a tool_input object")
 	}
 	if e.CWD == "" {
-		e.CWD = o.Project
-		if e.CWD == "" {
-			e.CWD, err = os.Getwd()
-			if err != nil {
-				return e, err
-			}
+		// The directory decides the project and whether a path lies inside it;
+		// taking this process's directory would explain a different call.
+		if o.Project == "" {
+			return e, errors.New("probe sample needs its actual cwd; put cwd in the event or pass --project")
 		}
+		e.CWD = o.Project
 	}
 	if e.Session == "" {
 		e.Session = o.Session
@@ -148,12 +147,17 @@ func checkProbe(ctx context.Context, store *memory.Store, o probeCheckOptions, e
 	}
 	rule, registered := probes.ruleFor(scope, e.Tool)
 	if !registered {
-		return result("tool_not_registered", "Map a verified input path in observed_fields to a named field, then run setup to register the tool.")
+		return result("tool_not_registered", "Add this tool to tool-probes.json: map an input path from observed_fields to a named field, run setup, then refresh the client.")
 	}
 	if !rule.active() {
-		return result("tool_disabled", "Check the active project tool registration.")
+		return result("tool_disabled", "This tool is listed with \"enabled\": false. Set it to true in tool-probes.json, run setup, then refresh the client.")
 	}
-	input, extraction := rule.extract(e)
+	root, err := store.ExperienceProjectBinding(ctx, e.CWD, scope)
+	if err != nil {
+		return result("project_binding_mismatch", "Use the sample's actual cwd and the matching library/scope from the existing setup.")
+	}
+	input, extraction := rule.extract(e, root)
+	extraction.Source = probes.ruleSource(scope, e.Tool)
 	report["tool_input"] = extraction
 	c, _, _, err := readAdapterConfig(o.Adapter, o.Config)
 	if err != nil {
@@ -181,7 +185,7 @@ func checkProbe(ctx context.Context, store *memory.Store, o probeCheckOptions, e
 		}
 	}
 	if len(input.Texts) == 0 {
-		return result("no_scanned_fields", "Check tool_input.fields and its outcome. Map a present string from observed_fields, or use a supported operation for this preset.")
+		return result("no_scanned_fields", "tool_input.outcome says why nothing was scanned, and each field's status says why it was left out: empty, missing, field_too_large, instruction_file, path_outside_project, path_unresolved or operation_not_scanned.")
 	}
 	probe, cancel := context.WithTimeout(ctx, 200*time.Millisecond)
 	defer cancel()

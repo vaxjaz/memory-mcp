@@ -8,9 +8,10 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
-from contextlib import closing
+from contextlib import closing, contextmanager
 if hasattr(sys.stdout, 'reconfigure'): sys.stdout.reconfigure(encoding="utf-8")
 import tempfile
 import threading
@@ -41,12 +42,55 @@ def rpc_write_fixture(binary, data, project, business=False):
     process.stdin.close();process.wait(timeout=10)
 
 
+def disposable_directory(prefix):
+    """A temporary directory whose removal waits for the processes the client launched.
+
+    A hook or the MCP server launched last may still hold the library for a
+    moment after the client is terminated; on Windows such a file cannot be
+    deleted until that process has exited.
+    """
+    root=tempfile.mkdtemp(prefix=prefix)
+    try:
+        yield root
+    finally:
+        for attempt in range(80):
+            try:
+                shutil.rmtree(root)
+                break
+            except OSError:
+                if attempt==79: raise
+                time.sleep(0.25)
+disposable_directory=contextmanager(disposable_directory)
+
+
+def stop_client(process):
+    """Stop the client together with everything it launched.
+
+    On Windows a .cmd shim is the direct child. Terminating that alone leaves
+    the real client alive, and with it the hook launchers and the MCP server
+    that hold the library, until this script itself exits.
+    """
+    if os.name=='nt':
+        subprocess.run(['taskkill','/PID',str(process.pid),'/T','/F'],capture_output=True)
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill();process.wait(timeout=10)
+    for stream in (process.stdin,process.stdout,process.stderr):
+        try:
+            if stream: stream.close()
+        except OSError:
+            pass
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--scenario',choices=['success','iserror','lifecycle','business'],default='success');parser.add_argument('--codex',required=True);parser.add_argument('--binary',required=True);parser.add_argument('--out',required=True)
     parser.add_argument('--business-envelope',choices=['json-text','structured'],default='json-text')
     args=parser.parse_args();binary=str(Path(args.binary).resolve());start=time.monotonic()
-    with tempfile.TemporaryDirectory(prefix='memory-native-delivery-') as temp:
+    with disposable_directory('memory-native-delivery-') as temp:
         root=Path(temp);project=root/'project';project.mkdir();home=root/'home';home.mkdir();data=root/'data'
         (project/'RemarkInput.java').write_text('// isolated fixture WorkOrder.remark\n',encoding='utf-8')
         (project/'FeedbackLogBuilder.java').write_text('// isolated fixture FeedbackLogBuilder.build\n',encoding='utf-8')
@@ -226,7 +270,7 @@ def main():
                 state['failure']=type(e).__name__+': '+str(e);run=subprocess.CompletedProcess([],1,stdout='',stderr=''.join(diagnostics)[-2000:])
             finally:
                 state['appserver_notification_counts']={m:methods.count(m) for m in set(methods)}
-                pipe.terminate();pipe.wait(timeout=10)
+                stop_client(pipe)
         else:
             try:run=subprocess.run(cmd,env=env,capture_output=True,text=True,encoding='utf-8',timeout=110)
             except subprocess.TimeoutExpired as e:

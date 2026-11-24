@@ -12,13 +12,20 @@ import (
 	"github.com/vaxjaz/memory-mcp/internal/memory"
 )
 
+// diagnoseFlags binds the options of diagnose.
+func diagnoseFlags() (fs *flag.FlagSet, dir, entry, scope, ids, out *string) {
+	fs = flag.NewFlagSet("diagnose", flag.ContinueOnError)
+	fs.Usage = func() { fmt.Fprint(fs.Output(), usage("diagnose")) }
+	dir = fs.String("data-dir", "", "EXPLICIT existing library directory; opened read-only without migration")
+	entry = fs.String("entry-id", "", "full original/current case ID to audit exact forward links")
+	scope = fs.String("scope", "", "expected scope, reported for comparison")
+	ids = fs.String("probe-ids", "", "comma-separated hook/source IDs to test for existence")
+	out = fs.String("out", "", "optional new JSON report file; never overwritten")
+	return fs, dir, entry, scope, ids, out
+}
+
 func diagnose(args []string, version, commit string) error {
-	fs := flag.NewFlagSet("diagnose", flag.ContinueOnError)
-	dir := fs.String("data-dir", "", "EXPLICIT existing library directory; opened read-only without migration")
-	entry := fs.String("entry-id", "", "full original/current case ID to audit exact forward links")
-	scope := fs.String("scope", "", "expected scope, reported for comparison")
-	ids := fs.String("probe-ids", "", "comma-separated hook/source IDs to test for existence")
-	out := fs.String("out", "", "optional new JSON report file; never overwritten")
+	fs, dir, entry, scope, ids, out := diagnoseFlags()
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil

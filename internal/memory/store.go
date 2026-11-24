@@ -61,16 +61,16 @@ type Link struct {
 }
 
 type Draft struct {
-	referenceValidated         bool
-	experienceValidated        bool
-	experienceKey              string
-	requestFingerprint         string
+	referenceValidated  bool
+	experienceValidated bool
+	experienceKey       string
+	requestFingerprint  string
 	// preCommit runs inside Put's write transaction, after dedup and revision
 	// checks and immediately before the entry insert. The W(x) write judgment
 	// re-checks comparison candidates here so a concurrent writer between the
 	// outer search and the commit turns this write into a comparison instead
 	// of a duplicate root.
-	preCommit                   func(context.Context, *sql.Tx) error
+	preCommit                  func(context.Context, *sql.Tx) error
 	ResponseMode               string   `json:"response_mode,omitempty" jsonschema:"compact: short IDs/state/integrity receipt; full: full response. Assist defaults to compact, strict to legacy full. Not part of write identity."`
 	ContextSourceID            string   `json:"context_source_id,omitempty" jsonschema:"Optional actual CURRENT user source for turn association, separate from evidence links. Assist validates source identity without requiring prepare/complete. Strict requires its checkpoint complete. Never fabricate source IDs."`
 	Profile                    *Profile `json:"profile,omitempty" jsonschema:"For cases and hypotheses: concrete future use, counter-check against saving, applicability and boundaries. No fabricated counterexamples."`
@@ -323,8 +323,11 @@ func Validate(d Draft) error {
 	if d.Scope != "global" && (!strings.HasPrefix(d.Scope, "project:") || strings.TrimSpace(strings.TrimPrefix(d.Scope, "project:")) == "") {
 		return errors.New("scope must be global or project:<stable identifier>")
 	}
-	if strings.TrimSpace(d.Title) == "" || strings.TrimSpace(d.Body) == "" {
-		return errors.New("title and body are required")
+	if strings.TrimSpace(d.Title) == "" {
+		return errors.New("title is required")
+	}
+	if strings.TrimSpace(d.Body) == "" {
+		return errors.New("body is required")
 	}
 	if utf8.RuneCountInString(d.Title) > 200 || len(d.Body) > 256*1024 || len(d.Scope) > 512 {
 		return errors.New("title, body, or scope exceeds size limit")
@@ -742,11 +745,11 @@ func (s *Store) ReadPage(ctx context.Context, id, referenceCursor string) (ReadR
 
 type SearchInput struct {
 	NeedsReview     *bool  `json:"needs_review,omitempty" jsonschema:"Filter source-change review queue; false selects entries without that flag"`
-	IncludeInactive bool   `json:"include_inactive,omitempty" jsonschema:"Include archived or replaced material for audit; normally hidden"`
+	IncludeInactive bool   `json:"include_inactive,omitempty" jsonschema:"Also list entries a cleanup archived or superseded. A revision replaced by a newer one is reached through memory_read and its entry.previous_id, not here."`
 	Scope           string `json:"scope" jsonschema:"Required explicit scope: project:<identifier> or global"`
-	Query           string `json:"query,omitempty" jsonschema:"Literal keywords separated by spaces; empty returns recent entries; no semantic model is used"`
+	Query           string `json:"query,omitempty" jsonschema:"Literal keywords separated by spaces; a record is listed when any one of them appears as a case-insensitive substring of its title, body or structured profile. Empty lists the recent entries. No ranking and no semantic model; memory_experience_lookup ranks."`
 	IncludeGlobal   bool   `json:"include_global,omitempty" jsonschema:"Also include global entries when searching a project; opt in explicitly"`
-	Kind            string `json:"kind,omitempty" jsonschema:"Optional record, case, or hypothesis filter"`
+	Kind            string `json:"kind,omitempty" jsonschema:"Optional filter: case for experiences, record for agreement references and earlier notes; hypothesis appears only in history."`
 	Limit           int    `json:"limit,omitempty" jsonschema:"Result limit, default 10, maximum 30"`
 	Cursor          string `json:"cursor,omitempty" jsonschema:"Opaque next_cursor from the prior memory_search result. Keep scope, query and every filter unchanged; only the page size may change."`
 	IncludeEvents   bool   `json:"include_events,omitempty" jsonschema:"Opt in to raw hook input/output events. Normally hidden so captured chat is not mistaken for a business decision."`
@@ -783,7 +786,7 @@ func (s *Store) SearchPage(ctx context.Context, in SearchInput) (SearchPage, err
 	}
 	in.Query = query
 	if in.Kind != "" && in.Kind != "record" && in.Kind != "case" && in.Kind != "hypothesis" {
-		return SearchPage{}, errors.New("invalid kind")
+		return SearchPage{}, errors.New("kind must be case, record or hypothesis: case covers experiences, record covers agreement references and earlier notes, hypothesis appears only in history")
 	}
 	if in.Limit == 0 {
 		in.Limit = 10

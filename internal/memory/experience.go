@@ -52,11 +52,11 @@ type ExperienceAdmission struct {
 
 type ExperienceWrite struct {
 	Admission  *ExperienceAdmission `json:"admission,omitempty" jsonschema:"Required for new writes and previous_id revisions. Correct task-specific misunderstandings without calling this tool. Explain a reusable judgment backed by a submitted evidence reference."`
-	Scope      string               `json:"scope"`
+	Scope      string               `json:"scope" jsonschema:"project:<identifier> this experience belongs to; a rule of another project never wakes it."`
 	Project    string               `json:"project" jsonschema:"Actual bound project directory; not inferred from a model name or another machine"`
-	Title      string               `json:"title"`
-	Experience Experience           `json:"experience"`
-	PreviousID string               `json:"previous_id,omitempty" jsonschema:"Full current case revision ID for a material correction. Send the complete revised experience, including evidence and cue references. Omit to create/deduplicate."`
+	Title      string               `json:"title" jsonschema:"Short name of the finding, shown in search results and candidate lists."`
+	Experience Experience           `json:"experience" jsonschema:"One body form, its evidence and the cues that should wake it."`
+	PreviousID string               `json:"previous_id,omitempty" jsonschema:"Full current ID of the record being revised, for a material correction. Send the complete revised experience, including evidence and cue references. Omit to create a new record or to deduplicate."`
 	RequestID  string               `json:"request_id,omitempty" jsonschema:"Reuse only when retrying the same record payload"`
 	Resolution *WriteResolution     `json:"resolution,omitempty" jsonschema:"Second call only: the judged relationship to the compared candidates, with the token from the needs_comparison response. Never invent a token."`
 	Cursor     string               `json:"cursor,omitempty" jsonschema:"next_cursor from a needs_comparison response to read the next candidate page for this unchanged draft."`
@@ -182,25 +182,29 @@ func (validation *recordValidation) experience(x *Experience) {
 }
 
 // Resolve symlinks before reading; memory content never authorizes external reads.
+// Errors name the submitted path: an agent can tell a wrong path from a missing file.
 func experienceFile(project, relative string) (string, error) {
 	if relative == "" || filepath.IsAbs(relative) || strings.Contains(relative, "\\") && filepath.Separator != '\\' {
 		return "", errors.New("code path must be project-relative")
 	}
 	root, err := filepath.EvalSymlinks(project)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("project directory %q cannot be resolved: %w", project, err)
 	}
 	target, err := filepath.EvalSymlinks(filepath.Join(root, filepath.FromSlash(relative)))
 	if err != nil {
-		return "", err
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("path %q: no such file in the bound project", relative)
+		}
+		return "", fmt.Errorf("path %q: cannot be resolved: %w", relative, err)
 	}
 	rel, err := filepath.Rel(root, target)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", errors.New("code evidence escapes bound project")
+		return "", fmt.Errorf("path %q: code evidence must stay inside the bound project", relative)
 	}
 	for _, part := range strings.Split(filepath.ToSlash(rel), "/") {
 		if part == ".git" || part == ".aws" || part == ".ssh" || part == ".env" {
-			return "", errors.New("credential/VCS paths are not code evidence")
+			return "", fmt.Errorf("path %q: credential and version-control paths are not code evidence", relative)
 		}
 	}
 	info, err := os.Stat(target)
@@ -208,25 +212,33 @@ func experienceFile(project, relative string) (string, error) {
 		return "", err
 	}
 	if !info.Mode().IsRegular() || info.Size() > 2*1024*1024 {
-		return "", errors.New("code evidence must be a regular file of at most 2 MiB")
+		return "", fmt.Errorf("path %q: code evidence must be a regular file of at most 2 MiB", relative)
 	}
 	return target, nil
 }
 
+// experienceProject returns the bound directory of a write or lookup. Its
+// errors say which directory and scope disagreed and what to do about it.
 func (s *Store) experienceProject(ctx context.Context, project, scope string) (string, error) {
 	if err := validScope(scope); err != nil {
 		return "", err
 	}
 	if scope == "global" {
-		return "", errors.New("experience trial requires explicit project scope")
+		return "", errors.New("an experience belongs to one project: scope must be project:<identifier>")
+	}
+	if project == "" {
+		return "", errors.New("project is required: the bound directory of the project the task works in")
 	}
 	abs, err := filepath.Abs(project)
-	if err != nil || project == "" {
-		return "", errors.New("actual bound project directory required")
+	if err != nil {
+		return "", fmt.Errorf("project %q is not a usable directory path", project)
 	}
 	bound, err := s.HookResolve(ctx, abs)
-	if err != nil || bound != scope {
-		return "", errors.New("project/scope binding mismatch")
+	if err != nil || bound == "" {
+		return "", fmt.Errorf("project/scope binding mismatch: %s is not bound to any scope in this library; bind it first with memory-mcp setup --host <client> --project \"%s\" --scope %s", abs, abs, scope)
+	}
+	if bound != scope {
+		return "", fmt.Errorf("project/scope binding mismatch: %s is bound to %s, not %s; send scope %s, or bind the directory to the intended scope with setup", abs, bound, scope, bound)
 	}
 	return abs, nil
 }
@@ -422,6 +434,7 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 		}
 	}
 	var validation recordValidation
+	validation.shortText("title", in.Title, 200)
 	validation.experienceAdmission(admission, in.Experience.Evidence)
 	validation.experience(&in.Experience)
 	validation.experienceWriteBoundary(&in.Experience, inherited)
@@ -443,11 +456,11 @@ func (s *Store) RecordExperience(ctx context.Context, in ExperienceWrite) (Exper
 		}
 		path, er := experienceFile(project, e.Path)
 		if er != nil {
-			return result, fmt.Errorf("evidence[%d]: %w", i, er)
+			return result, fmt.Errorf("experience.evidence[%d].path: %w", i, er)
 		}
 		body, er := os.ReadFile(path)
 		if er != nil {
-			return result, er
+			return result, fmt.Errorf("experience.evidence[%d].path: %w", i, er)
 		}
 		hash := sha256.Sum256(body)
 		actual := hex.EncodeToString(hash[:])

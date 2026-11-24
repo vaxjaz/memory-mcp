@@ -18,7 +18,7 @@ import (
 )
 
 type RecallQuery struct {
-	Terms []string `json:"terms" jsonschema:"1-16 grounded terms from one host-chosen investigation perspective."`
+	Terms []string `json:"terms" jsonschema:"1-16 grounded terms from one host-chosen investigation perspective. A term needs two consecutive identifier characters or two Han characters; Chinese is indexed as adjacent pairs, so a lone character is not searchable. Terms without that form are dropped and listed in dropped_terms."`
 	Match string   `json:"match,omitempty" jsonschema:"all (default): every term; any: alternatives. Lexical, not semantic."`
 }
 

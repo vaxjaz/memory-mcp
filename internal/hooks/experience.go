@@ -12,37 +12,59 @@ import (
 	"github.com/vaxjaz/memory-mcp/internal/memory"
 )
 
-func (r Runtime) configuredInput(ctx context.Context, e Event, scope string) (*matching.Input, probeRule, error) {
+// probeSelection is what one tool event resolves to.
+type probeSelection struct {
+	Rule  probeRule
+	Input *matching.Input
+	// FromProject tells a rule written for this project from one that applies
+	// to every project; only the former keeps a trace when nothing matched.
+	FromProject bool
+}
+
+func (r Runtime) configuredInput(ctx context.Context, e Event, scope string) (probeSelection, error) {
 	config, err := loadProbeConfig(r.Store.Dir)
 	if err != nil {
 		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_config_invalid", probeConfigName)
-		return &matching.Input{}, probeRule{}, nil
+		return probeSelection{Input: &matching.Input{}}, nil
 	}
+	selection := probeSelection{Input: &matching.Input{}}
 	rule, ok := config.ruleFor(scope, e.Tool)
 	if !ok || !rule.active() {
-		return &matching.Input{}, probeRule{}, nil
+		return selection, nil
 	}
+	selection.Rule = rule
+	_, selection.FromProject = selectTool(config.Projects[scope], e.Tool)
 	if rule.inspectionOnly() {
 		err = r.logToolShape(ctx, e, scope, e.Input)
-		return &matching.Input{}, rule, err
+		return selection, err
 	}
 	if len(rule.Observe) > 0 {
 		if err = r.startProbeFacts(ctx, e, scope, rule.Observe); err != nil {
-			return nil, rule, err
+			return selection, err
 		}
 	}
-	input, report := rule.extract(e)
-	if report.Outcome != "scanned" && len(rule.Fields) > 0 {
-		raw, _ := json.Marshal(report)
-		_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "custom_probe_input", string(raw))
+	// The binding root, not the session's current directory, is the project.
+	root, err := r.Store.ExperienceProjectBinding(ctx, e.CWD, scope)
+	if err != nil {
+		return selection, err
+	}
+	input, report := rule.extract(e, root)
+	report.Source = config.ruleSource(scope, e.Tool)
+	// A skipped call leaves its reasons, never its values, so a silent cue
+	// can be explained after the fact.
+	if report.Outcome != "scanned" {
+		if raw, er := json.Marshal(report); er == nil {
+			_ = r.Store.HookLog(ctx, e.Name, scope, e.Session, "probe_skipped", string(raw))
+		}
 	}
 	r.attachFacts(ctx, e, scope, config, input)
-	return input, rule, nil
+	selection.Input = input
+	return selection, nil
 }
 
 func (r Runtime) probeMatches(ctx context.Context, e Event, scope string, input *matching.Input, rule probeRule) ([]memory.ExperienceMatch, []memory.ExperienceMatch, error) {
 	direct, err := r.Store.MatchToolInput(ctx, scope, input)
-	if err != nil || rule.preset != "business" || e.Session == "" {
+	if err != nil || !rule.business() || e.Session == "" {
 		return direct, direct, err
 	}
 	matches := direct
@@ -118,9 +140,10 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 			}
 			return empty, err // fail-open; no context and never an experience gate
 		}
-		input, rule, err := r.configuredInput(ctx, e, scope)
-		business := rule.preset == "business"
-		configured := rule.preset == "" && len(rule.Fields) > 0
+		selection, err := r.configuredInput(ctx, e, scope)
+		rule, input := selection.Rule, selection.Input
+		business := rule.business()
+		configured := selection.FromProject && !business && len(rule.Fields) > 0
 		if err != nil {
 			return empty, err
 		}
@@ -215,7 +238,7 @@ func (r Runtime) experience(ctx context.Context, e Event, scope string) (map[str
 			}
 			return empty, nil
 		}
-		if err = r.finishProbeFacts(ctx, e, scope, rule.Observe); err != nil || rule.preset != "business" {
+		if err = r.finishProbeFacts(ctx, e, scope, rule.Observe); err != nil || !rule.business() {
 			return empty, err
 		}
 		records := businessObservationRecords(e)

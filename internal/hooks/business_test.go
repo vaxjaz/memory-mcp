@@ -95,21 +95,21 @@ func TestBusinessResultObservationWakesOnlySameObjectAndInput(t *testing.T) {
 
 func TestBusinessCluesStayBoundedAndDoNotProbeEveryTool(t *testing.T) {
 	for _, name := range []string{"mcp__decision_memory__memory_experience_lookup", "web_search", "mcp__github__fetch", "apply_patch", "Skill"} {
-		if rule, _ := (probeConfig{}).ruleFor("", name); rule.preset == "business" {
+		if rule, _ := (probeConfig{}).ruleFor("", name); rule.business() {
 			t.Fatal("overbroad native selector", name)
 		}
 	}
 	rule, _ := (probeConfig{}).ruleFor("", "mcp__mysql__query")
-	if rule.preset != "business" {
+	if !rule.business() {
 		t.Fatal("known database tool omitted")
 	}
 	e := Event{Tool: "mcp__mysql__query", Input: map[string]any{"sql": "select order_no from t", "password": "DO_NOT_PROBE_SECRET"}}
-	inp, _ := rule.extract(e)
+	inp, _ := rule.extract(e, "")
 	if len(inp.Texts) != 2 || inp.Fields["password"] != nil {
 		t.Fatal("secret field probed")
 	}
 	e.Input["sql"] = strings.Repeat("x", 32769)
-	if inp, _ = rule.extract(e); len(inp.Texts) != 0 {
+	if inp, _ = rule.extract(e, ""); len(inp.Texts) != 0 {
 		t.Fatal("oversized probe partially matched")
 	}
 	b, _ := json.Marshal(Event{Name: "PostToolUse", CWD: "/workspace", Session: "session", Response: map[string]any{"text": "data"}})

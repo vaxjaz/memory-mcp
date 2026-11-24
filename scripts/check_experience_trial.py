@@ -118,7 +118,9 @@ def main():
     parser.add_argument("--if-supported", action="store_true")
     opt = parser.parse_args()
     binary = str(Path(opt.binary).resolve())
-    if "--enable-wakeup" not in subprocess.check_output([binary, "help"], text=True, encoding="utf-8"):
+    # The parameter lives in the help of setup: the top-level help of a current
+    # executable lists commands, not their parameters.
+    if "--enable-wakeup" not in subprocess.check_output([binary, "setup", "--help"], text=True, encoding="utf-8"):
         if opt.if_supported:
             print("SKIP: historical executable predates experience trial")
             return

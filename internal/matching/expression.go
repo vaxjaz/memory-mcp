@@ -268,17 +268,42 @@ func (e *Expression) Evaluate(i *Input, report func(Check)) (Truth, *Hit, error)
 	return truth, hit, nil
 }
 
+// namedTexts are the values a field name stands for. A name may carry several
+// values, such as the elements of an array; every one of them takes part.
+func (e *Expression) namedTexts(i *Input) []NamedText {
+	var selected []NamedText
+	for _, text := range i.Texts {
+		if text.Field == e.Field {
+			selected = append(selected, text)
+		}
+	}
+	if len(selected) == 0 {
+		if text, ok := i.Fields[e.Field].(string); ok {
+			selected = []NamedText{{Field: e.Field, Value: text}}
+		}
+	}
+	return selected
+}
+
 func (e *Expression) compare(i *Input) (Truth, *Hit) {
 	if len(e.Entrances) == 0 {
+		// A text comparison is satisfied when any value under the name satisfies it.
+		if expected, ok := e.Value.(string); ok && e.Field != "" && len(e.namedTexts(i)) > 1 {
+			any := False
+			for _, text := range e.namedTexts(i) {
+				if e.Rule.MatchText(i.text(text.Value), expected, false) {
+					any = True
+				}
+			}
+			return any, nil
+		}
 		return e.Rule.Compare(i.Fields[e.Field], e.Value, false), nil
 	}
 	selected := i.Texts
 	if e.Field != "" {
-		text, ok := i.Fields[e.Field].(string)
-		if !ok {
+		if selected = e.namedTexts(i); len(selected) == 0 {
 			return Unknown, nil
 		}
-		selected = []NamedText{{Field: e.Field, Value: text}}
 	}
 	for _, value := range e.Entrances {
 		for _, text := range selected {

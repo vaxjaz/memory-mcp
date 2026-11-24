@@ -400,11 +400,26 @@ func (s *Store) HookReviewDone(ctx context.Context, in ReviewInput) (HookTurn, e
 	}
 	return current, tx.Commit()
 }
+
+// hookLogLimit bounds the event log. Every tool call of a bound project can
+// leave a row, so rows older than the newest this many are dropped; doctor
+// reads the twenty latest of a session and nothing else needs the history.
+const hookLogLimit = 20000
+
 func (s *Store) HookLog(ctx context.Context, event, scope, session, result, detail string) error {
 	if err := s.InitHooks(ctx); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO hook_runs(event,scope,session,result,detail,created_at)VALUES(?,?,?,?,?,?)`, event, scope, session, result, detail, time.Now().UTC().Format(time.RFC3339Nano))
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO hook_runs(event,scope,session,result,detail,created_at)VALUES(?,?,?,?,?,?)`, event, scope, session, result, detail, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	return s.trimHookLog(ctx)
+}
+
+// trimHookLog drops what fell beyond hookLogLimit. It is ordered by the
+// table's own id, so it normally removes nothing.
+func (s *Store) trimHookLog(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM hook_runs WHERE id <= (SELECT max(id) FROM hook_runs) - ?`, hookLogLimit)
 	return err
 }
 func (s *Store) HookDiagnostics(ctx context.Context, session string) (map[string]any, error) {

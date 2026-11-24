@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/vaxjaz/memory-mcp/internal/textguard"
 	"strings"
 )
@@ -32,7 +33,7 @@ func (s *Store) ConfirmMaintenance(ctx context.Context, scope, planID, purpose, 
 			want = "applied"
 		}
 		if p.Status != want {
-			return "", errors.New("confirmation requires the current displayed plan")
+			return "", fmt.Errorf("a confirmation with purpose %q needs a plan in state %q; this plan is in state %q", purpose, want, p.Status)
 		}
 	} else if planID != "" {
 		return "", errors.New("configuration confirmation is separate from a cleanup plan")

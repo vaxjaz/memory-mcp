@@ -248,17 +248,17 @@ func (s *Store) Maintenance(ctx context.Context, scope string) (MaintenanceStatu
 }
 
 type MaintenanceConfig struct {
-	Scope     string `json:"scope"`
-	Interval  int    `json:"interval" jsonschema:"Positive count of case/hypothesis writes from now; raw events and reuse do not count"`
-	Enabled   bool   `json:"enabled"`
+	Scope     string `json:"scope" jsonschema:"project:<identifier>, the same scope as the action"`
+	Interval  int    `json:"interval" jsonschema:"Positive count of stored experiences from now; a reused or declined write does not count"`
+	Enabled   bool   `json:"enabled" jsonschema:"false switches the reminder off"`
 	Repeating bool   `json:"repeating" jsonschema:"true for every N changes; false for once after N more changes"`
-	SourceID  string `json:"source_id" jsonschema:"Actual current user instruction requesting this configuration"`
+	SourceID  string `json:"source_id" jsonschema:"The approval_source_id returned by confirm with purpose configure for this change"`
 }
 
 func userSource(ctx context.Context, q queryer, id, scope string) (Entry, error) {
 	e, err := scanEntry(q.QueryRowContext(ctx, "SELECT "+columns+" FROM entries WHERE id=?", id))
 	if errors.Is(err, sql.ErrNoRows) {
-		return e, missingLookup("user_source_not_found", "source_id", id, scope, "This user-source ID is absent from the opened library. Verify the full ID and that MCP and hooks use the same data_dir; a readable target case does not establish that its new source exists. Do not create a duplicate case or invent a hook source ID.")
+		return e, missingLookup("user_source_not_found", "source_id", id, scope, "This ID is not an approval recorded in this library. approval_source_id must be the value returned by confirm for this plan: send plan_id, purpose and the user's own words as approval_quote, then use the approval_source_id it returns. For a reminder change the purpose is configure and the value goes into policy.source_id")
 	}
 	if err != nil {
 		return e, err

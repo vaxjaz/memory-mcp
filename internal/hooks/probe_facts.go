@@ -29,12 +29,12 @@ func (o probeObservation) validate() error {
 	}
 	for _, key := range o.Key {
 		source, path, ok := strings.Cut(key, ".")
-		if !ok || (source != "input" && source != "result") || !probeFieldPath.MatchString(path) {
+		if !ok || (source != "input" && source != "result") || !probeObjectPath.MatchString(path) {
 			return fmt.Errorf("observation %q key paths use input.<field> or result.<field>", o.Name)
 		}
 	}
 	for alias, path := range o.Fields {
-		if !matching.FieldName.MatchString(alias) || !probeFieldPath.MatchString(path) {
+		if !matching.FieldName.MatchString(alias) || !probeObjectPath.MatchString(path) {
 			return fmt.Errorf("observation %q has an invalid result field mapping", o.Name)
 		}
 	}

@@ -616,3 +616,71 @@ func withRawResolution(in ExperienceWrite, resolution *WriteResolution) Experien
 	in.Resolution = resolution
 	return in
 }
+
+// The comparison is asked for by identity, not by wording. Narrative words
+// recur across a whole project, so shared words alone never ask for a judgment.
+func TestWriteComparisonAsksOnIdentityNotOnSharedWords(t *testing.T) {
+	s, _, in := comparisonFixture(t)
+	if _, err := s.RecordExperience(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := in
+	elsewhere.RequestID = "other-source"
+	elsewhere.Title = "Where the settlement codes come from"
+	elsewhere.Experience.Fact = "The settlement codes are loaded by the feedback job, and the nightly job logs them for every environment."
+	elsewhere.Experience.Evidence = []ExperienceEvidence{{Kind: "business", Reference: "fixture:feedback-job", Observation: "Synthetic."}}
+	elsewhere.Experience.Cues = []ExperienceCue{{ID: "feedback", Label: "feedback", EvidenceRefs: []string{"fixture:feedback-job"},
+		Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"feedbackJob"}}}}}
+	elsewhere.Admission.EvidenceRef = "fixture:feedback-job"
+	stored, err := s.RecordExperience(ctx, elsewhere)
+	if err != nil || stored.Status == "needs_comparison" {
+		t.Fatal("shared words without shared identity asked for a judgment", stored, err)
+	}
+
+	// The same claim again, with another source and another entrance: the bodies overlap by more than half.
+	restated := elsewhere
+	restated.RequestID = "restated"
+	restated.Experience.Fact = "The settlement codes are loaded nightly by the feedback job for every environment."
+	restated.Experience.Evidence = []ExperienceEvidence{{Kind: "business", Reference: "fixture:second-ledger", Observation: "Synthetic."}}
+	restated.Experience.Cues = []ExperienceCue{{ID: "nightly", Label: "nightly", EvidenceRefs: []string{"fixture:second-ledger"},
+		Matches: []CueMatch{{Rule: matching.Rule{Op: "token"}, Entrances: []string{"nightlyCodes"}}}}}
+	restated.Admission.EvidenceRef = "fixture:second-ledger"
+	pending, err := s.RecordExperience(ctx, restated)
+	if err != nil || pending.Status != "needs_comparison" || len(pending.Candidates) != 1 || pending.Candidates[0].ID != stored.ID {
+		t.Fatal("a restatement with other evidence and entrance skipped comparison", pending, err)
+	}
+	if reasons := pending.Candidates[0].MatchedOn; len(reasons) != 1 || reasons[0] != "body_overlap" {
+		t.Fatal("the reason must say the bodies overlap", reasons)
+	}
+	if roots, total := rootCount(t, s, in.Scope); roots != 2 || total != 2 {
+		t.Fatal("the comparison wrote rows", roots, total)
+	}
+}
+
+func TestBodyOverlapIsTheShareOfDistinctWords(t *testing.T) {
+	set := func(words ...string) map[string]bool {
+		out := map[string]bool{}
+		for _, word := range words {
+			out[word] = true
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		a, b map[string]bool
+		want float64
+	}{
+		{set("a", "b", "c", "d"), set("c", "d"), 0.5},
+		{set("a", "b", "c", "d"), set("c", "d", "e", "f"), 1.0 / 3},
+		{set("a", "b"), set("a", "b"), 1},
+		{set("a", "b"), set("c", "d"), 0},
+		{set(), set("a"), 0},
+	} {
+		if got := bodyOverlap(tc.a, tc.b); got != tc.want {
+			t.Fatalf("overlap of %v and %v: got %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+	// "甲乙丙" gives the pairs 甲乙 and 乙丙; "甲乙丙丁" gives those and 丙丁.
+	if bodyOverlap(bodyTokens(&Experience{Fact: "甲乙丙"}), bodyTokens(&Experience{Counterexample: "甲乙丙丁"})) != 2.0/3 {
+		t.Fatal("Chinese bodies are compared by their adjacent pairs")
+	}
+}

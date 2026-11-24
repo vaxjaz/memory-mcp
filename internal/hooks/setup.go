@@ -277,7 +277,9 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 			a, _ := filepath.Abs(o.DataDir)
 			b, _ := filepath.Abs(oldDir)
 			if !strings.EqualFold(a, b) {
-				return nil, errors.New("--data-dir conflicts with existing MCP data; refusing to redirect or abandon it")
+				// The library already holds this project's records; sending the
+				// service to another directory would make them disappear.
+				return nil, fmt.Errorf("--data-dir \"%s\" is not the library the MCP server \"%s\" already uses (\"%s\"); pass that directory, or leave --data-dir out to keep it", a, name, oldDir)
 			}
 		}
 		o.DataDir = oldDir
@@ -295,6 +297,16 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	probes, err := loadProbeConfig(o.DataDir)
 	if err != nil {
 		return nil, err
+	}
+	// The file is valid: create it, or list the default tools it lacks.
+	seed, err := seedToolRules(o.DataDir, o.DryRun)
+	if err != nil {
+		return nil, err
+	}
+	if !o.DryRun {
+		if probes, err = loadProbeConfig(o.DataDir); err != nil {
+			return nil, err
+		}
 	}
 	o.Binary, err = filepath.Abs(o.Binary)
 	if err != nil {
@@ -438,6 +450,8 @@ func Setup(ctx context.Context, o SetupOptions) (map[string]any, error) {
 	report["hooks_config"] = adapter.DefaultHooks(o.Config)
 	report["historical_projects_auto_bound"] = false
 	report["probe_config_path"] = filepath.Join(o.DataDir, probeConfigName)
+	report["tool_rules"] = seed
+	report["probe_surface"] = probes.surface(o.Scope)
 	report["custom_probe_rules"] = len(probes.Projects[o.Scope])
 	report["probe_context_fact_rules"] = probes.observationCount(o.Scope)
 	report["verification_command"] = fmt.Sprintf("doctor --host %s --config %q --data-dir %q --project %q --scope %q", o.Host, o.Config, o.DataDir, o.Project, o.Scope)

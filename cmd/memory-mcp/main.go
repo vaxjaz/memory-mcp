@@ -41,41 +41,17 @@ func run(args []string) error {
 		buildVersion = strings.TrimPrefix(strings.TrimSpace(sourceVersion), "v")
 	}
 	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
-		fmt.Print(`memory-mcp: local decision memory, powered by your host AI.
-
-Usage:
-  memory-mcp serve [--data-dir DIR]           MCP over stdin/stdout
-  memory-mcp status [--data-dir DIR]          Show path and record count
-  memory-mcp export --out FILE [--data-dir DIR]
-  memory-mcp migrate [--data-dir DIR]         Preview the cue schema upgrade
-  memory-mcp migrate --apply --backup FILE [--data-dir DIR]
-  memory-mcp backup --out FILE [--data-dir DIR]  Consistent standalone SQLite snapshot
-  memory-mcp forget --id ID --yes [--data-dir DIR]
-  memory-mcp setup --host HOST --project DIR --scope project:ID
-                     [--enable-wakeup | --disable-wakeup]
-  memory-mcp hook --host HOST [--data-dir DIR]    User-level event handler (not an MCP server)
-  memory-mcp doctor [--data-dir DIR] [--session ID]
-                                             Bindings, probe configuration and recent hook events
-  memory-mcp doctor --challenge ID            Read-only lookup and delivery status
-  memory-mcp doctor --probe EVENT.json [--expect RECORD_ID]
-                                             Read-only check of a sample tool call and its cue matches
-  memory-mcp adapters                           List implemented host protocols and validation limits
-  memory-mcp diagnose --data-dir DIR [--entry-id ID] [--probe-ids ID,ID] [--out FILE]
-                                             Read-only metadata/link diagnostics; no migration or repair
-  memory-mcp guide                           Print the embedded guide and tool-probes.json example
-  memory-mcp config                         Print generic MCP JSON configuration
-  memory-mcp version                        Print version
-  memory-mcp build-info                     Print version and exact packaged source commit
-
-MEMORY_MCP_DATA_DIR overrides the platform default data directory.
-Use 'memory-mcp guide' for the per-project tool-probes.json format.
-Doctor validates the file. Setup updates native matchers.
-Read docs/AGENT_INSTALL.md to select the actual supported host; do not infer it from the model name.
-No model, account, network service, or runtime dependencies required.
-Export is plaintext JSON. Forget also removes revisions and dependents;
-it cannot erase exports, host transcripts, backups, or storage snapshots.
-`)
+		fmt.Print(help())
 		return nil
+	}
+	// An explicit help request shows one command's reference on stdout.
+	for _, a := range args[1:] {
+		if a == "--help" || a == "-h" {
+			if text := usage(args[0]); text != "" {
+				fmt.Print(text)
+				return nil
+			}
+		}
 	}
 	if args[0] == "version" {
 		fmt.Println(buildVersion)
@@ -120,22 +96,7 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 	default:
 		return fmt.Errorf("unknown command %q; run memory-mcp help", cmd)
 	}
-	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-	dir := fs.String("data-dir", "", "local data directory")
-	var out, id string
-	var yes, applyMigration bool
-	var migrationBackup string
-	if cmd == "migrate" {
-		fs.BoolVar(&applyMigration, "apply", false, "upgrade the inspected library and retain a backup")
-		fs.StringVar(&migrationBackup, "backup", "", "new backup file for the original SQLite library")
-	}
-	if cmd == "export" || cmd == "backup" {
-		fs.StringVar(&out, "out", "", "new output file (will not overwrite)")
-	}
-	if cmd == "forget" {
-		fs.StringVar(&id, "id", "", "entry ID; removes lineage and dependent interpretations")
-		fs.BoolVar(&yes, "yes", false, "confirm permanent local deletion")
-	}
+	fs, o := utilityFlags(cmd)
 	if err := fs.Parse(args[1:]); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -145,37 +106,37 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 	if fs.NArg() != 0 {
 		return errors.New("unexpected positional arguments")
 	}
-	if (cmd == "export" || cmd == "backup") && out == "" {
+	if (cmd == "export" || cmd == "backup") && *o.out == "" {
 		return fmt.Errorf("%s requires --out FILE", cmd)
 	}
-	if cmd == "forget" && (id == "" || !yes) {
+	if cmd == "forget" && (*o.id == "" || !*o.yes) {
 		return errors.New("forget requires --id ID --yes; removes all revisions and dependent interpretations")
 	}
-	if *dir == "" {
+	if *o.dir == "" {
 		p, err := memory.DefaultDir()
 		if err != nil {
 			return err
 		}
-		*dir = p
+		*o.dir = p
 	}
 	if cmd == "migrate" {
 		ctx := context.Background()
 		var report memory.MigrationReport
 		var err error
-		if applyMigration {
-			report, err = memory.ApplyCueMigration(ctx, *dir, migrationBackup)
+		if *o.applyMigration {
+			report, err = memory.ApplyCueMigration(ctx, *o.dir, *o.migrationBackup)
 		} else {
-			if migrationBackup != "" {
+			if *o.migrationBackup != "" {
 				return errors.New("--backup is only used with --apply")
 			}
-			report, err = memory.InspectCueMigration(ctx, *dir)
+			report, err = memory.InspectCueMigration(ctx, *o.dir)
 		}
 		if err != nil {
 			return err
 		}
 		return json.NewEncoder(os.Stdout).Encode(report)
 	}
-	store, err := memory.Open(*dir)
+	store, err := memory.Open(*o.dir)
 	if err != nil {
 		return err
 	}
@@ -197,19 +158,19 @@ it cannot erase exports, host transcripts, backups, or storage snapshots.
 		if err != nil {
 			return err
 		}
-		if err = memory.WriteExport(out, snapshot); err != nil {
+		if err = memory.WriteExport(*o.out, snapshot); err != nil {
 			return err
 		}
-		fmt.Fprintln(os.Stdout, "Exported to", out)
+		fmt.Fprintln(os.Stdout, "Exported to", *o.out)
 		return nil
 	case "backup":
-		if err = store.Backup(ctx, out); err != nil {
+		if err = store.Backup(ctx, *o.out); err != nil {
 			return err
 		}
-		fmt.Fprintln(os.Stdout, "Backed up to", out)
+		fmt.Fprintln(os.Stdout, "Backed up to", *o.out)
 		return nil
 	case "forget":
-		n, err := store.Forget(ctx, id)
+		n, err := store.Forget(ctx, *o.id)
 		if err != nil {
 			return err
 		}

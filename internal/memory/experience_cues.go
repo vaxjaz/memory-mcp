@@ -17,7 +17,7 @@ import (
 type ExperienceCue struct {
 	ID           string     `json:"cue_id" jsonschema:"Stable within the record. Start with a lowercase ASCII letter; use up to 48 lowercase letters, digits or underscores in total."`
 	Label        string     `json:"label" jsonschema:"Compact association label, at most 24 Unicode characters."`
-	Text         string     `json:"text,omitempty" jsonschema:"Optional legacy field for agreements and old experience records. New experience writes leave it empty; delivered facts come from the body. If present: a complete evidence-backed fact, at most 160 Unicode characters, only facts already in this version's body."`
+	Text         string     `json:"text,omitempty" jsonschema:"Experiences: leave it empty, delivered facts come from the body; submitted text is rejected. Agreements: required, the confirmed sentence this cue quotes, at most 160 Unicode characters."`
 	EvidenceRefs []string   `json:"evidence_refs" jsonschema:"1-3 exact evidence[].reference values from this submitted body. When removing evidence, update all cues that cite it."`
 	Matches      []CueMatch `json:"matches" jsonschema:"Matching groups with a total of 1-12 directly evidenced entrance strings."`
 }

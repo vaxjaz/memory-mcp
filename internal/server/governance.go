@@ -9,21 +9,32 @@ import (
 )
 
 type CleanupInput struct {
-	Purpose          string                    `json:"purpose,omitempty" jsonschema:"confirm only: apply, undo or configure"`
-	RequestID        string                    `json:"request_id,omitempty" jsonschema:"confirm only: stable ID for this exact submission"`
-	Action           string                    `json:"action" jsonschema:"inspect, configure, preview, confirm, read_plan, apply, undo, defer, acknowledge or recheck_sources. Apply/undo ONLY after user reviews and explicitly approves the exact displayed plan."`
-	Scope            string                    `json:"scope"`
-	Cursor           string                    `json:"cursor,omitempty" jsonschema:"inspect only: pass inventory.next_cursor for the next inventory page. For inventory.review_next_cursor use memory_search with the same scope and needs_review=true."`
-	Operations       []memory.CleanupOperation `json:"operations,omitempty"`
-	PlanID           string                    `json:"plan_id,omitempty"`
-	Policy           *memory.MaintenanceConfig `json:"policy,omitempty" jsonschema:"Translate an actual user instruction such as every N changes, after N more changes, or disable; echo settings to user"`
-	ApprovalSourceID string                    `json:"approval_source_id,omitempty"`
-	ApprovalQuote    string                    `json:"approval_quote,omitempty"`
-	DeferChanges     int                       `json:"defer_changes,omitempty"`
-	EntryID          string                    `json:"entry_id,omitempty"`
-	SourceIDs        []string                  `json:"source_ids,omitempty"`
-	Note             string                    `json:"note,omitempty"`
+	Action string `json:"action" jsonschema:"inspect, preview, confirm, apply, undo, read_plan, defer, acknowledge, configure or recheck_sources. apply and undo need the approval of the exact preview the user saw."`
+	Scope  string `json:"scope" jsonschema:"project:<identifier>"`
+
+	// inspect
+	Cursor string `json:"cursor,omitempty" jsonschema:"inspect only: inventory.next_cursor of the previous page, for the next one. inventory.review_next_cursor goes to memory_search with needs_review=true."`
+
+	// preview and recheck_sources
+	Operations []memory.CleanupOperation `json:"operations,omitempty" jsonschema:"preview only: the proposed operations. Each names entry_id, action (archive, supersede, distill or recheck), reason and the evidence_ids actually read; supersede also names replacement_id, distill a summary."`
+	EntryID    string                    `json:"entry_id,omitempty" jsonschema:"recheck_sources only: the record whose sources were rechecked."`
+	SourceIDs  []string                  `json:"source_ids,omitempty" jsonschema:"recheck_sources only: 1-32 IDs of the evidence that was actually read."`
+	Note       string                    `json:"note,omitempty" jsonschema:"recheck_sources only: the concrete reason."`
+
+	// confirm, apply, undo and read_plan
+	PlanID           string `json:"plan_id,omitempty" jsonschema:"The plan.id returned by preview. confirm, apply, undo and read_plan need it; a confirm with purpose configure leaves it out."`
+	Purpose          string `json:"purpose,omitempty" jsonschema:"confirm only: apply, undo or configure."`
+	ApprovalQuote    string `json:"approval_quote,omitempty" jsonschema:"confirm, apply and undo: the user's own words approving this exact plan, sent unchanged in all three calls."`
+	RequestID        string `json:"request_id,omitempty" jsonschema:"confirm only: a stable ID for this exact submission, so a retry does not record the approval twice."`
+	ApprovalSourceID string `json:"approval_source_id,omitempty" jsonschema:"apply and undo only: the approval_source_id returned by confirm for that purpose."`
+
+	// defer
+	DeferChanges int `json:"defer_changes,omitempty" jsonschema:"defer only: postpone the reminder by this many stored experiences, 1-1000000."`
+
+	// configure
+	Policy *memory.MaintenanceConfig `json:"policy,omitempty" jsonschema:"configure only: scope, interval, enabled, repeating, and source_id set to the approval_source_id of a confirm with purpose configure."`
 }
+
 type CleanupOutput struct {
 	ApprovalSourceID string                    `json:"approval_source_id,omitempty"`
 	Inventory        *memory.CleanupInventory  `json:"inventory,omitempty"`
@@ -33,8 +44,17 @@ type CleanupOutput struct {
 	Notice           string                    `json:"notice"`
 }
 
+const cleanupDescription = "Maintain the library reversibly. A change is applied only after the user approves the exact preview, and evidence is never permanently deleted. " +
+	"1. inspect: read-only inventory of this project (counts, items, pending plans, reminder policy); follow inventory.next_cursor. " +
+	"2. preview: store a proposed plan from operations and get plan.id. Nothing changes yet. Show the user the affected entries, what is kept or lost, the reasons and the unknowns, and offer apply, adjust or later. " +
+	"3. confirm: record the approval. Send plan_id, purpose \"apply\", the user's words as approval_quote and a request_id; the response carries approval_source_id. " +
+	"4. apply: send plan_id, approval_source_id and the same approval_quote. To reverse it, confirm again with purpose \"undo\" and then call undo. read_plan shows a stored plan. " +
+	"Reminders: defer postpones the next one by defer_changes; acknowledge resets it. To change it, confirm with purpose \"configure\" and the user's instruction as approval_quote (no plan_id), then configure with a policy whose source_id is that approval_source_id. " +
+	"recheck_sources previews a recheck of one record's evidence. " +
+	"Installation permission is not approval, and no semantic correctness is certified."
+
 func addGovernanceTools(s *mcp.Server, store *memory.Store) {
-	mcp.AddTool(s, &mcp.Tool{Name: "memory_cleanup", Description: "Manage a separate, reversible maintenance ledger, not business cases. inspect is read-only inventory; preview stores an exact proposed plan without changing memories. Show affected entries, retained/lost content, reasons and unknowns, then offer apply/adjust/later. After NEW actual user approval of the shown preview, confirm stores its compact maintenance-only excerpt; apply/undo use that source ID. Installation permission is insufficient. Configuration intent also uses confirm. No semantic correctness is certified. configure persists per-project natural-language schedule intent; raw capture/reuse do not count. Never permanently deletes evidence.", Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)}}, func(ctx context.Context, req *mcp.CallToolRequest, in CleanupInput) (*mcp.CallToolResult, any, error) {
+	mcp.AddTool(s, &mcp.Tool{Name: "memory_cleanup", Description: cleanupDescription, Annotations: &mcp.ToolAnnotations{DestructiveHint: boolPtr(true), OpenWorldHint: boolPtr(false)}}, func(ctx context.Context, req *mcp.CallToolRequest, in CleanupInput) (*mcp.CallToolResult, any, error) {
 		out := CleanupOutput{Notice: "Management records are excluded from ordinary memory search. Preserved bodies/links/history remain readable. Fresh user confirmation is required before applying any cleanup."}
 		var err error
 		switch in.Action {

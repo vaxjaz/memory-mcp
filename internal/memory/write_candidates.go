@@ -61,10 +61,41 @@ func entranceValues(x *Experience) map[string]bool {
 	return out
 }
 
+// bodyOverlapThreshold is the share of distinct words two bodies must have
+// in common before a write is compared with a stored record.
+const bodyOverlapThreshold = 0.5
+
+// bodyTokens are the distinct indexable words of an experience's own claim.
+func bodyTokens(x *Experience) map[string]bool {
+	out := map[string]bool{}
+	for _, token := range recallTokens(x.Fact + x.Pitfall + x.Counterexample) {
+		out[token] = true
+	}
+	return out
+}
+
+// bodyOverlap is the share of distinct words shared by two bodies:
+// intersection over union, 0 when either body has no indexable word.
+func bodyOverlap(a, b map[string]bool) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	shared := 0
+	for token := range a {
+		if b[token] {
+			shared++
+		}
+	}
+	return float64(shared) / float64(len(a)+len(b)-shared)
+}
+
 // writeCandidates searches current active records in this scope for entries
-// worth checking against a new observation: shared evidence locators, shared
-// distinctive entrances, or body-term overlap. Evidence and object double hits
-// rank first; ordering is stable by entry ID. The FULL ranked list is
+// worth checking against a new observation. A record is worth the check when
+// it cites the same evidence locator, wakes from the same entrance, or states
+// a body that overlaps the draft by at least half. A few shared words are not
+// a reason: narrative words such as how a fact was verified recur across a
+// whole project and would ask for a judgment on nearly every write. Evidence
+// and object double hits rank first; ordering is stable by entry ID. The FULL ranked list is
 // returned; callers page it with writeCandidateLimit per response and keep a
 // cursor so a hidden true duplicate stays reachable. The query runs read-only
 // against either the pool or an open write transaction.
@@ -78,10 +109,7 @@ func (s *Store) writeCandidates(ctx context.Context, q dbQuerier, scope string, 
 	}
 	draftEvidence := evidenceLocators(draft)
 	draftEntrances := entranceValues(draft)
-	draftTerms := map[string]bool{}
-	for _, token := range recallTokens(draft.Fact + draft.Pitfall + draft.Counterexample) {
-		draftTerms[token] = true
-	}
+	draftBody := bodyTokens(draft)
 	var out []WriteCandidate
 	for _, e := range entries {
 		if e.Profile == nil || e.Profile.Experience == nil {
@@ -101,22 +129,14 @@ func (s *Store) writeCandidates(ctx context.Context, q dbQuerier, scope string, 
 				break
 			}
 		}
-		shared := 0
-		for _, token := range recallTokens(other.Fact + other.Pitfall + other.Counterexample) {
-			if draftTerms[token] {
-				shared++
-			}
+		if overlap := bodyOverlap(draftBody, bodyTokens(other)); overlap >= bodyOverlapThreshold {
+			matched["body_overlap"] = true
 		}
-		// Term overlap is the weakest signal; common-word bigrams must not
-		// force a comparison on their own.
-		if shared >= 3 {
-			matched["fact_terms"] = true
-		}
-		if !matched["evidence_ref"] && !matched["entrance"] && !matched["fact_terms"] {
+		if !matched["evidence_ref"] && !matched["entrance"] && !matched["body_overlap"] {
 			continue
 		}
 		reasons := make([]string, 0, 3)
-		for _, reason := range []string{"evidence_ref", "entrance", "fact_terms"} {
+		for _, reason := range []string{"evidence_ref", "entrance", "body_overlap"} {
 			if matched[reason] {
 				reasons = append(reasons, reason)
 			}
